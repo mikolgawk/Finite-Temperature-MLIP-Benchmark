@@ -12,6 +12,21 @@ import re
 
 
 # ============================================================
+# Paths (edit these to point at your own data/output locations)
+# ============================================================
+
+REF_SETTINGS_CSV = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/vdos_settings_ref.csv"
+MLIP_SETTINGS_CSV = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/vdos_settings_mlip.csv"
+
+RESULTS_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/results"
+
+REF_TRAJ_BASE_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/ref-trajs"
+MLIP_TRAJ_BASE_DIR = "/home/mjgawkowski/Finite-Temperature-MLIP-Benchmarks/plots/mlip_trajectories"
+
+BY_SYSTEM_TYPE_OUTPUT_FILE = os.path.join(RESULTS_DIR, "rdf_similarity_scores_by_system_type_same_simulation_length.csv")
+
+
+# ============================================================
 # ASE → MDTraj (NO disk I/O, exact physics)
 # ============================================================
 
@@ -102,12 +117,6 @@ def save_rdf_csv(r, g, path):
 # ============================================================
 # Utilities
 # ============================================================
-
-REF_SETTINGS_CSV = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/vdos_settings_ref.csv"
-MLIP_SETTINGS_CSV = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/vdos_settings_mlip.csv"
-
-RESULTS_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/results"
-
 
 def _normalize_system_name(name: str) -> str:
     return "".join(ch.lower() for ch in name if ch.isalnum())
@@ -217,9 +226,6 @@ SYSTEMS = {
     # "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
 }
 
-BY_SYSTEM_TYPE_OUTPUT_FILE = os.path.join(RESULTS_DIR, "rdf_similarity_scores_by_system_type_same_simulation_length.csv")
-
-
 def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.DataFrame:
     """Aggregate per-system RDF errors into per-system-type means, per model."""
     results: dict[str, dict[str, float]] = {}
@@ -266,8 +272,8 @@ def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.Data
 
 if __name__ == "__main__":
 
-    ref_base = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/ref-trajs"
-    mlip_base = "/home/mjgawkowski/Finite-Temperature-MLIP-Benchmarks/plots/mlip_trajectories"
+    ref_base = REF_TRAJ_BASE_DIR
+    mlip_base = MLIP_TRAJ_BASE_DIR
 
     model_names = [
         'chgnet', 'mace-mp-0', 'grace-mp',
