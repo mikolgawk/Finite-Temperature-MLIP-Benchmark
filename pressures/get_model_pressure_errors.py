@@ -51,7 +51,8 @@ def infer_system_type(system: str) -> str:
         return "molecular crystals"
     if s.startswith("pt111w24h2o"):
         return "metal-water interfaces"
-    return "other"
+    if s.startswith("h"):
+        return "hydrogen"
 
 
 def normalize_model_name(name: str) -> str:
