@@ -8,7 +8,7 @@
         "from chgnet.model.model import CHGNet",
         "from chgnet.model import CHGNetCalculator"
       ],
-      "calculator_expr": "CHGNetCalculator(potential=CHGNet.load(use_device='cuda:0'), properties='energy', compute_stress=True, compute_hessian=True, stress_weight=0.01, use_device='cuda:0')"
+      "calculator_expr": "CHGNetCalculator(potential=CHGNet.load(use_device='cuda:0'), properties='energy', compute_stress=True, compute_hessian=True, use_device='cuda:0')"
     },
     {
       "name": "eq-v2-M-omat",
