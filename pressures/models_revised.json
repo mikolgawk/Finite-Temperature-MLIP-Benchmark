@@ -1,0 +1,275 @@
+{
+  "shared_notes": {
+    "uma_inference_settings": "CONFIRMED against the installed fairchem-core 2.7.1: dataclasses.fields(InferenceSettings) returns exactly ['tf32', 'activation_checkpointing', 'merge_mole', 'compile', 'wigner_cuda', 'external_graph_gen', 'internal_graph_gen_version', 'torch_num_threads']. There is no precision field of any kind, so UMA precision is NOT settable on this release and the checkpoint's native float32 applies - this is a documented-by-comment case. (base_precision_dtype, execution_mode and the predict_untrained_* flags exist only on fairchem's main branch, not in 2.7.1; do not cite them.) tf32 defaults to False under the 'default' preset. The 'turbo' preset sets tf32=True and merge_mole=True. merge_mole requires composition, total charge and spin to stay constant for the lifetime of the predictor - which an MD trajectory of a fixed system satisfies, so turbo is legitimate HERE provided one predictor is built per system rather than shared across several. To take merge_mole without the precision change, construct InferenceSettings(merge_mole=True, tf32=False, compile=True) directly; all three fields exist in 2.7.1."
+  },
+  "models": [
+    {
+      "name": "chgnet",
+      "package": "chgnet",
+      "imports": [
+        "from chgnet.model.model import CHGNet",
+        "from chgnet.model import CHGNetCalculator"
+      ],
+      "calculator_expr": "CHGNetCalculator(potential=CHGNet.load(use_device='cuda:0'), properties='energy', compute_stress=True, compute_hessian=False, use_device='cuda:0')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "unverified",
+      "dtype_note": "No dtype/precision kwarg exists on CHGNet.load or CHGNetCalculator; CHGNet hardcodes TORCH_DTYPE = torch.float32. Precision cannot be set here - this is the documented-by-comment case. The expr assumes the signature (model=None, *, use_device, check_cuda_mem, stress_weight, on_isolated_atoms, return_site_energies, **kwargs). Unrecognised keywords are absorbed by **kwargs without error, and a non-binding model= would leave model None and load the default pretrained checkpoint, so this stays 'unverified' until the installed signature is confirmed.",
+      "chgnet_version": "0.4.2",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "eq-v2-M-omat",
+      "package": "fairchem-core",
+      "imports": [
+        "from fairchem.core import OCPCalculator"
+      ],
+      "calculator_expr": "OCPCalculator(checkpoint_path='../models/eqV2_86M_omat_mp_salex.pt', cpu=False)",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "runtime-probe",
+      "dtype_note": "fairchem v1 (OCPCalculator), NOT the v2 InferenceSettings API - the two share a package name and nothing else. Inference runs fp32: OCPCalculator loads in inference-only mode and never builds the GradScaler, so trainer.scaler is None and autocast(enabled=scaler is not None) is false. This checkpoint's config stores amp:true, read directly from eqV2_86M_omat_mp_salex.pt, but the flag never takes effect: the scaler is never constructed, so autocast stays off and inference runs fp32. Additionally equiformer_v2/layer_norm.py carries four @autocast(enabled=False) decorators that force fp32 in the norm layers regardless. CHECKPOINT: this entry loads eqV2_86M_omat_mp_salex.pt - the OMat24 model fine-tuned on MPtrj and sAlex, i.e. the OAM checkpoint, which IS MP-consistent. The entry name 'eq-v2-M-omat' is shorthand and does not mean the OMat24-only file; any earlier note in this file claiming this is the OMat-only checkpoint with an incompatible energy reference was wrong and is retracted. eqV2 predicts forces as a network output rather than as -dE/dx, so it does not conserve energy and will drift in NVE.",
+      "fairchem-core_version": "1.3.0",
+      "weight_dtype_verified": false,
+      "probe_checkpoint": "RESOLVED. config['amp'] read directly from eqV2_86M_omat_mp_salex.pt (the file this entry loads): True. The trainer.scaler is None result was measured on eqV2_86M_omat.pt, but that half is checkpoint-independent - OCPCalculator loads inference-only ('not loading keys associated with trainer state') and never builds the GradScaler regardless of which checkpoint or what its config requests. Both eqV2 checkpoints carry amp:true, so this is a property of the eqV2 training recipe rather than of one file. Inference runs fp32."
+    },
+    {
+      "name": "eSEN-30M-OAM",
+      "package": "fairchem-core",
+      "imports": [
+        "from fairchem.core import OCPCalculator"
+      ],
+      "calculator_expr": "OCPCalculator(checkpoint_path='../models/esen_30m_oam.pt', cpu=False)",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "runtime-probe",
+      "dtype_note": "fairchem v1 (OCPCalculator). Reaches fp32 by a different route from eqV2: the config stores amp:false, so no AMP is requested in the first place, and trainer.scaler is None. Backbone reports direct_forces:false with regress_forces:true and regress_stress:true - forces and stress are autograd derivatives of the energy, so this is the energy-conserving variant. Config version 1.10.0, against eqV2's 1.3.0; both run under one installed fairchem, so record the installed version alongside these numbers.",
+      "fairchem-core_version": "1.10.0",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "grace-mp",
+      "package": "tensorpotential",
+      "imports": [
+        "from tensorpotential.calculator import grace_fm",
+        "import tensorflow as tf"
+      ],
+      "calculator_expr": "grace_fm('GRACE-2L-MP-r6')",
+      "weight_dtype": "float64",
+      "matmul_precision": "fp64",
+      "precision_settable": false,
+      "verified": "runtime-probe",
+      "dtype_note": "STILL FP64, and float_dtype alone CANNOT change that - measured, not assumed. grace_fm('GRACE-2L-MP-r6', float_dtype='float32') constructs without complaint but raises on the first evaluation: \"Can not cast TensorSpec(shape=(N,3), dtype=tf.float32, name='bond_vector') to TensorSpec(shape=(None,3), dtype=tf.float64)\". float_dtype governs only the INPUT pipeline; the model's tf.function signature is fixed at the checkpoint's dtype, so an fp32 input hits an fp64 graph and the bind fails. The same call with float_dtype='float64' runs fine. Consequence: precision_settable is FALSE at construction. Converting GRACE requires the offline `grace_utils cast_model` step (as was done for grace-oam), after which float_dtype='float32' MATCHES the recast checkpoint rather than converting it. This fails loudly rather than silently, which is the good case - an expression claiming fp32 here would crash on the first step, not quietly produce fp64 numbers. grace-mp is currently the only fp64 model in the catalog. Recast it with grace_utils cast_model for internal consistency, or state in the writeup that it is not precision-matched to the rest. The calculator exposes no float_dtype attribute after construction (absent from vars(calc)), so the requested value cannot be read back - empirical evaluation is the only check.",
+      "tensorpotential_version": "0.5.7",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "grace-oam",
+      "package": "tensorpotential",
+      "imports": [
+        "from tensorpotential.calculator import TPCalculator",
+        "import tensorflow as tf"
+      ],
+      "calculator_expr": "TPCalculator('/home/mjgawkowski/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "source",
+      "dtype_note": "CONVERTED TO FP32 offline. The shipped GRACE-2L-OMAT-large-ft-AM checkpoint is fp64; it was recast with `grace_utils cast_model`, and calculator_expr points at the cast artifact by explicit path (GRACE-2L-OMAT-large-ft-AM-fp32) rather than resolving a name. precision_settable is FALSE because float_dtype does not convert anything - it declares the input dtype and must MATCH the checkpoint's tf.function signature, or the bind fails (demonstrated on grace-mp). So float_dtype='float32' here is not setting precision; it is agreeing with a checkpoint that was already converted. Conversion is an offline step, not a constructor argument.",
+      "conversion": "fp64 -> fp32 via `grace_utils cast_model`. Record the cast artifact path and keep the original fp64 checkpoint, since an fp64/fp32 pair of the same model is a useful internal control for the precision study.",
+      "tensorpotential_version": "0.5.7",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "mace-mh-omat",
+      "package": "mace-torch",
+      "imports": [
+        "from mace.calculators import mace_mp, MACECalculator"
+      ],
+      "calculator_expr": "mace_mp(model='mh-1', default_dtype='float32', device='cuda', head='omat_pbe')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": true,
+      "verified": "source",
+      "dtype_note": "Set explicitly.",
+      "mace-torch_version": "0.3.15",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "mace-mp-0",
+      "package": "mace-torch",
+      "imports": [
+        "from mace.calculators import mace_mp, MACECalculator"
+      ],
+      "calculator_expr": "mace_mp('medium', default_dtype='float32', device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": true,
+      "verified": "source",
+      "dtype_note": "Set explicitly.",
+      "mace-torch_version": "0.3.9",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "mace-mpa-0",
+      "package": "mace-torch",
+      "imports": [
+        "from mace.calculators import mace_mp, MACECalculator"
+      ],
+      "calculator_expr": "MACECalculator('../models/mace-mpa-0-medium.model', default_dtype='float32', device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": true,
+      "verified": "source",
+      "dtype_note": "Set explicitly.",
+      "mace-torch_version": "0.3.9",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "mattersim-v1-5M",
+      "package": "mattersim",
+      "imports": [
+        "from mattersim.forcefield import MatterSimCalculator"
+      ],
+      "calculator_expr": "MatterSimCalculator(load_path='MatterSim-v1.0.0-5M.pth', device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "unverified",
+      "dtype_note": "The previous note claimed a dtype kwarg defaulting to 'float32'. No such kwarg appears among the documented attributes (potential, args_dict, compute_stress, stress_weight, device), so precision is treated as not settable and weight_dtype as unconfirmed until the installed signature and checkpoint state_dict are inspected.",
+      "mattersim_version": "1.2.0",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "nequip",
+      "package": "nequip",
+      "imports": [
+        "from nequip.ase import NequIPCalculator"
+      ],
+      "calculator_expr": "NequIPCalculator.from_compiled_model(compile_path='mir-group__NequIP-OAM-XL__0.1.nequip.pth', device='cuda', chemical_species_to_atom_type_map=True)",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "runtime-probe",
+      "dtype_note": "Artifact is TorchScript (.nequip.pth); the .pt2 on disk fails to load ('outdated pt2 file' then a zip archive error) and needs regenerating or deleting. TF32 IS RECOVERABLE, contrary to an earlier note in this file: load_compiled_model returns (model, metadata) and metadata carries allow_tf32 = b'0' alongside r_max 6.0, type_names and per_edge_type_cutoff. The artifact was compiled with TF32 DISABLED, matching nequip-compile's --no-tf32 default. Construction does not mutate global torch state (tf32/matmul flags identical before and after; matmul precision 'highest'). energy_units_to_eV and length_units_to_A both confirmed 1.0. DETERMINISTIC: five repeat evaluations of an identical geometry gave exactly 0.0 spread, at both 12 threads and 1 thread. An earlier note hypothesising run-to-run nondeterminism at ~2e-5 eV is RETRACTED. Compiled artifacts expose no parameters() (empty set), so weight_dtype is inferred from nequip's model_dtype default rather than measured; metadata does not carry it. Two-level precision remains the distinguishing feature: on a 108-atom Cu cell at E = -442.422 eV, returned energies resolve differences down to ~1.6e-06 eV, roughly 19x finer than one fp32 ULP at that magnitude (3.05e-05 eV) - so the final accumulation is NOT a single fp32 value, consistent with the documented float64 scale/shift over an fp32 core.",
+      "nequip_artifact": "TorchScript (.nequip.pth)",
+      "nequip_version": "0.16.2",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "orb-v2",
+      "package": "orb-models",
+      "imports": [
+        "from orb_models.forcefield.calculator import ORBCalculator",
+        "from orb_models.forcefield import pretrained"
+      ],
+      "calculator_expr": "ORBCalculator(pretrained.orb_v2(device='cuda', precision='float32-high'), device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "tf32",
+      "precision_settable": true,
+      "verified": "source",
+      "dtype_note": "'float32-high' sets torch float32 matmul precision to 'high', i.e. TF32 matmuls on Ampere+. Weights are fp32 but matmuls are NOT - this is reduced precision relative to every other torch entry in the catalog, and 'float32-highest' would restore parity. The setting is process-global; see schema_notes.global_state_warning.",
+      "orb-models_version": "0.5.5",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "orb-v3",
+      "package": "orb-models",
+      "imports": [
+        "from orb_models.forcefield.calculator import ORBCalculator",
+        "from orb_models.forcefield import pretrained"
+      ],
+      "calculator_expr": "ORBCalculator(pretrained.orb_v3_conservative_inf_mpa(device='cuda', precision='float32-high'), device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "tf32",
+      "precision_settable": true,
+      "verified": "source",
+      "dtype_note": "Same TF32 matmul path and global-state caveat as orb-v2. Checkpoint name indicates the conservative variant.",
+      "orb-models_version": "0.5.5",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "orb-v3-direct",
+      "package": "orb-models",
+      "imports": [
+        "from orb_models.forcefield.calculator import ORBCalculator",
+        "from orb_models.forcefield import pretrained"
+      ],
+      "calculator_expr": "ORBCalculator(pretrained.orb_v3_direct_20_mpa(device='cuda', precision='float32-high'), device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "tf32",
+      "precision_settable": true,
+      "verified": "source",
+      "dtype_note": "Same TF32 matmul path and global-state caveat as orb-v2.",
+      "orb-models_version": "0.5.5",
+      "weight_dtype_verified": false
+    },
+    {
+      "name": "pet-oam-xl",
+      "package": "upet",
+      "imports": [
+        "import torch",
+        "from upet.calculator import UPETCalculator"
+      ],
+      "calculator_expr": "UPETCalculator(model='pet-oam-xl', version='1.0.0', dtype=torch.float32, device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": true,
+      "verified": "runtime-probe",
+      "dtype_note": "CONFIRMED against upet 0.1.1. UPETCalculator.__init__ does expose dtype: Optional[torch.dtype] = None, so precision IS settable and is now set explicitly rather than left to the checkpoint. Both claims measured independently and agreeing: capabilities().dtype reports the string 'float32' (metatomic's declaration of the dtype used for model inputs and outputs) and {p.dtype for p in model.parameters()} returns {torch.float32}. Passing dtype mutates the private loaded_model._capabilities.dtype and then casts, bypassing the architecture's declared supported dtypes - fine for float32, treat float64 with suspicion. RETRACTED: an earlier note claimed a 'variants' kwarg selecting the energy head (pbe vs r2scan); 0.1.1 has calculate_uncertainty and calculate_ensemble instead, no variants. Confirmed defaults in 0.1.1: non_conservative=False (conservative forces), rotational_average_order=None - and PET is not equivariant by construction, so with averaging off predictions carry an orientation dependence the equivariant models do not have.",
+      "upet_version": "0.1.1",
+      "weight_dtype_verified": true
+    },
+    {
+      "name": "pet-omat-xl",
+      "package": "upet",
+      "imports": [
+        "import torch",
+        "from upet.calculator import UPETCalculator"
+      ],
+      "calculator_expr": "UPETCalculator(model='pet-omat-xl', dtype=torch.float32, device='cuda')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": true,
+      "verified": "runtime-probe",
+      "dtype_note": "CONFIRMED against upet 0.1.1, independently rather than inherited from pet-oam-xl: dtype is settable and float32 applies. dtype is set explicitly rather than left at None, which would defer to whatever the checkpoint declares. Passing dtype mutates the private loaded_model._capabilities.dtype and then casts - a no-op here since the checkpoint is already float32, but it pins the precision if a future checkpoint ships at a different one. This entry pins no version, so it resolves to 'latest' and is not reproducible across reruns; use list_upet(model='pet-omat', size='xl') to get the concrete version and pin it. Note get_upet raises TypeError on version=None (it calls packaging Version() directly) - omit the argument to take the default rather than passing None. Trained on OMat only (PBE), whereas pet-oam-xl is MP-consistent PBE - different energy references, not directly comparable on hull distances.",
+      "upet_version": "0.1.1",
+      "weight_dtype_verified": true
+    },
+    {
+      "name": "uma-s-omat",
+      "package": "fairchem-core",
+      "imports": [
+        "from fairchem.core import pretrained_mlip, FAIRChemCalculator"
+      ],
+      "calculator_expr": "FAIRChemCalculator(pretrained_mlip.get_predict_unit('uma-s-1p1', device='cuda'), task_name='omat')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "runtime-probe",
+      "dtype_note": "See shared_notes.uma_inference_settings. weight_dtype MEASURED for this checkpoint: {p.dtype for p in predictor.model.parameters()} returns {torch.float32} for uma-s-1p1 - a single-element set, so no mixed-precision storage.",
+      "fairchem-core_version": "2.7.1",
+      "weight_dtype_verified": true,
+      "shared_note_ref": "uma_inference_settings"
+    },
+    {
+      "name": "uma-m-omat",
+      "package": "fairchem-core",
+      "imports": [
+        "from fairchem.core import pretrained_mlip, FAIRChemCalculator"
+      ],
+      "calculator_expr": "FAIRChemCalculator(pretrained_mlip.get_predict_unit('uma-m-1p1', device='cuda'), task_name='omat')",
+      "weight_dtype": "float32",
+      "matmul_precision": "fp32",
+      "precision_settable": false,
+      "verified": "runtime-probe",
+      "dtype_note": "See shared_notes.uma_inference_settings. weight_dtype NOT yet measured for this checkpoint: uma-s-1p1 measured {torch.float32}, but uma-m-1p1 has not been checked and is the far larger model - run the parameter check on a compute node, not the login node. task_name='omat' selects the level of theory emulated; a wrong task is silently wrong, not an error.",
+      "fairchem-core_version": "2.7.1",
+      "weight_dtype_verified": false,
+      "shared_note_ref": "uma_inference_settings"
+    }
+  ]
+}
