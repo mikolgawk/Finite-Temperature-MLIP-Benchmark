@@ -41,7 +41,7 @@ v3-direct), PET (OAM-XL, OMAT-XL), and UMA (s-omat, m-omat).
 md_production/   NVT MD production runs (22 ps, Nose-Hoover chain) for every
                  model/system pair; also emits per-step timing.
 md_timings/      Standalone timing harness sharing the same MD driver.
-e_f_rmses/       Energy/force RMSE of each MLIP against reference DFT/AIMD
+e_f_rmses/       Energy/force RMSE of each MLIP against reference AIMD
                  trajectories, plus per-system-type aggregation and figures.
 pressures/       Per-frame stress / trajectory-averaged pressure, matched to
                  reference trajectories by simulated time, plus figures.
@@ -70,7 +70,7 @@ Each pipeline stage is invoked with the model to evaluate selected via the
 cd md_production
 MODEL_NAME=mace-mpa-0 python md_script-generic.py
 
-# Compute energy/force RMSEs against DFT reference trajectories
+# Compute energy/force RMSEs against AIMD reference trajectories
 cd ../e_f_rmses
 MODEL_NAME=mace-mpa-0 python rmse_script-generic.py
 
