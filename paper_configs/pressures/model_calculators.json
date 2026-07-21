@@ -17,7 +17,7 @@
       "imports": [
         "from fairchem.core import OCPCalculator"
       ],
-      "calculator_expr": "OCPCalculator(checkpoint_path='../models/eqV2_86M_omat_mp_salex.pt', cpu=False)",
+      "calculator_expr": "OCPCalculator(checkpoint_path='../data/models/eqV2_86M_omat_mp_salex.pt', cpu=False)",
       "fairchem-core_version": "1.3.0"
     },
     {
@@ -26,7 +26,7 @@
       "imports": [
         "from fairchem.core import OCPCalculator"
       ],
-      "calculator_expr": "OCPCalculator(checkpoint_path='../models/esen_30m_oam.pt', cpu=False)",
+      "calculator_expr": "OCPCalculator(checkpoint_path='../data/models/esen_30m_oam.pt', cpu=False)",
       "fairchem-core_version": "1.10.0"
     },
     {
@@ -73,7 +73,7 @@
       "imports": [
         "from mace.calculators import mace_mp, MACECalculator"
       ],
-      "calculator_expr": "MACECalculator('../models/mace-mpa-0-medium.model', default_dtype='float64', device='cuda')",
+      "calculator_expr": "MACECalculator('../data/models/mace-mpa-0-medium.model', default_dtype='float64', device='cuda')",
       "mace-torch_version": "0.3.9"
     },
     {

@@ -14,8 +14,7 @@ twice, under two top-level directories:
 | Tree | What it is |
 | --- | --- |
 | `paper_configs/` | The configurations that produced the results on arxiv. Frozen; kept for reproducibility. |
-| `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints.
-Where new work goes. |
+| `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints. Where new work goes. |
 
 The substantive differences:
 
@@ -38,6 +37,52 @@ The substantive differences:
   runs 22 ps with a per-system timestep (1.0 fs default, 0.5 fs for
   H-containing systems, 2.0 fs for CuAu), records every step, and uses a
   fixed 20 fs `tdamp` for all systems.
+
+### Model catalogs
+
+Each stage carries a `model_calculators.json` declaring, per model, the
+imports needed and a self-contained Python expression that constructs the ASE
+calculator. The catalog is what `MODEL_NAME` selects from at runtime.
+
+Calculator expressions that differ between the trees:
+
+| Model | `paper_configs` | `updated_configs` |
+| --- | --- | --- |
+| `chgnet` | `stress_weight=0.01` | argument dropped |
+| `grace-oam` | `grace_fm('GRACE-2L-OMAT-large-ft-AM')` — the shipped fp64 checkpoint | `TPCalculator('../data/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')` — an offline recast, by explicit path |
+| `mace-mp-0`, `mace-mpa-0`, `mace-mh-omat` | `default_dtype='float64'` | `default_dtype='float32'` |
+| MatterSim | `mattersim-v1-1M`: `MatterSimCalculator(device='cuda')`, i.e. the 1M default | `mattersim-v1-5M`: `load_path='MatterSim-v1.0.0-5M.pth'` |
+| `nequip` | bare `compile_path='mir-group__NequIP-OAM-XL__0.1.nequip.pth'` | `compile_path='../data/models/…'` |
+| `orb-v2`, `orb-v3`, `orb-v3-direct` | `precision='float64'` | `precision='float32-high'` — fp32 weights with TF32 matmuls, and a process-global setting |
+| `pet-oam-xl`, `pet-omat-xl` | no `dtype` — defers to the checkpoint | `dtype=torch.float32`, pinned explicitly |
+
+`eq-v2-M-omat`, `eSEN-30M-OAM`, `grace-mp`, `uma-s-omat` and `uma-m-omat` are
+byte-identical between the trees: none of them expose a settable precision, so
+there was nothing to change.
+
+The schema differs as well. `paper_configs` entries carry only `name`,
+`package`, `imports`, `calculator_expr` and a `<package>_version`.
+`updated_configs` adds the precision audit — `weight_dtype`,
+`matmul_precision`, `precision_settable`, `weight_dtype_verified`, `verified`
+(`source` / `runtime-probe` / `unverified`) and a prose `dtype_note` recording
+what was measured and what was retracted — plus `conversion` where a
+checkpoint was recast, `nequip_artifact`, `probe_checkpoint`, and a top-level
+`shared_notes` block that entries reference via `shared_note_ref` (the UMA
+inference-settings note is shared by both UMA entries). That is why the
+updated catalogs are ~20 KB against ~6 KB.
+
+Catalogs also vary *within* a tree, deliberately:
+
+- `paper_configs/e_f_rmses` omits `orb-v3-direct` and `pet-omat-xl` (15
+  models, not 17).
+- `paper_configs/md_timings` was already fp32: MACE at
+  `default_dtype='float32'`, ORB at `'float32-high'`, and MatterSim pinned to
+  `MatterSim-v1.0.0-1M.pth` rather than left to the default.
+- `updated_configs/pressures` sets `compute_stress=True` for `chgnet` — the
+  stage needs the stress tensor — and its `nequip` entry still uses the bare
+  `compile_path` filename rather than `../data/models/`.
+- `rdfs/` and `vdos/` have no catalog: they read trajectories off disk and
+  never construct a calculator.
 
 ## Benchmark systems
 
@@ -103,9 +148,10 @@ data/mlip-trajs-20fs-tau/<system>/      MD output, written by md_production
 data/models/                            Local model checkpoints
 ```
 
-`updated_configs` resolves all of these relative to `../data/`. In
-`paper_configs` the equivalents are siblings of the topic directory
-(`../ref-trajs/`, `../mlip-trajs/`, `../models/`).
+Both trees load model checkpoints from `../data/models/`. Trajectories
+differ: `updated_configs` resolves those under `../data/` too, whereas the
+`paper_configs` scripts still read from a sibling `../ref-trajs/` and write to
+`../mlip-trajs/`.
 
 ## Usage
 

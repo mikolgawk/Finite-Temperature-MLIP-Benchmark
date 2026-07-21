@@ -86,7 +86,7 @@ These are deliberate, and change behaviour relative to the original files:
   absolute prefixes (`/home/mjgawkowski/...` and `/share/rcif2/...`)
   depending on which cluster the directory was last touched on.
   `run-ase-generic.py` builds the calculator with the working directory set
-  to the catalog's own directory, so the catalog's `../models/...` paths
+  to the catalog's own directory, so the catalog's `../data/models/...` paths
   resolve exactly as they do for `md_script-generic.py`.
 - **Socket addresses are unique per job**
   (`ipi_<system>_<model>_<jobid>`). Every old `input.xml` used the address

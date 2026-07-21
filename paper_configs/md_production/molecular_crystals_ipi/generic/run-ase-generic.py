@@ -49,7 +49,7 @@ def build_calculator(model_entry):
     expression, returning the constructed ASE calculator instance.
 
     Evaluated with the working directory set to the catalog's own directory,
-    so the relative checkpoint paths in calculator_expr ('../models/...')
+    so the relative checkpoint paths in calculator_expr ('../data/models/...')
     resolve exactly as they do for md_script-generic.py, which runs from
     md_production/.
     '''
