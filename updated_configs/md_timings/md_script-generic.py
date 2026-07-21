@@ -38,7 +38,7 @@ SKIP_SYSTEMS = [
     'H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP',
 ]
 
-MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'models_revised.json')
+MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')
 
 
 def print_cuda_diagnostics():
