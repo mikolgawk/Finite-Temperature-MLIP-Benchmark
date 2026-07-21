@@ -1,7 +1,6 @@
 # Finite-Temperature MLIP Benchmark
 
-Benchmarking suite for evaluating machine-learned interatomic potentials
-(MLIPs) under finite-temperature molecular dynamics. For a panel of
+Benchmarking suite for evaluating (MLIPs) under finite-temperature molecular dynamics. For a panel of
 foundation MLIPs, the pipeline runs NVT MD on a set of reference systems and
 compares the resulting trajectories to AIMD reference trajectories along four
 axes: energy/force accuracy, pressure, radial distribution functions (RDFs),
@@ -14,8 +13,9 @@ twice, under two top-level directories:
 
 | Tree | What it is |
 | --- | --- |
-| `paper_configs/` | The configurations that produced the published results. Frozen; kept for reproducibility. |
-| `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints, and the pressure/VDOS stages. Where new work goes. |
+| `paper_configs/` | The configurations that produced the results on arxiv. Frozen; kept for reproducibility. |
+| `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints.
+Where new work goes. |
 
 The substantive differences:
 
@@ -38,13 +38,6 @@ The substantive differences:
   runs 22 ps with a per-system timestep (1.0 fs default, 0.5 fs for
   H-containing systems, 2.0 fs for CuAu), records every step, and uses a
   fixed 20 fs `tdamp` for all systems.
-- **Paths.** In `updated_configs`, every topic directory is self-contained:
-  paths resolve either inside the topic directory or under `../data/`
-  (`ref-trajs/`, `mlip-trajs-20fs-tau/`, `models/`). `paper_configs` uses the
-  older sibling layout (`../ref-trajs/`, `../mlip-trajs/`, `../models/`).
-- **Coverage.** The pressure and VDOS stages only exist in
-  `updated_configs`; `paper_configs/pressures` carries just the model catalog
-  used at the time, and `paper_configs/vdos` is empty.
 
 ## Benchmark systems
 
@@ -65,19 +58,6 @@ classification):
 Per-system settings (temperature, stride, timestep) are recorded in each
 analysis directory's `*_settings_ref.csv`.
 
-## Evaluated models
-
-Models are declared declaratively in each stage's `model_calculators.json`
-(imports plus a self-contained expression that constructs the ASE
-calculator), selected at runtime via the `MODEL_NAME` environment variable.
-The panel: CHGNet, eqV2-M-OMat, eSEN-30M-OAM, GRACE (MP and OAM), MACE (MP-0,
-MPA-0, MH-OMat), MatterSim-v1, NequIP-OAM-XL, ORB (v2, v3, v3-direct), PET
-(OAM-XL, OMAT-XL), and UMA (s-omat, m-omat).
-
-Valid `MODEL_NAME` values are the `name` fields of the catalog **in the
-directory you are running from** — the catalogs are per-stage and not
-identical (`paper_configs/e_f_rmses`, for instance, omits `orb-v3-direct` and
-`pet-omat-xl`).
 
 ## Pipeline stages
 
