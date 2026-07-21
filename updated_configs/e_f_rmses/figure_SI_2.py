@@ -58,6 +58,7 @@ SYSTEM_TYPE_ORDER = [
     'metal alloys',
     'molecular crystals',
     'metal-water interfaces',
+    'hydrogen'
 ]
 
 tier_1 = [normalize_calculator_name(model) for model in ["chgnet", "mace-mp-0", "grace-mp"]]

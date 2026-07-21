@@ -26,23 +26,7 @@ from matplotlib.lines import Line2D
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-SCRIPTS_DIR = SCRIPT_DIR.parent
-REPO_ROOT = SCRIPTS_DIR.parent
-LEGACY_DATA_ROOT = Path.home() / "Finite-Temperature-MLIP-Benchmarks" / "data"
-
-
-def first_existing_path(*candidates: Path) -> Path:
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
-def first_existing_matching_dir(pattern: str, *candidates: Path) -> Path:
-    for candidate in candidates:
-        if candidate.is_dir() and any(candidate.glob(pattern)):
-            return candidate
-    return candidates[0]
+DATA_DIR = SCRIPT_DIR.parent / "data"
 
 FONT_SIZE = 10
 LEGEND_FONT_SIZE = 6
@@ -166,12 +150,12 @@ def median_value_label_y(y_max):
 
 
 
-DEFAULT_RDF_CSV_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/results"
-DEFAULT_RDF_MEANS_FILE = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/results/rdf_similarity_scores_same_simulation_length.csv"
-DEFAULT_REF_BASE = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/ref-trajs"
-DEFAULT_MLIP_BASE = "/home/mjgawkowski/Finite-Temperature-MLIP-Benchmarks/plots/mlip_trajectories"
-DEFAULT_RDF_SAVE_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/results/rdf_same_simulation_length_saved"
-DEFAULT_OUTPUT_FILE = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/plots/plot_rdf_panel_combined.pdf"
+DEFAULT_RDF_CSV_DIR = SCRIPT_DIR / "results"
+DEFAULT_RDF_MEANS_FILE = DEFAULT_RDF_CSV_DIR / "rdf_similarity_scores_same_simulation_length.csv"
+DEFAULT_REF_BASE = DATA_DIR / "ref-trajs"
+DEFAULT_MLIP_BASE = DATA_DIR / "mlip-trajs-20fs-tau"
+DEFAULT_RDF_SAVE_DIR = DEFAULT_RDF_CSV_DIR / "rdf_same_simulation_length_saved"
+DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_rdf_panel_combined.pdf"
 def load_rdf_csv(path: str):
     if not os.path.exists(path):
         return None

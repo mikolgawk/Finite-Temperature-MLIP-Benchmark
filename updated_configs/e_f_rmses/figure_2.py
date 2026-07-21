@@ -53,7 +53,7 @@ def normalize_calculator_name(name):
     return CALCULATOR_DISPLAY_NAMES.get(text.lower(), text)
 
 # Read and aggregate data from per-model RMSE CSV files
-data_dir = BASE_DIR / 'data'
+data_dir = BASE_DIR.parent / 'data'
 csv_files = sorted(data_dir.glob('rmse-*.csv'))
 
 if not csv_files:

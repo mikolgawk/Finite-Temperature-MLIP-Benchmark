@@ -3,8 +3,9 @@ Generic RMSE script: reads trajectory files, extracts temperatures,
 and computes MLIP energies/forces RMSE against reference data using a
 calculator selected at runtime from model_calculators.json.
 
-Saves detailed results (plots, metrics) inside the SAME directory
-as the input trajectory file.
+Reads reference trajectories from ../data/ref-trajs and saves detailed
+results (plots, metrics) into this script's own outputs/ directory, one
+subdirectory per trajectory.
 
 Usage:
     MODEL_NAME=mace-mpa-0 python rmse_script-generic.py [--debug] [--output-dir results]
@@ -20,11 +21,14 @@ import numpy as np
 from ase.io import read
 import pandas as pd
 from pathlib import Path
-from scipy.stats import entropy
 import matplotlib.pyplot as plt
 
 
-MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR.parent / 'data'
+REF_TRAJ_DIR = DATA_DIR / 'ref-trajs'
+
+MODEL_CATALOG_PATH = BASE_DIR / 'model_calculators.json'
 
 # Per-system isolated-atom reference files, keyed by the system name parsed by
 # parse_system_info() (the directory prefix before the first '_'). Each entry
@@ -36,12 +40,11 @@ MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.
 # and the two H atom energies differ accordingly).
 # Systems with no entry here are evaluated without any energy correction.
 _AROMATIC_ISOLATED_ATOMS = {
-    'C': '../ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_C.extxyz',
-    'H': '../ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_H.extxyz',
+    'C': str(REF_TRAJ_DIR / 'naphthalene_295K_Sharma_S' / 'isolated_atom_C.extxyz'),
+    'H': str(REF_TRAJ_DIR / 'naphthalene_295K_Sharma_S' / 'isolated_atom_H.extxyz'),
 }
 _RUPP_QE_HYDROGEN_ISOLATED_ATOM = str(
-    Path(__file__).resolve().parent.parent
-    / 'rmse_scripts_h1050k_rupp_qe' / 'Hydrogen_E0' / 'isolated_atom_H.extxyz'
+    DATA_DIR / 'Hydrogen_E0' / 'isolated_atom_H.extxyz'
 )
 ISOLATED_ATOM_FILES = {
     **{name: _AROMATIC_ISOLATED_ATOMS for name in
@@ -94,7 +97,7 @@ def read_trajectory(file_path, debug=False):
         return None
 
 
-def get_file_names(directory='../ref-trajs/', extension='.extxyz', prefix='traj'):
+def get_file_names(directory=REF_TRAJ_DIR, extension='.extxyz', prefix='traj'):
     """Recursive search for trajectory files."""
     base_path = Path(directory)
 
@@ -132,22 +135,6 @@ def parse_system_info(file_path):
     reference_key = f"{system_name}_{tempK}K"
 
     return system_name, tempK, reference_key
-
-
-def kl_divergence_scipy(energies_mlip, energies_ref, bins=50):
-    """Calculate KL divergence."""
-    epsilon = 1e-10
-
-    all_e = np.concatenate([energies_mlip, energies_ref])
-    bin_edges = np.linspace(all_e.min(), all_e.max(), bins + 1)
-
-    hist_mlip, _ = np.histogram(energies_mlip, bins=bin_edges, density=True)
-    hist_ref, _ = np.histogram(energies_ref, bins=bin_edges, density=True)
-
-    hist_mlip = np.maximum(hist_mlip, epsilon)
-    hist_ref = np.maximum(hist_ref, epsilon)
-
-    return entropy(hist_ref, hist_mlip)
 
 
 def histogram_energies(energies, bins=50):
@@ -352,12 +339,13 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
 def main():
     parser = argparse.ArgumentParser(description='Evaluate MLIP in-place')
     parser.add_argument('--debug', action='store_true', help='Debug mode')
-    parser.add_argument('--output-dir', type=str, default='results-rmses', help='Global summary location')
+    parser.add_argument('--output-dir', type=str, default='results-rmses',
+                        help='Global summary location (relative paths resolve against this script)')
     parser.add_argument('--bins', type=int, default=50)
     args = parser.parse_args()
 
     # Setup global output directory
-    global_output_dir = Path(args.output_dir)
+    global_output_dir = BASE_DIR / args.output_dir
     global_output_dir.mkdir(exist_ok=True, parents=True)
 
     file_paths = get_file_names()
@@ -388,7 +376,7 @@ def main():
 
         # Output directory
         parent_dir = os.path.basename(os.path.dirname(file_path))
-        local_output_dir = Path('../outputs') / parent_dir
+        local_output_dir = BASE_DIR / 'outputs' / parent_dir
         local_output_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"   ↳ Saving results to: {local_output_dir}")
@@ -423,16 +411,8 @@ def main():
             # Metrics
             if e_mlip is not None and e_ref is not None:
                 bias = np.mean(e_mlip) - np.mean(e_ref)
-                kl_raw = kl_divergence_scipy(e_mlip, e_ref, args.bins)
-                kl_shift = kl_divergence_scipy(
-                    e_mlip - np.mean(e_mlip),
-                    e_ref - np.mean(e_ref),
-                    args.bins
-                )
             else:
                 bias = 0.0
-                kl_raw = 0.0
-                kl_shift = 0.0
 
             natoms = frames[0].get_global_number_of_atoms()
 
@@ -449,8 +429,6 @@ def main():
                 'mlip_force_eval_time_per_call_s': force_eval_time_per_call_s,
                 'mlip_force_eval_time_per_call_per_atom_s': force_eval_time_per_call_per_atom_s,
                 # 'bias': bias,
-                # 'kl_not_shifted': kl_raw,
-                # 'kl_shifted': kl_shift,
                 # 'n_frames': len(e_mlip) if e_mlip is not None else len(frames)
             }
 

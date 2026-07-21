@@ -4,7 +4,7 @@ import re
 import pandas as pd
 
 
-DATA_DIR = Path(__file__).resolve().parent / 'data'
+DATA_DIR = Path(__file__).resolve().parent.parent / 'data'
 RESULTS_DIR = Path(__file__).resolve().parent / 'results'
 REQUIRED_COLUMNS = [
     'system',

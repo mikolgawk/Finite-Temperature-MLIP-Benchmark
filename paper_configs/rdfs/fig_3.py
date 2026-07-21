@@ -73,11 +73,10 @@ CALCULATOR_DISPLAY_NAMES = {
     'mattersim-v1-1m': 'MatterSim-v1.0.0-1M',
     'grace-oam': 'GRACE-2L-OAM',
     'orb-v3': 'orb-v3-conservative-inf-mpa',
-    'orb-v3-direct': 'orb-v3-direct-20-mpa',
+
     'nequip': 'NequIP-OAM-XL',
     'esen-30m-oam': 'eSEN-30M-OAM',
     'pet-oam-xl': 'PET-OAM-XL',
-    'pet-omat-xl': 'PET-OMAT-XL',
     'mace-mh-omat': 'MACE-MH-1-OMAT',
     'uma-s-omat': 'UMA-S-P1',
     'uma-m-omat': 'UMA-M-P1',
@@ -108,13 +107,11 @@ SYSTEMS = {
         
         
     ],
-    "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
-    "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
 TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
 TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-1M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]
+TIER_3 = ["mattersim-v1-1M", "grace-oam", "orb-v3", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl"]
 TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
 
 TIER_1_NORM = [normalize_model_name(model) for model in TIER_1]

@@ -20,7 +20,6 @@ import numpy as np
 from ase.io import read
 import pandas as pd
 from pathlib import Path
-from scipy.stats import entropy
 import matplotlib.pyplot as plt
 
 
@@ -126,22 +125,6 @@ def parse_system_info(file_path):
     reference_key = f"{system_name}_{tempK}K"
 
     return system_name, tempK, reference_key
-
-
-def kl_divergence_scipy(energies_mlip, energies_ref, bins=50):
-    """Calculate KL divergence."""
-    epsilon = 1e-10
-
-    all_e = np.concatenate([energies_mlip, energies_ref])
-    bin_edges = np.linspace(all_e.min(), all_e.max(), bins + 1)
-
-    hist_mlip, _ = np.histogram(energies_mlip, bins=bin_edges, density=True)
-    hist_ref, _ = np.histogram(energies_ref, bins=bin_edges, density=True)
-
-    hist_mlip = np.maximum(hist_mlip, epsilon)
-    hist_ref = np.maximum(hist_ref, epsilon)
-
-    return entropy(hist_ref, hist_mlip)
 
 
 def histogram_energies(energies, bins=50):
@@ -417,16 +400,8 @@ def main():
             # Metrics
             if e_mlip is not None and e_ref is not None:
                 bias = np.mean(e_mlip) - np.mean(e_ref)
-                kl_raw = kl_divergence_scipy(e_mlip, e_ref, args.bins)
-                kl_shift = kl_divergence_scipy(
-                    e_mlip - np.mean(e_mlip),
-                    e_ref - np.mean(e_ref),
-                    args.bins
-                )
             else:
                 bias = 0.0
-                kl_raw = 0.0
-                kl_shift = 0.0
 
             natoms = frames[0].get_global_number_of_atoms()
 
@@ -443,8 +418,6 @@ def main():
                 'mlip_force_eval_time_per_call_s': force_eval_time_per_call_s,
                 'mlip_force_eval_time_per_call_per_atom_s': force_eval_time_per_call_per_atom_s,
                 # 'bias': bias,
-                # 'kl_not_shifted': kl_raw,
-                # 'kl_shifted': kl_shift,
                 # 'n_frames': len(e_mlip) if e_mlip is not None else len(frames)
             }
 

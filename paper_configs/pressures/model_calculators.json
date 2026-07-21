@@ -8,7 +8,8 @@
         "from chgnet.model.model import CHGNet",
         "from chgnet.model import CHGNetCalculator"
       ],
-      "calculator_expr": "CHGNetCalculator(potential=CHGNet.load(use_device='cuda:0'), properties='energy', compute_stress=False, compute_hessian=False, stress_weight=0.01, use_device='cuda:0')"
+      "calculator_expr": "CHGNetCalculator(potential=CHGNet.load(use_device='cuda:0'), properties='energy', compute_stress=False, compute_hessian=False, stress_weight=0.01, use_device='cuda:0')",
+      "chgnet_version": "0.4.2"
     },
     {
       "name": "eq-v2-M-omat",
@@ -16,7 +17,8 @@
       "imports": [
         "from fairchem.core import OCPCalculator"
       ],
-      "calculator_expr": "OCPCalculator(checkpoint_path='../models/eqV2_86M_omat_mp_salex.pt', cpu=False)"
+      "calculator_expr": "OCPCalculator(checkpoint_path='../models/eqV2_86M_omat_mp_salex.pt', cpu=False)",
+      "fairchem-core_version": "1.3.0"
     },
     {
       "name": "eSEN-30M-OAM",
@@ -24,7 +26,8 @@
       "imports": [
         "from fairchem.core import OCPCalculator"
       ],
-      "calculator_expr": "OCPCalculator(checkpoint_path='../models/esen_30m_oam.pt', cpu=False)"
+      "calculator_expr": "OCPCalculator(checkpoint_path='../models/esen_30m_oam.pt', cpu=False)",
+      "fairchem-core_version": "1.10.0"
     },
     {
       "name": "grace-mp",
@@ -33,7 +36,8 @@
         "import tensorflow as tf",
         "from tensorpotential.calculator import grace_fm"
       ],
-      "calculator_expr": "grace_fm('GRACE-2L-MP-r6')"
+      "calculator_expr": "grace_fm('GRACE-2L-MP-r6')",
+      "tensorpotential_version": "0.5.7"
     },
     {
       "name": "grace-oam",
@@ -42,7 +46,8 @@
         "import tensorflow as tf",
         "from tensorpotential.calculator import grace_fm"
       ],
-      "calculator_expr": "grace_fm('GRACE-2L-OMAT-large-ft-AM')"
+      "calculator_expr": "grace_fm('GRACE-2L-OMAT-large-ft-AM')",
+      "tensorpotential_version": "0.5.7"
     },
     {
       "name": "mace-mh-omat",
@@ -50,7 +55,8 @@
       "imports": [
         "from mace.calculators import mace_mp, MACECalculator"
       ],
-      "calculator_expr": "mace_mp(model='mh-1', default_dtype='float64', device='cuda', head='omat_pbe')"
+      "calculator_expr": "mace_mp(model='mh-1', default_dtype='float64', device='cuda', head='omat_pbe')",
+      "mace-torch_version": "0.3.15"
     },
     {
       "name": "mace-mp-0",
@@ -58,7 +64,8 @@
       "imports": [
         "from mace.calculators import mace_mp, MACECalculator"
       ],
-      "calculator_expr": "mace_mp('medium', default_dtype='float64', device='cuda')"
+      "calculator_expr": "mace_mp('medium', default_dtype='float64', device='cuda')",
+      "mace-torch_version": "0.3.9"
     },
     {
       "name": "mace-mpa-0",
@@ -66,7 +73,8 @@
       "imports": [
         "from mace.calculators import mace_mp, MACECalculator"
       ],
-      "calculator_expr": "MACECalculator('../models/mace-mpa-0-medium.model', default_dtype='float64', device='cuda')"
+      "calculator_expr": "MACECalculator('../models/mace-mpa-0-medium.model', default_dtype='float64', device='cuda')",
+      "mace-torch_version": "0.3.9"
     },
     {
       "name": "mattersim-v1-1M",
@@ -74,7 +82,8 @@
       "imports": [
         "from mattersim.forcefield import MatterSimCalculator"
       ],
-      "calculator_expr": "MatterSimCalculator(device='cuda')"
+      "calculator_expr": "MatterSimCalculator(device='cuda')",
+      "mattersim_version": "1.2.0"
     },
     {
       "name": "nequip",
@@ -82,7 +91,8 @@
       "imports": [
         "from nequip.ase import NequIPCalculator"
       ],
-      "calculator_expr": "NequIPCalculator.from_compiled_model(compile_path='mir-group__NequIP-OAM-XL__0.1.nequip.pth', device='cuda', chemical_species_to_atom_type_map=True)"
+      "calculator_expr": "NequIPCalculator.from_compiled_model(compile_path='mir-group__NequIP-OAM-XL__0.1.nequip.pth', device='cuda', chemical_species_to_atom_type_map=True)",
+      "nequip_version": "0.16.2"
     },
     {
       "name": "orb-v2",
@@ -91,7 +101,8 @@
         "from orb_models.forcefield.calculator import ORBCalculator",
         "from orb_models.forcefield import pretrained"
       ],
-      "calculator_expr": "ORBCalculator(pretrained.orb_v2(device='cuda', precision='float64'), device='cuda')"
+      "calculator_expr": "ORBCalculator(pretrained.orb_v2(device='cuda', precision='float64'), device='cuda')",
+      "orb-models_version": "0.5.5"
     },
     {
       "name": "orb-v3",
@@ -100,7 +111,8 @@
         "from orb_models.forcefield.calculator import ORBCalculator",
         "from orb_models.forcefield import pretrained"
       ],
-      "calculator_expr": "ORBCalculator(pretrained.orb_v3_conservative_inf_mpa(device='cuda', precision='float64'), device='cuda')"
+      "calculator_expr": "ORBCalculator(pretrained.orb_v3_conservative_inf_mpa(device='cuda', precision='float64'), device='cuda')",
+      "orb-models_version": "0.5.5"
     },
     {
       "name": "orb-v3-direct",
@@ -109,7 +121,8 @@
         "from orb_models.forcefield.calculator import ORBCalculator",
         "from orb_models.forcefield import pretrained"
       ],
-      "calculator_expr": "ORBCalculator(pretrained.orb_v3_direct_20_mpa(device='cuda', precision='float64'), device='cuda')"
+      "calculator_expr": "ORBCalculator(pretrained.orb_v3_direct_20_mpa(device='cuda', precision='float64'), device='cuda')",
+      "orb-models_version": "0.5.5"
     },
     {
       "name": "pet-oam-xl",
@@ -117,7 +130,8 @@
       "imports": [
         "from upet.calculator import UPETCalculator"
       ],
-      "calculator_expr": "UPETCalculator(model='pet-oam-xl', version='1.0.0', device='cuda')"
+      "calculator_expr": "UPETCalculator(model='pet-oam-xl', version='1.0.0', device='cuda')",
+      "upet_version": "0.1.1"
     },
     {
       "name": "pet-omat-xl",
@@ -125,7 +139,8 @@
       "imports": [
         "from upet.calculator import UPETCalculator"
       ],
-      "calculator_expr": "UPETCalculator(model='pet-omat-xl', device='cuda')"
+      "calculator_expr": "UPETCalculator(model='pet-omat-xl', device='cuda')",
+      "upet_version": "0.1.1"
     },
     {
       "name": "uma-m-omat",
@@ -133,7 +148,8 @@
       "imports": [
         "from fairchem.core import pretrained_mlip, FAIRChemCalculator"
       ],
-      "calculator_expr": "FAIRChemCalculator(pretrained_mlip.get_predict_unit('uma-m-1p1', device='cuda'), task_name='omat')"
+      "calculator_expr": "FAIRChemCalculator(pretrained_mlip.get_predict_unit('uma-m-1p1', device='cuda'), task_name='omat')",
+      "fairchem-core_version": "2.7.1"
     },
     {
       "name": "uma-s-omat",
@@ -141,7 +157,8 @@
       "imports": [
         "from fairchem.core import pretrained_mlip, FAIRChemCalculator"
       ],
-      "calculator_expr": "FAIRChemCalculator(pretrained_mlip.get_predict_unit('uma-s-1p1', device='cuda'), task_name='omat')"
+      "calculator_expr": "FAIRChemCalculator(pretrained_mlip.get_predict_unit('uma-s-1p1', device='cuda'), task_name='omat')",
+      "fairchem-core_version": "2.7.1"
     }
   ]
 }

@@ -223,8 +223,6 @@ SYSTEMS = {
     "Metal dichalcogenides": ["bulkMoS2_300K_NO-VdW_J.Kioseoglou_VASP", "TiSe2_400K_Ivor_VASP"],
     "Metal alloys": ["bulkCuAu_500K-Artrith_VASP", "bulkCuZrAl_1500K_A.Wadowski-J.Schmidt_VASP", "bulkLiMgAlZnSn_600K_J_Schmidt_VASP", "bulkLiMgAlZnSn_900K_J_Schmidt_VASP", "bulkPt3Co_300K_J.Kioseoglou_VASP"],
     "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
-    "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
-    "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
 def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.DataFrame:

@@ -28,6 +28,8 @@ NVT_RECORD_INTERVAL = 10
 NVT_LOG_INTERVAL = 100
 TDAMP_MULTIPLIER = 100.0
 
+SKIP_SYSTEMS = ['anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene']
+
 MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')
 
 
@@ -224,6 +226,10 @@ def main():
     for file_path in file_names:
         print(f"\n📁 Processing: {file_path}")
         parent_dir = os.path.basename(os.path.dirname(file_path))
+
+        if any(s in parent_dir for s in SKIP_SYSTEMS):
+            print(f"Skipping {parent_dir} (molecular crystal).")
+            continue
 
         frames = read_trajectory(file_path)
         if not frames:

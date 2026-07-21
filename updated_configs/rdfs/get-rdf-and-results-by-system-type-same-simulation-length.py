@@ -7,21 +7,27 @@ import pandas as pd
 import mdtraj as mdt
 from ase.io import read
 from fractions import Fraction
+from pathlib import Path
 import math
 import re
 
 
 # ============================================================
-# Paths (edit these to point at your own data/output locations)
+# Paths (all relative to this script: settings/outputs live here,
+# trajectories come from ../data)
 # ============================================================
 
-REF_SETTINGS_CSV = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/vdos_settings_ref.csv"
-MLIP_SETTINGS_CSV = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/vdos_settings_mlip.csv"
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR.parent / "data"
 
-RESULTS_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/rdf-scripts-final-copy/results"
+# Reference and MLIP trajectories share the same per-system stride/dt, so a
+# single settings file drives both sides of the comparison.
+SETTINGS_CSV = BASE_DIR / "rdf_settings_ref.csv"
 
-REF_TRAJ_BASE_DIR = "/home/mjgawkowski/phd_mlip_matbench_benchmarks/ref-trajs"
-MLIP_TRAJ_BASE_DIR = "/home/mjgawkowski/Finite-Temperature-MLIP-Benchmarks/plots/mlip_trajectories"
+RESULTS_DIR = BASE_DIR / "results"
+
+REF_TRAJ_BASE_DIR = DATA_DIR / "ref-trajs"
+MLIP_TRAJ_BASE_DIR = DATA_DIR / "mlip-trajs-20fs-tau"
 
 BY_SYSTEM_TYPE_OUTPUT_FILE = os.path.join(RESULTS_DIR, "rdf_similarity_scores_by_system_type_same_simulation_length.csv")
 
@@ -143,11 +149,9 @@ def load_vdos_settings(path: str) -> dict[tuple[str, int], dict[str, float | int
             temperature = int(float(row["temperature"]))
             stride = int(float(row["stride"]))
             dt_fs = float(row["dt"])
-            padding = int(float(row["padding"]))
             settings[(system, temperature)] = {
                 "stride": stride,
                 "dt_fs": dt_fs,
-                "padding": padding,
             }
 
     return settings
@@ -273,6 +277,8 @@ def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.Data
 
 if __name__ == "__main__":
 
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     ref_base = REF_TRAJ_BASE_DIR
     mlip_base = MLIP_TRAJ_BASE_DIR
 
@@ -286,8 +292,7 @@ if __name__ == "__main__":
     results = {m: [] for m in model_names}
     detailed_results = {m: [] for m in model_names}
 
-    ref_settings = load_vdos_settings(REF_SETTINGS_CSV)
-    mlip_settings = load_vdos_settings(MLIP_SETTINGS_CSV)
+    settings = load_vdos_settings(SETTINGS_CSV)
 
     systems = obtain_system_names(ref_base)
     print(f"Found {len(systems)} systems")
@@ -300,19 +305,12 @@ if __name__ == "__main__":
             print(f"  [SKIP] Could not parse system/temperature from directory name: {system}")
             continue
 
-        if system_key not in ref_settings:
-            print(f"  [SKIP] Missing reference CSV settings for {system}")
+        if system_key not in settings:
+            print(f"  [SKIP] Missing CSV settings for {system}")
             continue
 
-        if system_key not in mlip_settings:
-            print(f"  [SKIP] Missing MLIP CSV settings for {system}")
-            continue
-
-        ref_cfg = ref_settings[system_key]
-        mlip_cfg = mlip_settings[system_key]
-
-        ref_frame_dt_fs = float(ref_cfg["dt_fs"])
-        mlip_frame_dt_fs = float(mlip_cfg["dt_fs"])
+        # Same dt applies to both the reference and the MLIP trajectory.
+        frame_dt_fs = float(settings[system_key]["dt_fs"])
 
         # ---------- Reference ----------
         ref_traj_path = os.path.join(ref_base, system, "traj.extxyz")
@@ -328,7 +326,7 @@ if __name__ == "__main__":
         has_hydrogen = contains_hydrogen(ref_traj_all)
 
         print(
-            f"  Reference frames={len(ref_traj_all)}, dt={ref_frame_dt_fs:.3f} fs "
+            f"  Reference frames={len(ref_traj_all)}, dt={frame_dt_fs:.3f} fs "
             f"(contains H: {'yes' if has_hydrogen else 'no'})"
         )
 
@@ -355,8 +353,8 @@ if __name__ == "__main__":
             n_ref_use, n_mlip_use, matched_time_fs = matched_frame_counts(
                 n_ref_total=len(ref_traj_all),
                 n_mlip_total=len(mlip_traj_all),
-                ref_dt_fs=ref_frame_dt_fs,
-                mlip_dt_fs=mlip_frame_dt_fs,
+                ref_dt_fs=frame_dt_fs,
+                mlip_dt_fs=frame_dt_fs,
             )
 
             if n_ref_use <= 0 or n_mlip_use <= 0:
@@ -369,8 +367,8 @@ if __name__ == "__main__":
                 f"mlip frames={n_mlip_use}/{len(mlip_traj_all)}"
             )
 
-            ref_time_used = n_ref_use * ref_frame_dt_fs
-            mlip_time_used = n_mlip_use * mlip_frame_dt_fs
+            ref_time_used = n_ref_use * frame_dt_fs
+            mlip_time_used = n_mlip_use * frame_dt_fs
             if abs(ref_time_used - mlip_time_used) > 1e-12:
                 print(
                     f"    [WARN] Time mismatch after truncation: "

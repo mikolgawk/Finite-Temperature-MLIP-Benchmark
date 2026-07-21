@@ -82,7 +82,7 @@ TIER_COLORS = {
 }
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_RMSE_METRICS_FILE = SCRIPT_DIR.parent / "rmses" / "results" / "mean_metrics_by_model.csv"
+DEFAULT_RMSE_METRICS_FILE = SCRIPT_DIR.parent / "e_f_rmses" / "results" / "mean_metrics_by_model.csv"
 DEFAULT_RDF_SCORES_FILE = SCRIPT_DIR / "results" / "rdf_similarity_scores_same_simulation_length.csv"
 DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_SI_pareto_rdf_time_same_length.pdf"
 

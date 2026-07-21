@@ -1,0 +1,6 @@
+system,temperature_K,timestep_fs,tau_fs,total_steps,total_time_s,seed
+anthracene_293K_Sharma_S,293,0.5,10,40000,40000,31415
+naphthalene_295K_Sharma_S,295,0.5,10,40000,40000,31415
+pentacene_295K_Sharma_S,295,0.5,500,40000,40000,31415
+picene_295K_Sharma_S,295,0.5,500,40000,40000,31415
+tetracene_295K_Sharma_S,295,0.5,10,40000,40000,31415

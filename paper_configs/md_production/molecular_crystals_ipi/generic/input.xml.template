@@ -1,0 +1,40 @@
+<simulation mode='static' verbosity='medium'>
+  <output prefix='simulation'>
+    <!-- Select the properties and trajectories of your liking. If you want the same units as in ASE, just specify  {ase}. -->
+    <properties filename='out' stride='1'>  [ step, time{picosecond}, conserved{electronvolt}, temperature{kelvin}, kinetic_md{electronvolt}, potential{electronvolt}, pressure_md{megapascal} ] </properties>
+    <trajectory filename='pos' stride='1' format='ase'> positions </trajectory>
+    <trajectory filename='vel' stride='1' format='xyz'> velocities </trajectory>
+    <trajectory filename='for' stride='1' format='xyz'> forces </trajectory>
+    <checkpoint stride='100'/>
+  </output>
+  <total_time> $total_time_s </total_time>
+  <total_steps>$total_steps</total_steps>
+  <prng>
+    <seed>$seed</seed>
+  </prng>
+  <ffsocket name='driver' mode='unix'>
+      <address> $address </address>
+  </ffsocket>
+  <system>
+    <initialize nbeads='1'>
+      <file mode='ase'> init.xyz </file>
+      <velocities mode='thermal' units='kelvin'> $temperature_K </velocities>
+    </initialize>
+    <forces>
+      <force forcefield='driver'> </force>
+    </forces>
+    <motion mode='dynamics'>
+      <dynamics mode='nvt'>
+        <!-- The perfect value of tau depends on the frequency of the normal mode you want to effectively thermostat. For systems with more than one modes, the unique value will be system specific. However, heurestically a value between 100 and 1000 fs works well in my experience. -->
+        <thermostat mode='langevin'>
+          <tau units='femtosecond'> $tau_fs </tau>
+        </thermostat>
+        <!-- Change as per your system -->
+        <timestep units='femtosecond'> $timestep_fs </timestep>
+      </dynamics>
+    </motion>
+    <ensemble>
+      <temperature units='kelvin'> $temperature_K </temperature>
+    </ensemble>
+  </system>
+</simulation>
