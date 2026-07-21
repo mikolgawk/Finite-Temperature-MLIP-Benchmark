@@ -30,9 +30,12 @@ NVT_CUAU_TIMESTEP = 2.0  # fs
 NVT_TAU = 25.0  # fs
 NVT_RECORD_INTERVAL = 1
 
-TRAJ_DIR = '../ref-trajs-2/'
-OUTPUT_DIR = '../output-ref-trajs-2-25fs-fp32/'
-SKIP_SYSTEMS = ['anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene']
+TRAJ_DIR = '../ref-trajs/'
+OUTPUT_DIR = '../output-trajs-timings-paper/'
+SKIP_SYSTEMS = [
+    'anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene',
+    'H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP',
+]
 
 # Systems outside the paper panel. Trajectories are discovered by scanning
 # TRAJ_DIR, so these are excluded by name in case they are present there.

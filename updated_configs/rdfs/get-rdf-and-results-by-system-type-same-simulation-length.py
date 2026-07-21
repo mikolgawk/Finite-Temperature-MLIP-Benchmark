@@ -285,7 +285,7 @@ if __name__ == "__main__":
     model_names = [
         'chgnet', 'mace-mp-0', 'grace-mp',
         'mace-mpa-0', 'orb-v2',
-        'mattersim-v1-5M', 'grace-oam', 'orb-v3', 'eSEN-30M-OAM', 'nequip', 'eq-v2-M-omat', 'pet-oam-xl',
+        'mattersim-v1-5M', 'grace-oam', 'orb-v3', 'orb-v3-direct', 'eSEN-30M-OAM', 'nequip', 'eq-v2-M-omat', 'pet-oam-xl', 'pet-omat-xl',
         "mace-mh-omat", "uma-s-omat", "uma-m-omat"
     ]
 

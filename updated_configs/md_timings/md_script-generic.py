@@ -31,8 +31,8 @@ NVT_TAU = 25.0  # fs
 NVT_RECORD_INTERVAL = 1
 NVT_WARMUP_FRACTION = 0.1  # fraction of n_steps run untimed before production timing starts
 
-TRAJ_DIR = '../ref-trajs-timings/'
-OUTPUT_DIR = '../output-trajs-timings/'
+TRAJ_DIR = '../data/ref-trajs/'
+OUTPUT_DIR = '../data/output-trajs-timings-updated/'
 SKIP_SYSTEMS = [
     'anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene',
     'H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP',
