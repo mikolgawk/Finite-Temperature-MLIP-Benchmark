@@ -115,31 +115,12 @@
       "orb-models_version": "0.5.5"
     },
     {
-      "name": "orb-v3-direct",
-      "package": "orb-models",
-      "imports": [
-        "from orb_models.forcefield.calculator import ORBCalculator",
-        "from orb_models.forcefield import pretrained"
-      ],
-      "calculator_expr": "ORBCalculator(pretrained.orb_v3_direct_20_mpa(device='cuda', precision='float32-high'), device='cuda')",
-      "orb-models_version": "0.5.5"
-    },
-    {
       "name": "pet-oam-xl",
       "package": "upet",
       "imports": [
         "from upet.calculator import UPETCalculator"
       ],
       "calculator_expr": "UPETCalculator(model='pet-oam-xl', version='1.0.0', device='cuda')",
-      "upet_version": "0.1.1"
-    },
-    {
-      "name": "pet-omat-xl",
-      "package": "upet",
-      "imports": [
-        "from upet.calculator import UPETCalculator"
-      ],
-      "calculator_expr": "UPETCalculator(model='pet-omat-xl', device='cuda')",
       "upet_version": "0.1.1"
     },
     {

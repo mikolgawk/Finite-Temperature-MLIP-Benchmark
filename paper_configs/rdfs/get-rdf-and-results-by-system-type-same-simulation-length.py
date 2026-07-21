@@ -225,6 +225,11 @@ SYSTEMS = {
     "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
 }
 
+# Systems outside the paper panel. Trajectory directories are discovered by
+# scanning the reference root, so these are excluded by name in case they are
+# present there; SYSTEMS above already leaves them out of the aggregation.
+EXCLUDED_SYSTEMS = ["H_1050K_Rupp_QE", "Pt111w24H2O_380K_Heenen_VASP"]
+
 def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.DataFrame:
     """Aggregate per-system RDF errors into per-system-type means, per model."""
     results: dict[str, dict[str, float]] = {}
@@ -292,6 +297,10 @@ if __name__ == "__main__":
 
     for system in systems:
         print(f"\n=== System: {system} ===")
+
+        if any(s in system for s in EXCLUDED_SYSTEMS):
+            print(f"  [SKIP] {system} is not part of the paper panel")
+            continue
 
         system_key = parse_system_temperature_from_dirname(system)
         if system_key is None:

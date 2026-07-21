@@ -44,12 +44,16 @@ Each stage carries a `model_calculators.json` declaring, per model, the
 imports needed and a self-contained Python expression that constructs the ASE
 calculator. The catalog is what `MODEL_NAME` selects from at runtime.
 
+The trees also differ in panel size: `paper_configs` covers 15 models,
+`updated_configs` 17 — `orb-v3-direct` and `pet-omat-xl` were added after the
+paper and appear only in the updated tree.
+
 The stage catalogs are not all copies of one another, so the paper→updated
 comparison depends on which stage you look at. Within `updated_configs`, the
 `md_production`, `e_f_rmses` and `md_timings` catalogs are byte-identical to
 each other and only `pressures` deviates. Within `paper_configs`,
-`md_production` and `pressures` are identical, `e_f_rmses` drops two models,
-and `md_timings` is its own variant.
+`md_production`, `e_f_rmses` and `pressures` are byte-identical and
+`md_timings` is its own variant.
 
 #### `md_production`
 
@@ -61,8 +65,9 @@ Calculator expressions that differ between the trees:
 | `grace-oam` | `grace_fm('GRACE-2L-OMAT-large-ft-AM')` — the shipped fp64 checkpoint | `TPCalculator('../data/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')` — an offline recast, by explicit path |
 | `mace-mp-0`, `mace-mpa-0`, `mace-mh-omat` | `default_dtype='float64'` | `default_dtype='float32'` |
 | MatterSim | `mattersim-v1-1M`: `MatterSimCalculator(device='cuda')`, i.e. the 1M default | `mattersim-v1-5M`: `load_path='MatterSim-v1.0.0-5M.pth'` |
-| `orb-v2`, `orb-v3`, `orb-v3-direct` | `precision='float64'` | `precision='float32-high'` — fp32 weights with TF32 matmuls, and a process-global setting |
-| `pet-oam-xl`, `pet-omat-xl` | no `dtype` — defers to the checkpoint | `dtype=torch.float32`, pinned explicitly |
+| `orb-v2`, `orb-v3` | `precision='float64'` | `precision='float32-high'` — fp32 weights with TF32 matmuls, and a process-global setting |
+| `pet-oam-xl` | no `dtype` — defers to the checkpoint | `dtype=torch.float32`, pinned explicitly |
+| `orb-v3-direct`, `pet-omat-xl` | not in the panel | added, at `'float32-high'` and `dtype=torch.float32` respectively |
 
 `eq-v2-M-omat`, `eSEN-30M-OAM`, `grace-mp`, `uma-s-omat` and `uma-m-omat` are
 byte-identical between the trees: none of them expose a settable precision, so
@@ -85,11 +90,12 @@ What still differs between the trees for this stage:
 - `grace-oam` — fp64 `grace_fm(...)` → the recast fp32 `TPCalculator(...)`.
 - MatterSim — `mattersim-v1-1M` → `mattersim-v1-5M`
   (`MatterSim-v1.0.0-5M.pth`).
-- `pet-oam-xl`, `pet-omat-xl` — `dtype=torch.float32` pinned explicitly.
+- `pet-oam-xl` — `dtype=torch.float32` pinned explicitly.
 - `nequip` — checkpoint path moves under `../data/models/`.
+- `orb-v3-direct`, `pet-omat-xl` — present only in the updated tree.
 
-The MACE and ORB entries are unchanged across the trees here — the only stage
-where that is true.
+Every entry the two panels share apart from those is unchanged here — MACE and
+ORB included, which is true of no other stage.
 
 The schema differs as well. `paper_configs` entries carry only `name`,
 `package`, `imports`, `calculator_expr` and a `<package>_version`.
@@ -101,16 +107,6 @@ checkpoint was recast, `nequip_artifact`, `probe_checkpoint`, and a top-level
 `shared_notes` block that entries reference via `shared_note_ref` (the UMA
 inference-settings note is shared by both UMA entries). That is why the
 updated catalogs are ~20 KB against ~6 KB.
-
-Catalogs also vary *within* a tree, deliberately:
-
-- `paper_configs/e_f_rmses` omits `orb-v3-direct` and `pet-omat-xl` (15
-  models, not 17).
-- `updated_configs/pressures` sets `compute_stress=True` for `chgnet` — the
-  stage needs the stress tensor — and its `nequip` entry still uses the bare
-  `compile_path` filename rather than `../data/models/`.
-- `rdfs/` and `vdos/` have no catalog: they read trajectories off disk and
-  never construct a calculator.
 
 ## Benchmark systems
 
@@ -125,8 +121,14 @@ classification):
 - **Perovskites** — CsSnI3 (500 K), MAPbBr3 (300 K)
 - **Molecular crystals** — anthracene (293 K), naphthalene, pentacene,
   picene, tetracene (295 K)
-- **Metal–water interfaces** — Pt(111) with 24 H2O (380 K)
-- **Hydrogen** — H at 1050 K
+- **Metal–water interfaces** — Pt(111) with 24 H2O (380 K) — `updated_configs`
+  only
+- **Hydrogen** — H at 1050 K — `updated_configs` only
+
+`paper_configs` covers the first five categories. Its system-type tables list
+no hydrogen or metal–water interface category, and because its scripts
+discover systems by scanning the trajectory directory, both are also excluded
+by name (`EXCLUDED_SYSTEMS`) so a stray directory cannot pull them back in.
 
 Per-system settings (temperature, stride, timestep) are recorded in each
 analysis directory's `*_settings_ref.csv`.

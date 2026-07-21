@@ -34,6 +34,10 @@ TRAJ_DIR = '../ref-trajs-2/'
 OUTPUT_DIR = '../output-ref-trajs-2-25fs-fp32/'
 SKIP_SYSTEMS = ['anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene']
 
+# Systems outside the paper panel. Trajectories are discovered by scanning
+# TRAJ_DIR, so these are excluded by name in case they are present there.
+EXCLUDED_SYSTEMS = ['H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP']
+
 MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')
 
 
@@ -250,6 +254,10 @@ def main():
 
         if any(s in parent_dir for s in SKIP_SYSTEMS):
             print(f"Skipping {parent_dir} (organic molecule).")
+            continue
+
+        if any(s in parent_dir for s in EXCLUDED_SYSTEMS):
+            print(f"Skipping {parent_dir} (not part of the paper panel).")
             continue
 
         frames = read_trajectory(file_path)

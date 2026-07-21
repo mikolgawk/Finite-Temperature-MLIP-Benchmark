@@ -21,7 +21,7 @@ sbatch --job-name=naphthalene-mace-mpa-0-ipi \
        --export=ALL,SYSTEM=naphthalene_295K_Sharma_S,MODEL_NAME=mace-mpa-0 \
        submit-generic.sh
 
-# The whole 5 x 17 grid, or a slice of it
+# The whole 5 x 15 grid, or a slice of it
 ./submit_all.sh
 ./submit_all.sh --model mace-mpa-0
 ./submit_all.sh --system picene_295K_Sharma_S

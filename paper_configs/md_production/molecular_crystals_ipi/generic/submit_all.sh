@@ -1,7 +1,8 @@
 #!/bin/bash -l
 #
-# Submits one i-PI job per (system, model) pair -- the full 5 x 17 grid that
-# the per-directory tree used to encode by hand.
+# Submits one i-PI job per (system, model) pair -- the full 5 x 15 grid, i.e.
+# every model the shared catalog lists, as the per-directory tree used to
+# encode by hand.
 #
 #   ./submit_all.sh                       # everything
 #   ./submit_all.sh --model mace-mpa-0    # one model, all systems

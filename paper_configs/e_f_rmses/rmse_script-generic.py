@@ -42,6 +42,10 @@ ISOLATED_ATOM_FILES = {
     ('anthracene', 'picene', 'naphthalene', 'pentacene', 'tetracene')
 }
 
+# Systems outside the paper panel. Trajectories are discovered by scanning
+# ../ref-trajs/, so these are excluded by name in case they are present there.
+EXCLUDED_SYSTEMS = ['H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP']
+
 # Global dictionary to track issues
 issues = {
     'failed_file_reads': [],
@@ -365,6 +369,11 @@ def main():
 
         # Output directory
         parent_dir = os.path.basename(os.path.dirname(file_path))
+
+        if any(s in parent_dir for s in EXCLUDED_SYSTEMS):
+            print(f"   ↳ Skipping {parent_dir} (not part of the paper panel).")
+            continue
+
         local_output_dir = Path('../outputs') / parent_dir
         local_output_dir.mkdir(parents=True, exist_ok=True)
 
