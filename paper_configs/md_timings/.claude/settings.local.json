@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(wsl --% -e bash -lc \"cd /home/mikigawkowski/Finite-Temperature-MLIP-Benchmark/paper_configs/md_timings && python3 -m py_compile md_script-generic.py && echo COMPILE_OK && MODEL_NAME=bogus python3 md_script-generic.py 2>&1 | tail -3\")",
+      "PowerShell(wsl --% -e bash -lc \"python3 -c 'import ase; print\\(\\\\\"ase\\\\\", ase.__version__\\)' 2>&1 | tail -1; ls ~/miniconda3/envs ~/anaconda3/envs 2>/dev/null | head -30\")"
+    ]
+  }
+}
