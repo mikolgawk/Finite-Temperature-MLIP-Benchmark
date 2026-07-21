@@ -25,7 +25,7 @@
       "imports": [
         "from fairchem.core import OCPCalculator"
       ],
-      "calculator_expr": "OCPCalculator(checkpoint_path='../models/eqV2_86M_omat_mp_salex.pt', cpu=False)",
+      "calculator_expr": "OCPCalculator(checkpoint_path='../data/models/eqV2_86M_omat_mp_salex.pt', cpu=False)",
       "weight_dtype": "float32",
       "matmul_precision": "fp32",
       "precision_settable": false,
@@ -41,7 +41,7 @@
       "imports": [
         "from fairchem.core import OCPCalculator"
       ],
-      "calculator_expr": "OCPCalculator(checkpoint_path='../models/esen_30m_oam.pt', cpu=False)",
+      "calculator_expr": "OCPCalculator(checkpoint_path='../data/models/esen_30m_oam.pt', cpu=False)",
       "weight_dtype": "float32",
       "matmul_precision": "fp32",
       "precision_settable": false,
@@ -73,7 +73,7 @@
         "from tensorpotential.calculator import TPCalculator",
         "import tensorflow as tf"
       ],
-      "calculator_expr": "TPCalculator('/home/mjgawkowski/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')",
+      "calculator_expr": "TPCalculator('../data/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')",
       "weight_dtype": "float32",
       "matmul_precision": "fp32",
       "precision_settable": false,
@@ -119,7 +119,7 @@
       "imports": [
         "from mace.calculators import mace_mp, MACECalculator"
       ],
-      "calculator_expr": "MACECalculator('../models/mace-mpa-0-medium.model', default_dtype='float32', device='cuda')",
+      "calculator_expr": "MACECalculator('../data/models/mace-mpa-0-medium.model', default_dtype='float32', device='cuda')",
       "weight_dtype": "float32",
       "matmul_precision": "fp32",
       "precision_settable": true,

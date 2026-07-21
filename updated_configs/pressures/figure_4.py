@@ -87,7 +87,7 @@ SYSTEMS = {
         "bulkCuZrAl_1500K_A.Wadowski-J.Schmidt_VASP",
         "bulkLiMgAlZnSn_600K_J_Schmidt_VASP",
     ],
-    # "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
+    "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
 
     "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
     "Hydrogen": ["H_1050K_Rupp_QE"],

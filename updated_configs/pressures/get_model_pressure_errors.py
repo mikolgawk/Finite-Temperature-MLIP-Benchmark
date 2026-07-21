@@ -11,7 +11,7 @@ import pandas as pd
 EXCLUDED_MODELS = {"pet-mad"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results" / "same-simulation-length"
+DEFAULT_PRESSURES_DIR = SCRIPT_DIR.parent / "data" / "results" / "same-simulation-length"
 DEFAULT_REFERENCE_FILE = DEFAULT_PRESSURES_DIR / "reference_pressure_per_frame_same_simulation_length.csv"
 DEFAULT_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
 DEFAULT_PAIR_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "pressure_pair_similarity_same_simulation_length.csv"

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from compute_model_pressure_errors_same_simulation_length import (
+from get_model_pressure_errors import (
     load_pressure_per_frame_csv,
     normalize_model_name,
     parse_model_name,
@@ -48,7 +48,7 @@ plt.rcParams.update({
 })
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results" / "same-simulation-length"
+DEFAULT_PRESSURES_DIR = SCRIPT_DIR.parent / "data" / "results" / "same-simulation-length"
 DEFAULT_REFERENCE_FILE = DEFAULT_PRESSURES_DIR / "reference_pressure_per_frame_same_simulation_length.csv"
 DEFAULT_RANKING_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
 DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_pressure_panel_combined_pressure_errors.pdf"
@@ -89,7 +89,7 @@ SYSTEMS = {
         "bulkCuZrAl_1500K_A.Wadowski-J.Schmidt_VASP",
         "bulkLiMgAlZnSn_600K_J_Schmidt_VASP",
     ],
-    # "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
+    "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
     "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
