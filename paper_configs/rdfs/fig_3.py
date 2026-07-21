@@ -70,7 +70,7 @@ CALCULATOR_DISPLAY_NAMES = {
     'mace-mpa-0': 'MACE-MPA-0',
     'orb-v2': 'orb-v2',
     'eq-v2-m-omat': 'EquiformerV2',
-    'mattersim-v1-5m': 'MatterSim-v1.0.0-5M',
+    'mattersim-v1-1m': 'MatterSim-v1.0.0-1M',
     'grace-oam': 'GRACE-2L-OAM',
     'orb-v3': 'orb-v3-conservative-inf-mpa',
     'orb-v3-direct': 'orb-v3-direct-20-mpa',
@@ -114,7 +114,7 @@ SYSTEMS = {
 
 TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
 TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]
+TIER_3 = ["mattersim-v1-1M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]
 TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
 
 TIER_1_NORM = [normalize_model_name(model) for model in TIER_1]

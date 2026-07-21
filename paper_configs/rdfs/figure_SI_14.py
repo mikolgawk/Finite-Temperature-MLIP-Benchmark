@@ -47,7 +47,7 @@ CALCULATOR_DISPLAY_NAMES = {
     "mace-mpa-0": "MACE-MPA-0",
     "orb-v2": "orb-v2",
     "eq-v2-m-omat": "EquiformerV2",
-    "mattersim-v1-5m": "MatterSim-v1.0.0-5M",
+    "mattersim-v1-1m": "MatterSim-v1.0.0-1M",
     "orb-v3": "orb-v3-conservative-inf-mpa",
     "grace-oam": "GRACE-2L-OAM",
     "nequip": "NequIP-OAM-XL",
@@ -70,7 +70,7 @@ def display_name(model: str) -> str:
 
 TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
 TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl"]
+TIER_3 = ["mattersim-v1-1m", "grace-oam", "orb-v3", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl"]
 TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
 
 TIER_COLORS = {

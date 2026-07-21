@@ -29,7 +29,7 @@ CALCULATOR_DISPLAY_NAMES = {
     'mace-mpa-0': 'MACE-MPA-0',
     'orb-v2': 'orb-v2',
     'eq-v2-m-omat': 'EquiformerV2',
-    'mattersim-v1-5m': 'MatterSim-v1.0.0-5M',
+    'mattersim-v1-1m': 'MatterSim-v1.0.0-1M',
     'grace-oam': 'GRACE-2L-OAM',
     'orb-v3': 'orb-v3-conservative-inf-mpa',
     'orb-v3-direct': 'orb-v3-direct-20-mpa',
@@ -62,7 +62,7 @@ SYSTEM_TYPE_ORDER = [
 
 tier_1 = [normalize_calculator_name(model) for model in ["chgnet", "mace-mp-0", "grace-mp"]]
 tier_2 = [normalize_calculator_name(model) for model in ["mace-mpa-0", "orb-v2"]]
-tier_3 = [normalize_calculator_name(model) for model in ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]]
+tier_3 = [normalize_calculator_name(model) for model in ["mattersim-v1-1M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]]
 tier_4 = [normalize_calculator_name(model) for model in ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]]
 
 tier_defs = [
