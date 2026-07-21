@@ -44,6 +44,15 @@ Each stage carries a `model_calculators.json` declaring, per model, the
 imports needed and a self-contained Python expression that constructs the ASE
 calculator. The catalog is what `MODEL_NAME` selects from at runtime.
 
+The stage catalogs are not all copies of one another, so the paper→updated
+comparison depends on which stage you look at. Within `updated_configs`, the
+`md_production`, `e_f_rmses` and `md_timings` catalogs are byte-identical to
+each other and only `pressures` deviates. Within `paper_configs`,
+`md_production` and `pressures` are identical, `e_f_rmses` drops two models,
+and `md_timings` is its own variant.
+
+#### `md_production`
+
 Calculator expressions that differ between the trees:
 
 | Model | `paper_configs` | `updated_configs` |
@@ -52,13 +61,35 @@ Calculator expressions that differ between the trees:
 | `grace-oam` | `grace_fm('GRACE-2L-OMAT-large-ft-AM')` — the shipped fp64 checkpoint | `TPCalculator('../data/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')` — an offline recast, by explicit path |
 | `mace-mp-0`, `mace-mpa-0`, `mace-mh-omat` | `default_dtype='float64'` | `default_dtype='float32'` |
 | MatterSim | `mattersim-v1-1M`: `MatterSimCalculator(device='cuda')`, i.e. the 1M default | `mattersim-v1-5M`: `load_path='MatterSim-v1.0.0-5M.pth'` |
-| `nequip` | bare `compile_path='mir-group__NequIP-OAM-XL__0.1.nequip.pth'` | `compile_path='../data/models/…'` |
 | `orb-v2`, `orb-v3`, `orb-v3-direct` | `precision='float64'` | `precision='float32-high'` — fp32 weights with TF32 matmuls, and a process-global setting |
 | `pet-oam-xl`, `pet-omat-xl` | no `dtype` — defers to the checkpoint | `dtype=torch.float32`, pinned explicitly |
 
 `eq-v2-M-omat`, `eSEN-30M-OAM`, `grace-mp`, `uma-s-omat` and `uma-m-omat` are
 byte-identical between the trees: none of them expose a settable precision, so
 there was nothing to change.
+
+#### `md_timings`
+
+The gap here is much narrower, because `paper_configs/md_timings` had already
+diverged from its own `md_production` catalog in the fp32 direction: MACE at
+`default_dtype='float32'`, ORB at `precision='float32-high'`, and MatterSim
+pinned to `MatterSim-v1.0.0-1M.pth` rather than left to the implicit default.
+The paper's *timing* numbers were therefore measured at close to the updated
+tree's precision, unlike the paper's *production* MD. In `updated_configs`
+that split is gone — its `md_timings` catalog is identical to its
+`md_production` one.
+
+What still differs between the trees for this stage:
+
+- `chgnet` — `stress_weight=0.01` dropped.
+- `grace-oam` — fp64 `grace_fm(...)` → the recast fp32 `TPCalculator(...)`.
+- MatterSim — `mattersim-v1-1M` → `mattersim-v1-5M`
+  (`MatterSim-v1.0.0-5M.pth`).
+- `pet-oam-xl`, `pet-omat-xl` — `dtype=torch.float32` pinned explicitly.
+- `nequip` — checkpoint path moves under `../data/models/`.
+
+The MACE and ORB entries are unchanged across the trees here — the only stage
+where that is true.
 
 The schema differs as well. `paper_configs` entries carry only `name`,
 `package`, `imports`, `calculator_expr` and a `<package>_version`.
@@ -75,9 +106,6 @@ Catalogs also vary *within* a tree, deliberately:
 
 - `paper_configs/e_f_rmses` omits `orb-v3-direct` and `pet-omat-xl` (15
   models, not 17).
-- `paper_configs/md_timings` was already fp32: MACE at
-  `default_dtype='float32'`, ORB at `'float32-high'`, and MatterSim pinned to
-  `MatterSim-v1.0.0-1M.pth` rather than left to the default.
 - `updated_configs/pressures` sets `compute_stress=True` for `chgnet` — the
   stage needs the stress tensor — and its `nequip` entry still uses the bare
   `compile_path` filename rather than `../data/models/`.
