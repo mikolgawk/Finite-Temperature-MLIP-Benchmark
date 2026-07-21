@@ -32,21 +32,15 @@ MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.
 # info tag, computed at the same level of theory as that system's trajectory.
 # Isolated-atom energies are DFT-code/settings-specific, so files are NOT
 # shared across systems computed with different codes (e.g. the aromatic
-# systems use VASP references, H_*_Rupp_QE uses Quantum Espresso references,
-# and the two H atom energies differ accordingly).
+# systems use VASP references).
 # Systems with no entry here are evaluated without any energy correction.
 _AROMATIC_ISOLATED_ATOMS = {
     'C': '../ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_C.extxyz',
     'H': '../ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_H.extxyz',
 }
-_RUPP_QE_HYDROGEN_ISOLATED_ATOM = str(
-    Path(__file__).resolve().parent.parent
-    / 'rmse_scripts_h1050k_rupp_qe' / 'Hydrogen_E0' / 'isolated_atom_H.extxyz'
-)
 ISOLATED_ATOM_FILES = {
-    **{name: _AROMATIC_ISOLATED_ATOMS for name in
-       ('anthracene', 'picene', 'naphthalene', 'pentacene', 'tetracene')},
-    'H': {'H': _RUPP_QE_HYDROGEN_ISOLATED_ATOM},
+    name: _AROMATIC_ISOLATED_ATOMS for name in
+    ('anthracene', 'picene', 'naphthalene', 'pentacene', 'tetracene')
 }
 
 # Global dictionary to track issues

@@ -19,8 +19,7 @@ SYSTEM_TYPES = [
     'metal dichalcogenides',
     'metal alloys',
     'molecular crystals',
-    'metal-water interfaces',
-    'hydrogen',
+
 ]
 
 def infer_system_type(system: str) -> str:
@@ -48,10 +47,7 @@ def infer_system_type(system: str) -> str:
         or s.startswith("tetracene")
     ):
         return "molecular crystals"
-    if s.startswith("pt111w24h2o"):
-        return "metal-water interfaces"
-    if s.startswith("h"):
-        return "hydrogen"
+
 
 
 def list_rmse_csv_files(data_dir: Path) -> list[Path]:
