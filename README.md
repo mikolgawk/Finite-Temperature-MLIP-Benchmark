@@ -23,7 +23,10 @@ The main differences between the two:
   `pretrained.orb_v2(precision='float64')`). `updated_configs` normalizes to
   fp32 wherever precision is settable, and each model config entry records
   `weight_dtype`, `matmul_precision`, `precision_settable`, `verified`, and a
-  `dtype_note` explaining how that was established.
+  `dtype_note` explaining how that was established. The one exception is
+  `paper_configs/md_timings`, whose MACE and ORB entries run at fp32 /
+  `float32-high` like the updated tree — a speed comparison is only meaningful
+  if both sides are clocked at the same precision.
 - **Checkpoints.** `mattersim-v1-1M` → `mattersim-v1-5M`; `grace-oam` moves
   from the shipped fp64 `GRACE-2L-OMAT-large-ft-AM` to an offline-recast fp32
   artifact. `grace-mp` remains the one fp64 model in the updated model config and
@@ -37,9 +40,11 @@ The main differences between the two:
 
 ### Model config files
 
-Each stage carries a `model_calculators.json` declaring, per model, the
-imports needed and a self-contained Python expression that constructs the ASE
-calculator.
+The four stages that build a calculator — `md_production`, `md_timings`,
+`e_f_rmses` and `pressures` — each carry a `model_calculators.json` declaring,
+per model, the imports needed and a self-contained Python expression that
+constructs the ASE calculator. `rdfs` and `vdos` read trajectories off disk and
+have no catalog.
 
 
 The two trees also differ in panel size: `paper_configs` covers 15 models,
@@ -68,9 +73,10 @@ Calculator expressions that differ between the trees:
 | `pet-oam-xl` | no `dtype` — defers to the checkpoint | `dtype=torch.float32`, pinned explicitly |
 | `orb-v3-direct`, `pet-omat-xl` | not in the panel | added, at `'float32-high'` and `dtype=torch.float32` respectively |
 
-`eq-v2-M-omat`, `eSEN-30M-OAM`, `grace-mp`, `uma-s-omat` and `uma-m-omat` are
-byte-identical between the trees: none of them expose a settable precision, so
-there was nothing to change.
+`eq-v2-M-omat`, `eSEN-30M-OAM`, `grace-mp`, `nequip`, `uma-s-omat` and
+`uma-m-omat` carry identical calculator expressions in both trees: none of them
+expose a settable precision, so there was nothing to change. (The updated tree's
+entries still differ in carrying the precision metadata fields above.)
 
 #### `md_timings`
 
@@ -85,10 +91,16 @@ Differences between paper and updated model config files:
 
 - `chgnet` — `stress_weight=0.01` dropped.
 - `grace-oam` — fp64 `grace_fm(...)` → the recast fp32 `TPCalculator(...)`.
-- MatterSim — `mattersim-v1-1M` → `mattersim-v1-5M`
-  (`MatterSim-v1.0.0-5M.pth`).
+- MatterSim — `mattersim-v1-1M` (`MatterSim-v1.0.0-1M.pth`) →
+  `mattersim-v1-5M` (`MatterSim-v1.0.0-5M.pth`). Both trees pin the checkpoint
+  by path here, unlike `md_production`, where the paper tree takes the 1M
+  default implicitly.
 - `pet-oam-xl` — `dtype=torch.float32` pinned explicitly.
 - `orb-v3-direct`, `pet-omat-xl` — present only in the updated tree.
+
+MACE and ORB do **not** differ in this stage: the paper catalog runs them at
+`default_dtype='float32'` and `precision='float32-high'`, matching the updated
+tree, so the two timing sets are taken at the same precision.
 
 ##### How the timing is taken
 
@@ -110,6 +122,18 @@ trajectory. They differ in what falls inside the clock:
 Output goes to `../data/output-trajs-timings-paper/` and
 `../data/output-trajs-timings-updated/` respectively.
 
+#### `e_f_rmses`
+
+```
+paper_configs/e_f_rmses/model_calculators.json
+updated_configs/e_f_rmses/model_calculators.json
+```
+
+Within each tree this catalog matches that tree's `md_production` catalog
+entry for entry — the RMSEs are evaluated with exactly the calculators that
+produced the trajectories. So the paper/updated differences are the ones in the
+`md_production` table above.
+
 #### `pressures`
 
 The paths to the model config files are:
@@ -120,17 +144,21 @@ updated_configs/pressures/model_calculators.json
 ```
 
 
-What is specific to this stage, in `updated_configs` only:
+What is specific to this stage:
 
-- `chgnet` — `compute_stress=True`. This is the one entry in either tree that
-  turns stress on; every other catalog sets `compute_stress=False`. The stage
-  needs the stress tensor and CHGNet only returns it when asked. The paper
-  tree's copy was never flipped and still reads `compute_stress=False` —
-  moot in practice, since that tree ships no pressure script for the catalog
-  to feed.
-- `nequip` — the only entry in the updated tree whose `compile_path` is a bare
-  filename instead of `../data/models/…`, so it resolves against the working
-  directory rather than the shared checkpoint directory.
+- `chgnet` — `compute_stress=True` in **both** trees. These are the only two
+  entries anywhere that turn stress on; every other catalog sets
+  `compute_stress=False`. The stage needs the stress tensor and CHGNet only
+  returns it when asked. The trees differ in the neighbouring flags: the paper
+  copy also sets `compute_hessian=True`, the updated one leaves it `False`, and
+  the paper copy drops `stress_weight` here (unlike its other stages).
+- Every checkpoint path in both catalogs resolves under `../data/models/`,
+  including `nequip`'s `compile_path`.
+
+Only `updated_configs` ships a pressure script; the paper tree carries the
+catalog with no script to feed it. The script skips any system whose directory
+starts with `Pt111w24H2O_` — a slab in a padded cell, where a cell-averaged
+pressure is not a meaningful quantity to compare.
 
 
 
@@ -151,13 +179,17 @@ Reference trajectories span several system types:
 
 `paper_configs` covers the first five categories.
 
-Per-system settings (temperature, stride, timestep) are recorded in each
-analysis directory's `*_settings_ref.csv`.
+Per-system settings (temperature, stride, timestep) are recorded in the
+`*_settings_ref.csv` carried by the analysis stages that need them —
+`updated_configs/{pressures,rdfs,vdos}/` and the i-PI harness's
+`ipi_settings_ref.csv`. The MD stages take temperature from the system
+directory name (the `\d+K` in it) and the timestep from the per-system rule
+above, so they carry no settings file.
 
 
 ## Pipeline
 
-Both trees use the same pipeline names:
+Both trees use the same stage names, but the paper tree is not complete:
 
 ```
 md_production/   NVT MD production runs for every model/system pair.
@@ -168,24 +200,36 @@ e_f_rmses/       Energy/force RMSE of each MLIP against reference AIMD
                  corrections and per-system-type aggregation.
 pressures/       Per-frame stress and trajectory-averaged pressure, matched
                  to reference trajectories by simulated time, plus error
-                 aggregation.
+                 aggregation.  Script in `updated_configs` only.
 rdfs/            Radial distribution functions from MLIP vs. reference
                  trajectories (via MDTraj), matched by simulation length.
 vdos/            Vibrational density of states via the Fourier transform of
                  the velocity autocorrelation function (Hann-windowed),
                  matched by simulation length, with normalization/plotting.
-data/            Placeholder for local inputs; see below.
+                 `updated_configs` only.
 ```
+
+New analysis work goes in `updated_configs`.
+
+Alongside the analysis scripts, each stage carries the plotting scripts for
+the figures it produces — `figure_2.py`, `fig_3.py`, `figure_4.py` and the
+`figure_SI_*.py` set — plus the aggregation steps they read from
+(`compute_mean_rmses_by_system_type.py`, `get_model_pressure_errors.py`,
+`get_normalized_VDOS.py`).
 
 Additionally, `paper_configs/md_production/molecular_crystals_ipi/generic/`
 holds the unified i-PI harness used for the five molecular crystals, which
 run under i-PI rather than the ASE driver. It has its own
 [README](paper_configs/md_production/molecular_crystals_ipi/generic/README.md)
-covering the `SYSTEM` × `MODEL_NAME` submission grid (but importantly molcular crystals are excluded from `md_timings`).
+covering the `SYSTEM` × `MODEL_NAME` submission grid. Note that the molecular
+crystals are excluded from `md_timings` in both trees.
 
 ## Data layout
 
-`data/` is tracked as an empty placeholder currently
+No `data/` directory is committed — trajectories and checkpoints are too large
+to track. Each tree's scripts resolve paths relative to their own stage
+directory, so create `paper_configs/data/` and `updated_configs/data/` with
+this layout before running anything:
 
 ```
 data/ref-trajs/<system>/traj.extxyz     Reference AIMD trajectories
@@ -195,6 +239,14 @@ data/output-trajs-timings-updated/      Timing output, written by `updated` md_t
 data/output-trajs-timings-paper/        Timing output, written by `paper` md_timings
 data/models/                            Local model checkpoints
 ```
+
+The updated tree keeps to this convention throughout: its scripts reference
+only their own directory or `../data/`. The paper tree is less consistent and
+needs editing before it will run elsewhere —
+`paper_configs/rdfs/get-rdf-and-results-by-system-type-same-simulation-length.py`
+and `fig_3.py` still carry absolute `/home/mjgawkowski/…` paths, and
+`paper_configs/e_f_rmses/compute_mean_rmses_by_system_type.py` reads a
+stage-local `data/` where its updated counterpart reads `../data/`.
 
 ## Usage
 
