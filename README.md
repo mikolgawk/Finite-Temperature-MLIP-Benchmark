@@ -8,25 +8,22 @@ and vibrational density of states (VDOS).
 
 ## Two configuration trees
 
-The repository tracks configurations, not data. The same pipeline exists
+In the repo, the same pipeline exists
 twice, under two top-level directories:
 
 | Tree | What it is |
 | --- | --- |
-| `paper_configs/` | The configurations that produced the results on arxiv. Frozen; kept for reproducibility. |
+| `paper_configs/` | The configurations that produced the results on arxiv. |
 | `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints. Where new work goes. |
 
-The substantive differences:
+The differences between the two:
 
 - **Precision.** `paper_configs` ran each model at whatever its constructor
   defaulted to or at fp64 (`mace_mp(default_dtype='float64')`,
   `pretrained.orb_v2(precision='float64')`). `updated_configs` normalizes to
-  fp32 wherever precision is settable, and each catalog entry records
+  fp32 wherever precision is settable, and each model config entry records
   `weight_dtype`, `matmul_precision`, `precision_settable`, `verified`, and a
-  `dtype_note` explaining how that was established (source reading,
-  runtime probe, or unverified). Models where precision genuinely cannot be
-  set — CHGNet, eqV2, eSEN, UMA — are documented as such rather than silently
-  assumed.
+  `dtype_note` explaining how that was established.
 - **Checkpoints.** `mattersim-v1-1M` → `mattersim-v1-5M`; `grace-oam` moves
   from the shipped fp64 `GRACE-2L-OMAT-large-ft-AM` to an offline-recast fp32
   artifact. `grace-mp` remains the one fp64 model in the updated catalog and
