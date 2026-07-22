@@ -39,16 +39,12 @@ The main differences between the two:
 
 Each stage carries a `model_calculators.json` declaring, per model, the
 imports needed and a self-contained Python expression that constructs the ASE
-calculator. The config file is what `MODEL_NAME` selects from at runtime.
+calculator.
 
 
-
-
-
-The trees also differ in panel size: `paper_configs` covers 15 models,
+The two trees also differ in panel size: `paper_configs` covers 15 models,
 `updated_configs` 17 — `orb-v3-direct` and `pet-omat-xl` were added after the
 paper and appear only in the updated tree.
-
 
 
 #### `md_production`
@@ -94,6 +90,31 @@ Differences between paper and updated model config files:
 - `pet-oam-xl` — `dtype=torch.float32` pinned explicitly.
 - `orb-v3-direct`, `pet-omat-xl` — present only in the updated tree.
 
+##### How the timing is taken
+
+Both trees run the same short benchmark — 0.2 ps per system, per-system
+timestep, `tdamp = 25 fs`, every step recorded, over a reduced system set
+(molecular crystals, `H_1050K_Rupp_QE` and `Pt111w24H2O_380K_Heenen_VASP` are
+skipped) — and wrap `dyn.run(n_steps)` in a CUDA-synchronized
+`time.perf_counter()`, writing `md_timing_<model>.csv` alongside the
+trajectory. They differ in what falls inside the clock:
+
+- `paper_configs` times the whole 0.2 ps from the first step, so one-time
+  costs (CUDA kernel autotune, first-call compilation, lazily built neighbour
+  lists) are included in `seconds_per_step`.
+- `updated_configs` first runs `NVT_WARMUP_FRACTION = 0.1` of the steps
+  untimed, synchronizes, and only then starts the clock — a steady-state
+  per-step cost, with the startup transient excluded rather than averaged in.
+  The CSV carries an extra `warmup_steps` column recording this.
+
+The practical consequence: paper-tree numbers are biased upward on a 0.2 ps
+run (the fixed startup cost is spread over only ~200 steps), and the bias is
+larger for models with heavier compilation or first-call setup. The two sets
+should not be compared against each other directly.
+
+Output goes to `../output-trajs-timings-paper/` and
+`../data/output-trajs-timings-updated/` respectively.
+
 
 
 ## Benchmark systems
@@ -117,9 +138,9 @@ Per-system settings (temperature, stride, timestep) are recorded in each
 analysis directory's `*_settings_ref.csv`.
 
 
-## Pipeline stages
+## Pipeline
 
-Both trees use the same stage names:
+Both trees use the same pipeline names:
 
 ```
 md_production/   NVT MD production runs for every model/system pair; also
@@ -151,20 +172,15 @@ covering the `SYSTEM` × `MODEL_NAME` submission grid.
 
 ## Data layout
 
-`data/` is tracked as an empty placeholder — trajectories and checkpoints are
-large and live outside the repository. Populate it, in the tree you are
-running:
+`data/` is tracked as an empty placeholder currently
 
 ```
 data/ref-trajs/<system>/traj.extxyz     Reference AIMD trajectories
-data/mlip-trajs-20fs-tau/<system>/      MD output, written by md_production
+data/mlip-trajs-20fs-tau/<system>/      MD output, written by `updated` md_production
+data/mlip-trajs/<system>/
+`paper` md_production
 data/models/                            Local model checkpoints
 ```
-
-Both trees load model checkpoints from `../data/models/`. Trajectories
-differ: `updated_configs` resolves those under `../data/` too, whereas the
-`paper_configs` scripts still read from a sibling `../ref-trajs/` and write to
-`../mlip-trajs/`.
 
 ## Usage
 
@@ -189,23 +205,3 @@ An unset or unrecognized `MODEL_NAME` fails immediately with the list of
 valid names. MD production skips any system whose output trajectory already
 exists, so reruns are resumable.
 
-RDF and VDOS analyses operate on the MD trajectories already produced above
-and are run per-analysis rather than per-model; see the `--help` output of
-`rdfs/get-rdf-and-results-by-system-type-same-simulation-length.py` and
-`vdos/get_normalized_VDOS.py`. Note that `get_normalized_VDOS.py` imports two
-batch/plot helper modules that are not tracked here, and its `--ref-root`
-default is an absolute cluster path — pass `--ref-root` explicitly.
-
-Figure-generating scripts (`figure_*.py`, `fig_*.py`) reproduce the plots in
-the accompanying paper from the CSVs each pipeline stage produces.
-
-## Requirements
-
-MLIP evaluation depends on the packages named in the `package` field of each
-model config entry (`chgnet`, `fairchem-core`, `tensorpotential`, `mace-torch`,
-`mattersim`, `nequip`, `orb-models`, `upet`), plus `ase`, `numpy`, `pandas`,
-`scipy`, `matplotlib`, `seaborn`, and `mdtraj` for the analysis/plotting
-stages. Models need mutually incompatible dependency sets, so one environment
-rarely covers the whole panel — run the panel a slice at a time, one
-environment per group of models. A CUDA GPU is expected for MD production,
-RMSE, and pressure evaluation.
