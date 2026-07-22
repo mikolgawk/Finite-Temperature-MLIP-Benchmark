@@ -28,10 +28,13 @@ NVT_RECORD_INTERVAL = 10
 NVT_LOG_INTERVAL = 100
 TDAMP_MULTIPLIER = 100.0
 
+TRAJ_DIR = '../data/ref-trajs/'
+OUTPUT_DIR = '../data/mlip-trajs/'
+
 SKIP_SYSTEMS = ['anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene']
 
 # Systems outside the paper panel. Trajectories are discovered by scanning
-# ../data/ref-trajs/, so these are excluded by name in case they are present there.
+# TRAJ_DIR, so these are excluded by name in case they are present there.
 EXCLUDED_SYSTEMS = ['H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP']
 
 MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')
@@ -83,7 +86,7 @@ def read_trajectory(file_path):
         return []
 
 
-def get_file_names(directory='../data/ref-trajs/', extension='.extxyz'):
+def get_file_names(directory=TRAJ_DIR, extension='.extxyz'):
     '''Gets a list of file names with a specific extension from subdirectories.'''
     directories = [d for d in os.listdir(directory)
                    if os.path.isdir(os.path.join(directory, d))]
@@ -147,8 +150,8 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
     )
 
     file_path_output = os.path.basename(os.path.dirname(file_path))
-    os.makedirs(f'../data/mlip-trajs/{file_path_output}/', exist_ok=True)
-    log_file = f'../data/mlip-trajs/{file_path_output}/md_{calculator_name}.log'
+    os.makedirs(f'{OUTPUT_DIR}{file_path_output}/', exist_ok=True)
+    log_file = f'{OUTPUT_DIR}{file_path_output}/md_{calculator_name}.log'
     print(log_file)
     dyn.attach(
         MDLogger(dyn, atoms, log_file, header=True, stress=False,
@@ -177,7 +180,7 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
         f"({seconds_per_step:.6f} s/step)"
     )
 
-    timing_file = f'../data/mlip-trajs/{file_path_output}/md_timing_{calculator_name}.csv'
+    timing_file = f'{OUTPUT_DIR}{file_path_output}/md_timing_{calculator_name}.csv'
     pd.DataFrame([{
         'calculator': calculator_name,
         'source_file': file_path,
@@ -256,7 +259,7 @@ def main():
         print(f"Temperature: {tempK} K")
 
         file_path_output = os.path.basename(os.path.dirname(file_path))
-        nvt_output = f'../data/mlip-trajs/{file_path_output}/nvt_{model_name}.extxyz'
+        nvt_output = f'{OUTPUT_DIR}{file_path_output}/nvt_{model_name}.extxyz'
         if os.path.exists(nvt_output):
             print(f"  âš  NVT trajectory already exists: {nvt_output}, skipping simulation.")
             continue
