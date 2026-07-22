@@ -110,6 +110,28 @@ trajectory. They differ in what falls inside the clock:
 Output goes to `../data/output-trajs-timings-paper/` and
 `../data/output-trajs-timings-updated/` respectively.
 
+#### `pressures`
+
+The paths to the model config files are:
+
+```
+paper_configs/pressures/model_calculators.json
+updated_configs/pressures/model_calculators.json
+```
+
+
+What is specific to this stage, in `updated_configs` only:
+
+- `chgnet` — `compute_stress=True`. This is the one entry in either tree that
+  turns stress on; every other catalog sets `compute_stress=False`. The stage
+  needs the stress tensor and CHGNet only returns it when asked. The paper
+  tree's copy was never flipped and still reads `compute_stress=False` —
+  moot in practice, since that tree ships no pressure script for the catalog
+  to feed.
+- `nequip` — the only entry in the updated tree whose `compile_path` is a bare
+  filename instead of `../data/models/…`, so it resolves against the working
+  directory rather than the shared checkpoint directory.
+
 
 
 ## Benchmark systems

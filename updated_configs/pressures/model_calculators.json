@@ -149,7 +149,7 @@
       "imports": [
         "from nequip.ase import NequIPCalculator"
       ],
-      "calculator_expr": "NequIPCalculator.from_compiled_model(compile_path='mir-group__NequIP-OAM-XL__0.1.nequip.pth', device='cuda', chemical_species_to_atom_type_map=True)",
+      "calculator_expr": "NequIPCalculator.from_compiled_model(compile_path='../data/models/mir-group__NequIP-OAM-XL__0.1.nequip.pth', device='cuda', chemical_species_to_atom_type_map=True)",
       "weight_dtype": "float32",
       "matmul_precision": "fp32",
       "precision_settable": false,
