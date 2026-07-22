@@ -73,6 +73,10 @@ there was nothing to change.
 
 The paths to the model config files are:
 
+```
+paper_configs/md_timings/model_calculators.json
+updated_configs/md_timings/model_calculators.json
+```
 
 Differences between paper and updated model config files:
 
@@ -87,9 +91,7 @@ Differences between paper and updated model config files:
 
 ## Benchmark systems
 
-Reference trajectories span several system types (see
-`e_f_rmses/compute_mean_rmses_by_system_type.py` for the exact
-classification):
+Reference trajectories span several system types:
 
 - **Pure metals** — bulk Ag (600 K), Au (1500 K), Cu (1000 K)
 - **Metal alloys** — CuAu (500 K), CuZrAl (1500 K), LiMgAlZnSn (600/900 K),
@@ -102,10 +104,7 @@ classification):
   only
 - **Hydrogen** — H at 1050 K — `updated_configs` only
 
-`paper_configs` covers the first five categories. Its system-type tables list
-no hydrogen or metal–water interface category, and because its scripts
-discover systems by scanning the trajectory directory, both are also excluded
-by name (`EXCLUDED_SYSTEMS`) so a stray directory cannot pull them back in.
+`paper_configs` covers the first five categories.
 
 Per-system settings (temperature, stride, timestep) are recorded in each
 analysis directory's `*_settings_ref.csv`.
