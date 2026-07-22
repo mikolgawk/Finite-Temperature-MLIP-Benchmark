@@ -26,7 +26,7 @@ The main differences between the two:
   `dtype_note` explaining how that was established.
 - **Checkpoints.** `mattersim-v1-1M` → `mattersim-v1-5M`; `grace-oam` moves
   from the shipped fp64 `GRACE-2L-OMAT-large-ft-AM` to an offline-recast fp32
-  artifact. `grace-mp` remains the one fp64 model in the updated catalog and
+  artifact. `grace-mp` remains the one fp64 model in the updated model config and
   is flagged as not precision-matched.
 - **MD settings.** `paper_configs` runs 80 000 steps × 0.25 fs (20 ps),
   recording every 10th frame, with `tdamp = 100 × timestep`, and excludes the
@@ -52,6 +52,13 @@ paper and appear only in the updated tree.
 
 
 #### `md_production`
+
+The paths to the model config files are:
+
+```
+paper_configs/md_production/model_calculators.json
+updated_configs/md_production/model_calculators.json
+```
 
 Calculator expressions that differ between the trees:
 
@@ -195,7 +202,7 @@ the accompanying paper from the CSVs each pipeline stage produces.
 ## Requirements
 
 MLIP evaluation depends on the packages named in the `package` field of each
-catalog entry (`chgnet`, `fairchem-core`, `tensorpotential`, `mace-torch`,
+model config entry (`chgnet`, `fairchem-core`, `tensorpotential`, `mace-torch`,
 `mattersim`, `nequip`, `orb-models`, `upet`), plus `ase`, `numpy`, `pandas`,
 `scipy`, `matplotlib`, `seaborn`, and `mdtraj` for the analysis/plotting
 stages. Models need mutually incompatible dependency sets, so one environment
