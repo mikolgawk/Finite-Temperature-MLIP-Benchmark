@@ -36,6 +36,7 @@ OUTPUT_DIR = '../data/output-trajs-timings-updated/'
 SKIP_SYSTEMS = [
     'anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene',
     'H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP',
+    'bulkLiMgAlZnSn_600K_J_Schmidt_VASP', 'bulkLiMgAlZnSn_900K_J_Schmidt_VASP',
 ]
 
 MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')

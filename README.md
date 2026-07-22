@@ -109,7 +109,9 @@ timestep, `tdamp = 25 fs`, every step recorded, over a reduced system set
 (molecular crystals, `H_1050K_Rupp_QE` and `Pt111w24H2O_380K_Heenen_VASP` are
 skipped) — and wrap `dyn.run(n_steps)` in a CUDA-synchronized
 `time.perf_counter()`, writing `md_timing_<model>.csv` alongside the
-trajectory. They differ in what falls inside the clock:
+trajectory. The updated tree additionally skips
+`bulkLiMgAlZnSn_600K_J_Schmidt_VASP` and `bulkLiMgAlZnSn_900K_J_Schmidt_VASP`,
+so those two LiMgAlZnSn systems are timed only in `paper_configs`. They differ in what falls inside the clock:
 
 - `paper_configs` times the whole 0.2 ps from the first step, so one-time
   costs (CUDA kernel autotune, first-call compilation, lazily built neighbour
