@@ -1,6 +1,6 @@
 # Finite-Temperature MLIP Benchmark
 
-Benchmarking suite for evaluating (MLIPs) under finite-temperature molecular dynamics. For a panel of
+Benchmarking suite for evaluating MLIPs under finite-temperature molecular dynamics. For a panel of
 foundation MLIPs, the pipeline runs NVT MD on a set of reference systems and
 compares the resulting trajectories to AIMD reference trajectories along four
 axes: energy/force accuracy, pressure, radial distribution functions (RDFs),
@@ -13,8 +13,8 @@ twice, under two top-level directories:
 
 | Tree | What it is |
 | --- | --- |
-| `paper_configs/` | The configurations that produced the results on arxiv. |
-| `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints. Where new work goes. |
+| `paper_configs/` | The pipeline that produced the results on arxiv. |
+| `updated_configs/` | The revised pipeline — audited numerical precision, refreshed checkpoints. Where new work goes. |
 
 The main differences between the two:
 
