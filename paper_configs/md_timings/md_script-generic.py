@@ -1,4 +1,4 @@
-'''
+﻿'''
 Generic MD timing script: reads trajectory files, extracts temperatures, and runs a
 short NVT MD benchmark using a calculator selected at runtime from
 model_calculators.json.
@@ -30,7 +30,7 @@ NVT_CUAU_TIMESTEP = 2.0  # fs
 NVT_TAU = 25.0  # fs
 NVT_RECORD_INTERVAL = 1
 
-TRAJ_DIR = '../ref-trajs/'
+TRAJ_DIR = '../data/ref-trajs/'
 OUTPUT_DIR = '../data/output-trajs-timings-paper/'
 SKIP_SYSTEMS = [
     'anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene',
@@ -96,10 +96,10 @@ def read_trajectory(file_path):
     '''Reads a trajectory file and returns a list of ASE Atoms objects.'''
     try:
         frames = read(file_path, index=':')
-        print(f"  ✓ Read {len(frames)} frames from {file_path}")
+        print(f"  âœ“ Read {len(frames)} frames from {file_path}")
         return frames
     except Exception as e:
-        print(f"  ✗ Error reading {file_path}: {e}")
+        print(f"  âœ— Error reading {file_path}: {e}")
         return []
 
 
@@ -137,7 +137,7 @@ def extract_temperatures(directories):
             temperature = int(match.group(1))
             data.append({'Directory': dir_name, 'Temperature': temperature})
         else:
-            print(f"  ⚠ No temperature found in directory name: {dir_name}")
+            print(f"  âš  No temperature found in directory name: {dir_name}")
 
     df = pd.DataFrame(data)
     df.to_csv('temperatures.csv', index=False)
@@ -192,9 +192,9 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
     elapsed_seconds = time.perf_counter() - start_time
     seconds_per_step = elapsed_seconds / n_steps if n_steps else np.nan
 
-    print(f"  ✓ Simulation complete: {len(traj_frames)} frames recorded")
+    print(f"  âœ“ Simulation complete: {len(traj_frames)} frames recorded")
     print(
-        f"  ✓ MD simulation time: {elapsed_seconds:.2f} s "
+        f"  âœ“ MD simulation time: {elapsed_seconds:.2f} s "
         f"({seconds_per_step:.6f} s/step)"
     )
 
@@ -213,7 +213,7 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
         'elapsed_seconds': elapsed_seconds,
         'seconds_per_step': seconds_per_step,
     }]).to_csv(timing_file, index=False)
-    print(f"  ✓ Saved MD timing to {timing_file}")
+    print(f"  âœ“ Saved MD timing to {timing_file}")
 
     return traj_frames
 
@@ -234,15 +234,15 @@ def main():
 
     print(f"\nInitializing calculator '{model_name}'...")
     calculator = build_calculator(catalog[model_name])
-    print(f"  ✓ Loaded {model_name}")
+    print(f"  âœ“ Loaded {model_name}")
 
     file_names, directories = get_file_names()
 
     if not file_names:
-        print("\n⚠ No trajectory files found!")
+        print("\nâš  No trajectory files found!")
         return
 
-    print(f"\n✓ Found {len(file_names)} trajectory file(s)\n")
+    print(f"\nâœ“ Found {len(file_names)} trajectory file(s)\n")
 
     print("Extracting temperatures from directory names...")
     extract_temperatures(directories)
@@ -252,7 +252,7 @@ def main():
     print(f"{'='*70}\n")
 
     for file_path in file_names:
-        print(f"\n📁 Processing: {file_path}")
+        print(f"\nðŸ“ Processing: {file_path}")
         parent_dir = os.path.basename(os.path.dirname(file_path))
 
         if any(s in parent_dir for s in SKIP_SYSTEMS):
@@ -265,12 +265,12 @@ def main():
 
         frames = read_trajectory(file_path)
         if not frames:
-            print("  ⚠ Skipping due to read error")
+            print("  âš  Skipping due to read error")
             continue
 
         match = re.search(r'(\d+)K', parent_dir)
         if not match:
-            print("  ⚠ Cannot extract temperature from directory name")
+            print("  âš  Cannot extract temperature from directory name")
             continue
 
         tempK = int(match.group(1))
@@ -283,7 +283,7 @@ def main():
         file_path_output = os.path.basename(os.path.dirname(file_path))
         nvt_output = f'{OUTPUT_DIR}{file_path_output}/nvt_{model_name}.extxyz'
         if os.path.exists(nvt_output):
-            print(f"  ⚠ NVT trajectory already exists: {nvt_output}, skipping simulation.")
+            print(f"  âš  NVT trajectory already exists: {nvt_output}, skipping simulation.")
             continue
 
         if os.path.basename(file_path) in ('isolated_atom_C.xyz', 'isolated_atom_H.xyz'):
@@ -303,12 +303,12 @@ def main():
 
         try:
             write(nvt_output, nvt_frames)
-            print(f"  ✓ Saved NVT trajectory to {nvt_output}")
+            print(f"  âœ“ Saved NVT trajectory to {nvt_output}")
         except Exception as e:
-            print(f"  ✗ Error saving trajectory: {e}")
+            print(f"  âœ— Error saving trajectory: {e}")
 
     print(f"\n{'='*70}")
-    print("✓ Timing benchmark complete!")
+    print("âœ“ Timing benchmark complete!")
     print(f"{'='*70}\n")
 
 

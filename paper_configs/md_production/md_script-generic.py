@@ -1,4 +1,4 @@
-'''
+﻿'''
 Generic MD script: reads trajectory files, extracts temperatures, and runs NVT MD
 using a calculator selected at runtime from model_calculators.json.
 
@@ -31,7 +31,7 @@ TDAMP_MULTIPLIER = 100.0
 SKIP_SYSTEMS = ['anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene']
 
 # Systems outside the paper panel. Trajectories are discovered by scanning
-# ../ref-trajs/, so these are excluded by name in case they are present there.
+# ../data/ref-trajs/, so these are excluded by name in case they are present there.
 EXCLUDED_SYSTEMS = ['H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP']
 
 MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.json')
@@ -76,14 +76,14 @@ def read_trajectory(file_path):
     '''Reads a trajectory file and returns a list of ASE Atoms objects.'''
     try:
         frames = read(file_path, index=':')
-        print(f"  ✓ Read {len(frames)} frames from {file_path}")
+        print(f"  âœ“ Read {len(frames)} frames from {file_path}")
         return frames
     except Exception as e:
-        print(f"  ✗ Error reading {file_path}: {e}")
+        print(f"  âœ— Error reading {file_path}: {e}")
         return []
 
 
-def get_file_names(directory='../ref-trajs/', extension='.extxyz'):
+def get_file_names(directory='../data/ref-trajs/', extension='.extxyz'):
     '''Gets a list of file names with a specific extension from subdirectories.'''
     directories = [d for d in os.listdir(directory)
                    if os.path.isdir(os.path.join(directory, d))]
@@ -117,7 +117,7 @@ def extract_temperatures(directories):
             temperature = int(match.group(1))
             data.append({'Directory': dir_name, 'Temperature': temperature})
         else:
-            print(f"  ⚠ No temperature found in directory name: {dir_name}")
+            print(f"  âš  No temperature found in directory name: {dir_name}")
 
     df = pd.DataFrame(data)
     df.to_csv('temperatures.csv', index=False)
@@ -147,8 +147,8 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
     )
 
     file_path_output = os.path.basename(os.path.dirname(file_path))
-    os.makedirs(f'../mlip-trajs/{file_path_output}/', exist_ok=True)
-    log_file = f'../mlip-trajs/{file_path_output}/md_{calculator_name}.log'
+    os.makedirs(f'../data/mlip-trajs/{file_path_output}/', exist_ok=True)
+    log_file = f'../data/mlip-trajs/{file_path_output}/md_{calculator_name}.log'
     print(log_file)
     dyn.attach(
         MDLogger(dyn, atoms, log_file, header=True, stress=False,
@@ -171,13 +171,13 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
     elapsed_seconds = time.perf_counter() - start_time
     seconds_per_step = elapsed_seconds / n_steps if n_steps else np.nan
 
-    print(f"  ✓ Simulation complete: {len(traj_frames)} frames recorded")
+    print(f"  âœ“ Simulation complete: {len(traj_frames)} frames recorded")
     print(
-        f"  ✓ MD simulation time: {elapsed_seconds:.2f} s "
+        f"  âœ“ MD simulation time: {elapsed_seconds:.2f} s "
         f"({seconds_per_step:.6f} s/step)"
     )
 
-    timing_file = f'../mlip-trajs/{file_path_output}/md_timing_{calculator_name}.csv'
+    timing_file = f'../data/mlip-trajs/{file_path_output}/md_timing_{calculator_name}.csv'
     pd.DataFrame([{
         'calculator': calculator_name,
         'source_file': file_path,
@@ -189,7 +189,7 @@ def nvt_simulation(init_structure, temperature, n_steps, time_step,
         'elapsed_seconds': elapsed_seconds,
         'seconds_per_step': seconds_per_step,
     }]).to_csv(timing_file, index=False)
-    print(f"  ✓ Saved MD timing to {timing_file}")
+    print(f"  âœ“ Saved MD timing to {timing_file}")
 
     return traj_frames
 
@@ -210,15 +210,15 @@ def main():
 
     print(f"\nInitializing calculator '{model_name}'...")
     calculator = build_calculator(catalog[model_name])
-    print(f"  ✓ Loaded {model_name}")
+    print(f"  âœ“ Loaded {model_name}")
 
     file_names, directories = get_file_names()
 
     if not file_names:
-        print("\n⚠ No trajectory files found!")
+        print("\nâš  No trajectory files found!")
         return
 
-    print(f"\n✓ Found {len(file_names)} trajectory file(s)\n")
+    print(f"\nâœ“ Found {len(file_names)} trajectory file(s)\n")
 
     print("Extracting temperatures from directory names...")
     extract_temperatures(directories)
@@ -228,7 +228,7 @@ def main():
     print(f"{'='*70}\n")
 
     for file_path in file_names:
-        print(f"\n📁 Processing: {file_path}")
+        print(f"\nðŸ“ Processing: {file_path}")
         parent_dir = os.path.basename(os.path.dirname(file_path))
 
         if any(s in parent_dir for s in SKIP_SYSTEMS):
@@ -241,12 +241,12 @@ def main():
 
         frames = read_trajectory(file_path)
         if not frames:
-            print("  ⚠ Skipping due to read error")
+            print("  âš  Skipping due to read error")
             continue
 
         match = re.search(r'(\d+)K', parent_dir)
         if not match:
-            print("  ⚠ Cannot extract temperature from directory name")
+            print("  âš  Cannot extract temperature from directory name")
             continue
 
         tempK = int(match.group(1))
@@ -256,9 +256,9 @@ def main():
         print(f"Temperature: {tempK} K")
 
         file_path_output = os.path.basename(os.path.dirname(file_path))
-        nvt_output = f'../mlip-trajs/{file_path_output}/nvt_{model_name}.extxyz'
+        nvt_output = f'../data/mlip-trajs/{file_path_output}/nvt_{model_name}.extxyz'
         if os.path.exists(nvt_output):
-            print(f"  ⚠ NVT trajectory already exists: {nvt_output}, skipping simulation.")
+            print(f"  âš  NVT trajectory already exists: {nvt_output}, skipping simulation.")
             continue
 
         if os.path.basename(file_path) in ('isolated_atom_C.xyz', 'isolated_atom_H.xyz'):
@@ -278,12 +278,12 @@ def main():
 
         try:
             write(nvt_output, nvt_frames)
-            print(f"  ✓ Saved NVT trajectory to {nvt_output}")
+            print(f"  âœ“ Saved NVT trajectory to {nvt_output}")
         except Exception as e:
-            print(f"  ✗ Error saving trajectory: {e}")
+            print(f"  âœ— Error saving trajectory: {e}")
 
     print(f"\n{'='*70}")
-    print("✓ Analysis complete!")
+    print("âœ“ Analysis complete!")
     print(f"{'='*70}\n")
 
 

@@ -34,8 +34,8 @@ MODEL_CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'model_calculators.
 # systems use VASP references).
 # Systems with no entry here are evaluated without any energy correction.
 _AROMATIC_ISOLATED_ATOMS = {
-    'C': '../ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_C.extxyz',
-    'H': '../ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_H.extxyz',
+    'C': '../data/ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_C.extxyz',
+    'H': '../data/ref-trajs/naphthalene_295K_Sharma_S/isolated_atom_H.extxyz',
 }
 ISOLATED_ATOM_FILES = {
     name: _AROMATIC_ISOLATED_ATOMS for name in
@@ -43,7 +43,7 @@ ISOLATED_ATOM_FILES = {
 }
 
 # Systems outside the paper panel. Trajectories are discovered by scanning
-# ../ref-trajs/, so these are excluded by name in case they are present there.
+# ../data/ref-trajs/, so these are excluded by name in case they are present there.
 EXCLUDED_SYSTEMS = ['H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP']
 
 # Global dictionary to track issues
@@ -91,7 +91,7 @@ def read_trajectory(file_path, debug=False):
         return None
 
 
-def get_file_names(directory='../ref-trajs/', extension='.extxyz', prefix='traj'):
+def get_file_names(directory='../data/ref-trajs/', extension='.extxyz', prefix='traj'):
     """Recursive search for trajectory files."""
     base_path = Path(directory)
 
@@ -374,7 +374,7 @@ def main():
             print(f"   ↳ Skipping {parent_dir} (not part of the paper panel).")
             continue
 
-        local_output_dir = Path('../outputs') / parent_dir
+        local_output_dir = Path('../data/outputs') / parent_dir
         local_output_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"   ↳ Saving results to: {local_output_dir}")

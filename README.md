@@ -168,8 +168,9 @@ covering the `SYSTEM` × `MODEL_NAME` submission grid (but importantly molcular 
 ```
 data/ref-trajs/<system>/traj.extxyz     Reference AIMD trajectories
 data/mlip-trajs-20fs-tau/<system>/      MD output, written by `updated` md_production
-data/mlip-trajs/<system>/
-`paper` md_production
+data/mlip-trajs/<system>/               MD output, written by `paper` md_production
+data/output-trajs-timings-updated/      Timing output, written by `updated` md_timings
+data/output-trajs-timings-paper/        Timing output, written by `paper` md_timings
 data/models/                            Local model checkpoints
 ```
 
