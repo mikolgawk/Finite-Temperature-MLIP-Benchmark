@@ -16,7 +16,7 @@ twice, under two top-level directories:
 | `paper_configs/` | The configurations that produced the results on arxiv. |
 | `updated_configs/` | The revised panel — audited numerical precision, refreshed checkpoints. Where new work goes. |
 
-The differences between the two:
+The main differences between the two:
 
 - **Precision.** `paper_configs` ran each model at whatever its constructor
   defaulted to or at fp64 (`mace_mp(default_dtype='float64')`,
@@ -35,22 +35,21 @@ The differences between the two:
   H-containing systems, 2.0 fs for CuAu), records every step, and uses a
   fixed 20 fs `tdamp` for all systems.
 
-### Model catalogs
+### Model config files
 
 Each stage carries a `model_calculators.json` declaring, per model, the
 imports needed and a self-contained Python expression that constructs the ASE
-calculator. The catalog is what `MODEL_NAME` selects from at runtime.
+calculator. The config file is what `MODEL_NAME` selects from at runtime.
+
+
+
+
 
 The trees also differ in panel size: `paper_configs` covers 15 models,
 `updated_configs` 17 — `orb-v3-direct` and `pet-omat-xl` were added after the
 paper and appear only in the updated tree.
 
-The stage catalogs are not all copies of one another, so the paper→updated
-comparison depends on which stage you look at. Within `updated_configs`, the
-`md_production`, `e_f_rmses` and `md_timings` catalogs are byte-identical to
-each other and only `pressures` deviates. Within `paper_configs`,
-`md_production`, `e_f_rmses` and `pressures` are byte-identical and
-`md_timings` is its own variant.
+
 
 #### `md_production`
 
@@ -72,38 +71,19 @@ there was nothing to change.
 
 #### `md_timings`
 
-The gap here is much narrower, because `paper_configs/md_timings` had already
-diverged from its own `md_production` catalog in the fp32 direction: MACE at
-`default_dtype='float32'`, ORB at `precision='float32-high'`, and MatterSim
-pinned to `MatterSim-v1.0.0-1M.pth` rather than left to the implicit default.
-The paper's *timing* numbers were therefore measured at close to the updated
-tree's precision, unlike the paper's *production* MD. In `updated_configs`
-that split is gone — its `md_timings` catalog is identical to its
-`md_production` one.
+The paths to the model config files are:
 
-What still differs between the trees for this stage:
+
+Differences between paper and updated model config files:
 
 - `chgnet` — `stress_weight=0.01` dropped.
 - `grace-oam` — fp64 `grace_fm(...)` → the recast fp32 `TPCalculator(...)`.
 - MatterSim — `mattersim-v1-1M` → `mattersim-v1-5M`
   (`MatterSim-v1.0.0-5M.pth`).
 - `pet-oam-xl` — `dtype=torch.float32` pinned explicitly.
-- `nequip` — checkpoint path moves under `../data/models/`.
 - `orb-v3-direct`, `pet-omat-xl` — present only in the updated tree.
 
-Every entry the two panels share apart from those is unchanged here — MACE and
-ORB included, which is true of no other stage.
 
-The schema differs as well. `paper_configs` entries carry only `name`,
-`package`, `imports`, `calculator_expr` and a `<package>_version`.
-`updated_configs` adds the precision audit — `weight_dtype`,
-`matmul_precision`, `precision_settable`, `weight_dtype_verified`, `verified`
-(`source` / `runtime-probe` / `unverified`) and a prose `dtype_note` recording
-what was measured and what was retracted — plus `conversion` where a
-checkpoint was recast, `nequip_artifact`, `probe_checkpoint`, and a top-level
-`shared_notes` block that entries reference via `shared_note_ref` (the UMA
-inference-settings note is shared by both UMA entries). That is why the
-updated catalogs are ~20 KB against ~6 KB.
 
 ## Benchmark systems
 
