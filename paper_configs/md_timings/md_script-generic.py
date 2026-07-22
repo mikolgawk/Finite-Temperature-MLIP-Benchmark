@@ -31,7 +31,7 @@ NVT_TAU = 25.0  # fs
 NVT_RECORD_INTERVAL = 1
 
 TRAJ_DIR = '../ref-trajs/'
-OUTPUT_DIR = '../output-trajs-timings-paper/'
+OUTPUT_DIR = '../data/output-trajs-timings-paper/'
 SKIP_SYSTEMS = [
     'anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene',
     'H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP',

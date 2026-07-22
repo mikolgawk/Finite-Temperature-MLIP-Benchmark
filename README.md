@@ -107,12 +107,7 @@ trajectory. They differ in what falls inside the clock:
   per-step cost, with the startup transient excluded rather than averaged in.
   The CSV carries an extra `warmup_steps` column recording this.
 
-The practical consequence: paper-tree numbers are biased upward on a 0.2 ps
-run (the fixed startup cost is spread over only ~200 steps), and the bias is
-larger for models with heavier compilation or first-call setup. The two sets
-should not be compared against each other directly.
-
-Output goes to `../output-trajs-timings-paper/` and
+Output goes to `../data/output-trajs-timings-paper/` and
 `../data/output-trajs-timings-updated/` respectively.
 
 
@@ -143,21 +138,17 @@ analysis directory's `*_settings_ref.csv`.
 Both trees use the same pipeline names:
 
 ```
-md_production/   NVT MD production runs for every model/system pair; also
-                 emits per-step timing alongside each trajectory.
+md_production/   NVT MD production runs for every model/system pair.
 md_timings/      Standalone timing harness sharing the same MD driver: a
-                 short 0.2 ps run with a warm-up fraction excluded from the
-                 timed region, over a reduced system set.
+                 short 0.2 ps run over a reduced system set.
 e_f_rmses/       Energy/force RMSE of each MLIP against reference AIMD
                  trajectories, with per-system isolated-atom energy
-                 corrections, per-system-type aggregation, and figures
-                 (figure_2, figure_SI_2/3/4).
+                 corrections and per-system-type aggregation.
 pressures/       Per-frame stress and trajectory-averaged pressure, matched
                  to reference trajectories by simulated time, plus error
-                 aggregation and figures (figure_4, figure_SI_4/6/15).
+                 aggregation.
 rdfs/            Radial distribution functions from MLIP vs. reference
-                 trajectories (via MDTraj), matched by simulation length,
-                 plus figures (fig_3, figure_SI_14).
+                 trajectories (via MDTraj), matched by simulation length.
 vdos/            Vibrational density of states via the Fourier transform of
                  the velocity autocorrelation function (Hann-windowed),
                  matched by simulation length, with normalization/plotting.
@@ -168,7 +159,7 @@ Additionally, `paper_configs/md_production/molecular_crystals_ipi/generic/`
 holds the unified i-PI harness used for the five molecular crystals, which
 run under i-PI rather than the ASE driver. It has its own
 [README](paper_configs/md_production/molecular_crystals_ipi/generic/README.md)
-covering the `SYSTEM` × `MODEL_NAME` submission grid.
+covering the `SYSTEM` × `MODEL_NAME` submission grid (but importantly molcular crystals are excluded from `md_timings`).
 
 ## Data layout
 
