@@ -44,7 +44,7 @@ The four stages that build a calculator — `md_production`, `md_timings`,
 `e_f_rmses` and `pressures` — each carry a `model_calculators.json` declaring,
 per model, the imports needed and a self-contained Python expression that
 constructs the ASE calculator. `rdfs` and `vdos` read trajectories off disk and
-have no catalog.
+have no model config file.
 
 
 The two trees also differ in panel size: `paper_configs` covers 15 models,
@@ -98,7 +98,7 @@ Differences between paper and updated model config files:
 - `pet-oam-xl` — `dtype=torch.float32` pinned explicitly.
 - `orb-v3-direct`, `pet-omat-xl` — present only in the updated tree.
 
-MACE and ORB do **not** differ in this stage: the paper catalog runs them at
+MACE and ORB do **not** differ in this stage: the paper model config file runs them at
 `default_dtype='float32'` and `precision='float32-high'`, matching the updated
 tree, so the two timing sets are taken at the same precision.
 
@@ -129,7 +129,7 @@ paper_configs/e_f_rmses/model_calculators.json
 updated_configs/e_f_rmses/model_calculators.json
 ```
 
-Within each tree this catalog matches that tree's `md_production` catalog
+Within each tree this model config file matches that tree's `md_production` model config file
 entry for entry — the RMSEs are evaluated with exactly the calculators that
 produced the trajectories. So the paper/updated differences are the ones in the
 `md_production` table above.
@@ -147,18 +147,15 @@ updated_configs/pressures/model_calculators.json
 What is specific to this stage:
 
 - `chgnet` — `compute_stress=True` in **both** trees. These are the only two
-  entries anywhere that turn stress on; every other catalog sets
+  entries anywhere that turn stress on; every other model config file sets
   `compute_stress=False`. The stage needs the stress tensor and CHGNet only
   returns it when asked. The trees differ in the neighbouring flags: the paper
   copy also sets `compute_hessian=True`, the updated one leaves it `False`, and
   the paper copy drops `stress_weight` here (unlike its other stages).
-- Every checkpoint path in both catalogs resolves under `../data/models/`,
+- Every checkpoint path in both model config files resolves under `../data/models/`,
   including `nequip`'s `compile_path`.
 
-Only `updated_configs` ships a pressure script; the paper tree carries the
-catalog with no script to feed it. The script skips any system whose directory
-starts with `Pt111w24H2O_` — a slab in a padded cell, where a cell-averaged
-pressure is not a meaningful quantity to compare.
+`Pt111w24H2O` is excluded from the pressure calculations.
 
 
 
@@ -209,14 +206,6 @@ vdos/            Vibrational density of states via the Fourier transform of
                  `updated_configs` only.
 ```
 
-New analysis work goes in `updated_configs`.
-
-Alongside the analysis scripts, each stage carries the plotting scripts for
-the figures it produces — `figure_2.py`, `fig_3.py`, `figure_4.py` and the
-`figure_SI_*.py` set — plus the aggregation steps they read from
-(`compute_mean_rmses_by_system_type.py`, `get_model_pressure_errors.py`,
-`get_normalized_VDOS.py`).
-
 Additionally, `paper_configs/md_production/molecular_crystals_ipi/generic/`
 holds the unified i-PI harness used for the five molecular crystals, which
 run under i-PI rather than the ASE driver. It has its own
@@ -239,14 +228,6 @@ data/output-trajs-timings-updated/      Timing output, written by `updated` md_t
 data/output-trajs-timings-paper/        Timing output, written by `paper` md_timings
 data/models/                            Local model checkpoints
 ```
-
-The updated tree keeps to this convention throughout: its scripts reference
-only their own directory or `../data/`. The paper tree is less consistent and
-needs editing before it will run elsewhere —
-`paper_configs/rdfs/get-rdf-and-results-by-system-type-same-simulation-length.py`
-and `fig_3.py` still carry absolute `/home/mjgawkowski/…` paths, and
-`paper_configs/e_f_rmses/compute_mean_rmses_by_system_type.py` reads a
-stage-local `data/` where its updated counterpart reads `../data/`.
 
 ## Usage
 
