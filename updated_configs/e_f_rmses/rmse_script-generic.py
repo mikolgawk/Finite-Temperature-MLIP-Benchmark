@@ -357,6 +357,9 @@ def main():
                              'directory that the figure scripts read from. Relative '
                              'paths resolve against this script.')
     parser.add_argument('--bins', type=int, default=50)
+    parser.add_argument('--force', action='store_true',
+                        help='Recompute even if this model\'s summary CSV already '
+                             'exists (default: skip models already done).')
     args = parser.parse_args()
 
     # Setup global output directory. By default the per-model summary CSV lands
@@ -382,6 +385,16 @@ def main():
     catalog = load_model_catalog()
     if model_name not in catalog:
         raise SystemExit(f"Set MODEL_NAME to one of: {', '.join(sorted(catalog))}")
+
+    # Skip models whose summary CSV already exists (lets a batch sweep resume
+    # after an interruption without redoing finished models). Checked before the
+    # calculator is built so we don't pay the model-load cost for a skip.
+    # Pass --force to recompute and overwrite.
+    results_path = global_output_dir / f'rmse-results-all_{model_name}.csv'
+    if results_path.exists() and not args.force:
+        print(f"✓ {results_path.name} already exists; skipping {model_name}. "
+              f"Use --force to recompute.")
+        return
 
     try:
         calc = build_calculator(catalog[model_name])
@@ -477,9 +490,8 @@ def main():
                 import traceback
                 traceback.print_exc()
 
-    # Save all results to single CSV
+    # Save all results to single CSV (path resolved above, before evaluation)
     if all_metrics:
-        results_path = global_output_dir / f'rmse-results-all_{calc_name}.csv'
         df = pd.DataFrame(all_metrics)
         df.to_csv(results_path, index=False)
         print(f"\n✓ All results saved to: {results_path}")
