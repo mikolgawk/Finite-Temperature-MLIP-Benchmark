@@ -4,8 +4,10 @@ and computes MLIP energies/forces RMSE against reference data using a
 calculator selected at runtime from model_calculators.json.
 
 Reads reference trajectories from ../data/ref-trajs and saves detailed
-results (plots, metrics) into this script's own outputs/ directory, one
-subdirectory per trajectory.
+per-trajectory results (histograms, comparison plots) into this script's
+own outputs/ directory, one subdirectory per trajectory. The per-model
+summary CSV is written to ../data/ as rmse-results-all_<model>.csv, the
+canonical name the figure and mean-aggregation scripts read.
 
 Usage:
     MODEL_NAME=mace-mpa-0 python rmse_script-generic.py [--debug] [--output-dir results]
@@ -73,7 +75,13 @@ def build_calculator(model_entry):
     namespace = {}
     for import_line in model_entry['imports']:
         exec(import_line, namespace)
-    return eval(model_entry['calculator_expr'], namespace)
+    # Checkpoint paths in the catalog are written relative to this directory
+    # ('../data/...'). Resolve them against DATA_DIR so the calculators load
+    # regardless of the current working directory the script was launched from.
+    # as_posix() keeps forward slashes, avoiding backslash escapes in the
+    # eval'd string literal on non-POSIX shells.
+    expr = model_entry['calculator_expr'].replace('../data/', f'{DATA_DIR.as_posix()}/')
+    return eval(expr, namespace)
 
 
 def log(message, level='info', debug=False):
@@ -247,29 +255,21 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
         counts = Counter(frame.get_chemical_symbols())
         return sum(counts[element] * e0[element] for element in e0)
 
-    # Extract reference data
-    ref_energies = []
-    ref_forces = []
-    for frame in frames_list:
+    # Extract reference data, keyed by frame index so a frame that fails here
+    # drops from the comparison on BOTH sides rather than shifting the pairing.
+    ref_data = {}  # frame index -> (energy, forces array)
+    for i, frame in enumerate(frames_list):
         try:
-            ref_energies.append(frame.get_potential_energy())
-            ref_forces.append(frame.get_forces())
+            ref_data[i] = (frame.get_potential_energy(), frame.get_forces())
         except Exception as e:
-            print(f"Warning: Could not extract reference data from frame: {e}")
+            print(f"Warning: Could not extract reference data from frame {i}: {e}")
             continue
 
-    if not ref_energies:
+    if not ref_data:
         raise ValueError("No valid reference energies found")
 
-    normalized_energies = [
-        energy - isolated_atom_offset(frame, ref_e0)
-        for frame, energy in zip(frames_list, ref_energies)
-    ]
-
-    # Compute MLIP predictions + time FORCE call
-    mlip_energies = []
-    mlip_forces = []
-    mlip_frames = []
+    # Compute MLIP predictions + time FORCE call, also keyed by frame index.
+    mlip_data = {}  # frame index -> (energy, forces array)
     total_force_eval_time_s = 0.0
     successful_force_evals = 0
 
@@ -283,9 +283,7 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
 
             energy = frame.get_potential_energy()
 
-            mlip_energies.append(energy)
-            mlip_forces.append(forces)
-            mlip_frames.append(frame)
+            mlip_data[i] = (energy, forces)
 
             total_force_eval_time_s += (t1 - t0)
             successful_force_evals += 1
@@ -294,22 +292,37 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
             print(f"Warning: Could not compute MLIP predictions for frame {i}: {e}")
             continue
 
-    if len(mlip_energies) != len(ref_energies):
+    # Pair reference and MLIP results only on frames where BOTH succeeded, so a
+    # mid-trajectory failure removes that frame from both arrays instead of
+    # silently misaligning every later frame (positional truncation would not).
+    common_indices = sorted(ref_data.keys() & mlip_data.keys())
+    if not common_indices:
+        raise ValueError("No frames where both reference and MLIP evaluations succeeded")
+
+    if len(common_indices) != len(frames_list):
         print(
-            f"Warning: Mismatch in number of frames - ref: {len(ref_energies)}, "
-            f"mlip: {len(mlip_energies)}"
+            f"Warning: aligned {len(common_indices)}/{len(frames_list)} frames "
+            f"(dropped {len(ref_data) - len(common_indices)} where MLIP failed, "
+            f"{len(mlip_data) - len(common_indices)} where reference failed)"
         )
 
-    normalized_mlip_energies = [
-        energy - isolated_atom_offset(frame, mlip_e0)
-        for frame, energy in zip(mlip_frames, mlip_energies)
-    ]
+    normalized_ref_energies = []
+    normalized_mlip_energies = []
+    forces_ref_list = []
+    forces_mlip_list = []
+    for i in common_indices:
+        frame = frames_list[i]
+        ref_energy, ref_force = ref_data[i]
+        mlip_energy, mlip_force = mlip_data[i]
+        normalized_ref_energies.append(ref_energy - isolated_atom_offset(frame, ref_e0))
+        normalized_mlip_energies.append(mlip_energy - isolated_atom_offset(frame, mlip_e0))
+        forces_ref_list.append(ref_force.flatten())
+        forces_mlip_list.append(mlip_force.flatten())
 
+    energies_normalized_ref = np.array(normalized_ref_energies)
     energies_mlip = np.array(normalized_mlip_energies)
-    energies_normalized_ref = np.array(normalized_energies[:len(normalized_mlip_energies)])
-
-    forces_mlip = np.concatenate([f.flatten() for f in mlip_forces])
-    forces_ref = np.concatenate([f.flatten() for f in ref_forces[:len(mlip_forces)]])
+    forces_ref = np.concatenate(forces_ref_list)
+    forces_mlip = np.concatenate(forces_mlip_list)
 
     natoms = frames_list[0].get_global_number_of_atoms()
     energy_rmse = np.sqrt(np.mean((energies_mlip - energies_normalized_ref)**2)) * (1 / natoms)
@@ -339,13 +352,23 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
 def main():
     parser = argparse.ArgumentParser(description='Evaluate MLIP in-place')
     parser.add_argument('--debug', action='store_true', help='Debug mode')
-    parser.add_argument('--output-dir', type=str, default='results-rmses',
-                        help='Global summary location (relative paths resolve against this script)')
+    parser.add_argument('--output-dir', type=str, default=None,
+                        help='Global summary location. Default: the shared ../data '
+                             'directory that the figure scripts read from. Relative '
+                             'paths resolve against this script.')
     parser.add_argument('--bins', type=int, default=50)
     args = parser.parse_args()
 
-    # Setup global output directory
-    global_output_dir = BASE_DIR / args.output_dir
+    # Setup global output directory. By default the per-model summary CSV lands
+    # in ../data/ under the canonical rmse-results-all_<model>.csv name, which is
+    # exactly what figure_2.py, figure_SI_4.py, and
+    # compute_mean_rmses_by_system_type.py glob for.
+    if args.output_dir is None:
+        global_output_dir = DATA_DIR
+    else:
+        global_output_dir = Path(args.output_dir)
+        if not global_output_dir.is_absolute():
+            global_output_dir = BASE_DIR / global_output_dir
     global_output_dir.mkdir(exist_ok=True, parents=True)
 
     file_paths = get_file_names()
@@ -456,7 +479,7 @@ def main():
 
     # Save all results to single CSV
     if all_metrics:
-        results_path = global_output_dir / f'rmse-results-ref-trajs-{calc_name}.csv'
+        results_path = global_output_dir / f'rmse-results-all_{calc_name}.csv'
         df = pd.DataFrame(all_metrics)
         df.to_csv(results_path, index=False)
         print(f"\n✓ All results saved to: {results_path}")

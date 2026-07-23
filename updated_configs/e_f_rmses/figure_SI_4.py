@@ -65,19 +65,15 @@ def is_molecular_crystal(system):
 
 # Read and aggregate data from per-model RMSE CSV files
 data_dir = BASE_DIR.parent / 'data'
-csv_files = sorted(data_dir.glob('rmse-*.csv'))
+csv_files = sorted(data_dir.glob('rmse-results-all_*.csv'))
 
 if not csv_files:
-    raise FileNotFoundError(f'No rmse-*.csv files found in {data_dir}')
+    raise FileNotFoundError(f'No rmse-results-all_*.csv files found in {data_dir}')
 
 all_frames = []
 for csv_file in csv_files:
     frame = pd.read_csv(csv_file)
-    model_name = csv_file.stem
-    if model_name.startswith('rmse-results-all_'):
-        model_name = model_name.replace('rmse-results-all_', '', 1)
-    elif model_name.startswith('rmse-'):
-        model_name = model_name.replace('rmse-', '', 1)
+    model_name = csv_file.stem.replace('rmse-results-all_', '', 1)
     frame['calculator'] = normalize_calculator_name(model_name)
     all_frames.append(frame)
 

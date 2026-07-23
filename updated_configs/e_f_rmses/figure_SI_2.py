@@ -146,7 +146,9 @@ def main() -> None:
             fig.add_subplot(gs[1, 3:5]),
         ]
     else:
-        fig, axes = plt.subplots(2, 3, figsize=(3.53 * 3, 3.53 * 2), squeeze=False)
+        ncols = 3
+        nrows = (n_panels + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows, ncols, figsize=(3.53 * ncols, 3.53 * nrows), squeeze=False)
         axes_flat = axes.flatten().tolist()
 
     for idx, system_type in enumerate(system_types_to_plot):
