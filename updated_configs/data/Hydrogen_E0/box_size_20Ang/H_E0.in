@@ -1,0 +1,42 @@
+&CONTROL
+    calculation = 'scf',
+    prefix      = 'H_atom',
+    outdir      = './tmp/',
+    pseudo_dir  = './',
+    tprnfor     = .true.,
+    tstress     = .true.,
+/
+
+&SYSTEM
+    ibrav = 0,
+    nat = 1,
+    ntyp = 1,
+
+    ecutwfc = 80.0,
+    ecutrho = 320.0,
+
+    input_dft = 'PBE',
+
+    nspin = 2,
+    tot_magnetization = 1.0,
+
+    occupations = 'fixed',
+/
+
+&ELECTRONS
+    conv_thr = 1.0d-8,
+    mixing_beta = 0.7,
+/
+
+ATOMIC_SPECIES
+H   1.008   H.pbe-kjpaw_psl.1.0.0.UPF
+
+CELL_PARAMETERS angstrom
+20.0   0.0   0.0
+0.0   20.0   0.0
+0.0    0.0  20.0
+
+ATOMIC_POSITIONS angstrom
+H   10.0   10.0   10.0
+
+K_POINTS gamma
