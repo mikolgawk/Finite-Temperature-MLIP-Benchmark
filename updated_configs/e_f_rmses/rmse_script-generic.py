@@ -245,11 +245,11 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
     uncorrected_elements = {
         symbol for frame in frames_list for symbol in frame.get_chemical_symbols()
     } - ref_e0.keys()
-    if uncorrected_elements:
-        print(
-            f"    [WARN] No isolated-atom reference for element(s) "
-            f"{sorted(uncorrected_elements)}; leaving them uncorrected."
-        )
+    # if uncorrected_elements:
+    #     print(
+    #         f"    [WARN] No isolated-atom reference for element(s) "
+    #         f"{sorted(uncorrected_elements)}; leaving them uncorrected."
+    #     )
 
     def isolated_atom_offset(frame, e0):
         counts = Counter(frame.get_chemical_symbols())
