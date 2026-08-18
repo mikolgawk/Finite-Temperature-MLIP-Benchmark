@@ -67,6 +67,8 @@ def build_calculator(model_entry):
 def get_nvt_timestep(system_name, atoms):
     if 'CuAu' in system_name:
         return NVT_CUAU_TIMESTEP
+    if 'Pt111w24H2O' in system_name:
+        return NVT_TIMESTEP
     if 'H' in set(atoms.get_chemical_symbols()):
         return NVT_HYDROGEN_TIMESTEP
     return NVT_TIMESTEP
