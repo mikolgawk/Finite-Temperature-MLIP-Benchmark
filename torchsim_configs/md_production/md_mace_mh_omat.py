@@ -1,9 +1,18 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "torch-sim-atomistic[mace]==0.6.1",
+#   "torch-sim-atomistic[mace,vesin]==0.6.1",
 #   "ase>=3.26",
+#   "torch",
 # ]
+#
+# [[tool.uv.index]]
+# name = "pytorch-cu128"
+# url = "https://download.pytorch.org/whl/cu128"
+# explicit = true
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-cu128" }
 # ///
 """TorchSim NVT production MD — mace-mh-omat.
 
@@ -36,13 +45,14 @@ from ase.io import read
 
 from mace.calculators import mace_mp
 from torch_sim.models.mace import MaceModel
+from torch_sim.neighbors import vesin_nl_ts
 
 # settings
 MODEL_NAME = "mace-mh-omat"
 HERE = Path(__file__).resolve().parent
 DATA_ROOT = HERE.parent.parent / "updated_configs" / "data"
 MODELS_DIR = DATA_ROOT / "models"
-REF_ROOT = DATA_ROOT / "ref-trajs"
+REF_ROOT = HERE.parent / "ref-trajs"
 OUT_ROOT = DATA_ROOT / "mlip-trajs-torchsim"
 
 SIMULATION_LENGTH_PS = 22.0   # NVT_SIMULATION_LENGTH_PS in the ASE script
@@ -62,6 +72,7 @@ model = MaceModel(
     model=mace_mp(model="mh-1", return_raw_model=True, default_dtype="float32"),
     device=device, dtype=torch.float32, compute_forces=True, compute_stress=False,
     head="omat_pbe",
+    neighbor_list_fn=vesin_nl_ts,  # default NVIDIA NL overflows on dense fluids like H at 1050 K
 )
 
 
