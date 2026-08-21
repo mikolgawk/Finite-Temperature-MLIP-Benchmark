@@ -16,7 +16,7 @@
 # ///
 """TorchSim NVT production MD — mace-mh-omat.
 
-Per-system MD parameters come from data/ref-trajs/md_metadata.json, which
+Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json, which
 records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
@@ -49,7 +49,7 @@ from torch_sim.neighbors import vesin_nl_ts
 MODEL_NAME = "mace-mh-omat"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-METADATA_FILE = REPO / "data" / "ref-trajs" / "md_metadata.json"
+METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim"
 
 SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
@@ -96,12 +96,18 @@ for name, meta in METADATA.items():
         integrator = ts.Integrator.nvt_langevin
         init_kwargs = {}
         step_kwargs = {"gamma": 1000.0 / tau_fs}           # 1/tau, in ps^-1
-    else:  # Nose-Hoover
+    elif thermostat == "Nose-Hoover":
         integrator = ts.Integrator.nvt_nose_hoover
         init_kwargs = {"tau": tau_fs / 1000.0,             # ps
                        "chain_length": CHAIN_LENGTH,
                        "chain_steps": CHAIN_STEPS, "sy_steps": SY_STEPS}
         step_kwargs = {}
+    elif thermostat.lower().startswith("velocity"):        # velocity rescaling, Bussi CSVR
+        integrator = ts.Integrator.nvt_vrescale
+        init_kwargs = {}
+        step_kwargs = {"tau": tau_fs / 1000.0}             # ps
+    else:
+        raise SystemExit(f"{name}: unknown thermostat type {thermostat!r} in metadata")
 
     atoms0 = read(init_file, index=0)                      # reference frame 0
     out_dir.mkdir(parents=True, exist_ok=True)
