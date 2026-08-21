@@ -223,10 +223,21 @@ STATE_DTYPE = torch.float32
 device = torch.device("cuda")
 
 # model
-# the fp32-cast artifact used by the ASE benchmark
+# the fp32-cast artifact used by the ASE benchmark; cast from the official fp64 checkpoint on first run
 if not MODEL_PATH.is_dir():
-    raise SystemExit(f"GRACE artifact not found at {MODEL_PATH} — "
-                     "point MODEL_PATH at the fp32-cast SavedModel directory")
+    import glob
+    from types import SimpleNamespace
+    from tensorpotential.calculator.foundation_models import get_or_download_checkpoint
+    from tensorpotential.scripts.grace_utils import cast_model
+    ckpt_dir = get_or_download_checkpoint("GRACE-2L-OMAT-large-ft-AM")
+    ckpt = glob.glob(os.path.join(ckpt_dir, "*.index"))[0].removesuffix(".index")
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    os.chdir(MODEL_PATH.parent)
+    cast_model(SimpleNamespace(potential=os.path.join(ckpt_dir, "model.yaml"),
+                               checkpoint_path=ckpt, output_suffix="-fp32",
+                               curr="fp64", to="fp32"))
+    os.replace("casted_model", MODEL_PATH.name)
+    os.chdir(HERE)
 model = GraceModel(
     model=TPCalculator(str(MODEL_PATH), float_dtype="float32"),
     device=device, dtype=STATE_DTYPE, compute_stress=False,
