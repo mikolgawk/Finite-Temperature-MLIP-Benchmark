@@ -4,6 +4,8 @@
 #   "torch-sim-atomistic[mace,vesin]==0.6.1",
 #   "ase>=3.26",
 #   "torch",
+#   "cuequivariance-torch>=0.4",
+#   "cuequivariance-ops-torch-cu12",
 # ]
 #
 # [[tool.uv.index]]
@@ -56,6 +58,7 @@ SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1
 SY_STEPS = 3
+ACCELERATION = True           # cuEquivariance fused CUDA kernels for MACE
 SEED = 42                     # Maxwell-Boltzmann velocity seed
 STATE_DTYPE = torch.float32
 
@@ -67,6 +70,7 @@ model = MaceModel(
     model=mace_mp(model="mh-1", return_raw_model=True, default_dtype="float32"),
     device=device, dtype=torch.float32, compute_forces=True, compute_stress=False,
     head="omat_pbe",
+    enable_cueq=ACCELERATION,
     neighbor_list_fn=vesin_nl_ts,  # default NVIDIA NL overflows on dense fluids like H at 1050 K
 )
 
@@ -153,7 +157,7 @@ for name, meta in METADATA.items():
                          "tau_fs": tau_fs, "record_interval": stride,
                          "elapsed_seconds": f"{elapsed:.2f}",
                          "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                         "engine": "torch-sim-0.6.1", "seed": SEED})
+                         "engine": f"torch-sim-0.6.1{'+cueq' if ACCELERATION else ''}", "seed": SEED})
     print(f"[{MODEL_NAME}] {name}: saved {out_h5} "
           f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)")
 
