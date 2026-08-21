@@ -1,24 +1,18 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "torch-sim-atomistic[fairchem]==0.6.1",
+#   "torch-sim-atomistic==0.6.1",
+#   "fairchem-core>=2.20.0",
 #   "ase>=3.26",
-#   "torch",
 # ]
-#
-# [[tool.uv.index]]
-# name = "pytorch-cu128"
-# url = "https://download.pytorch.org/whl/cu128"
-# explicit = true
-#
-# [tool.uv.sources]
-# torch = { index = "pytorch-cu128" }
 # ///
 """TorchSim NVT production MD — uma-s-omat.
 
-Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json, which
-records how each reference AIMD was run. The trajectory is saved as HDF5
-with positions and velocities:
+Port of updated_configs/md_production/md_script-generic.py: same protocol
+(Nose-Hoover chain, tchain=1, tdamp=20 fs, 22 ps, per-system timestep,
+temperature from the system directory name, initial structure = reference
+frame 0), run on torch-sim's GPU integrator. The trajectory is saved as HDF5 with
+positions and velocities every RECORD_INTERVAL steps:
 
     <OUT_ROOT>/<system>/nvt_uma-s-omat.h5
 
@@ -78,7 +72,7 @@ if ACCELERATION:
 
     pretrained_mlip.get_predict_unit = _accelerated
 
-model = FairChemModel(model="uma-s-1p1", task_name="omat", device=device, compute_stress=True)
+model = FairChemModel(model="uma-s-1p1", task_name="omat", device=device, compute_stress=False)
 
 # NVT MD loop, one entry per system in the metadata file
 METADATA = json.loads(METADATA_FILE.read_text())
