@@ -7,6 +7,7 @@
 #   "torch==2.4.1",
 #   "torch-scatter",               # runtime imports of fairchem v1, undeclared there
 #   "torch-sparse",
+#   "scipy<1.17",                # fairchem-core 1.10 imports the removed scipy.special.sph_harm
 #   "ase>=3.26",
 # ]
 #

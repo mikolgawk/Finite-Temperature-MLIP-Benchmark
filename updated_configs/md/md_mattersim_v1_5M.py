@@ -3,7 +3,8 @@
 # dependencies = [
 #   "torch-sim-atomistic[mattersim]==0.6.1",
 #   "ase>=3.26",
-#   "torch",
+#   "torch==2.11.0+cu128",
+#   "torchvision==0.26.0+cu128",
 # ]
 #
 # [[tool.uv.index]]
@@ -13,6 +14,7 @@
 #
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
+# torchvision = { index = "pytorch-cu128" }
 # ///
 """TorchSim NVT production MD — mattersim-v1-5M.
 

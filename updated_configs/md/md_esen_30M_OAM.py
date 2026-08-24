@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.12,<3.13"  # torch 2.4.1+cu124 supplies wheels only through CPython 3.12
 # dependencies = [
 #   "torch-sim-atomistic==0.5.2",  # 0.6.1 needs torch>=2.8, fairchem 1.x pins <2.5;
 #                                  # 0.5.2 has the same integrate API incl. nvt_vrescale
@@ -7,6 +7,7 @@
 #   "torch==2.4.1",
 #   "torch-scatter",               # runtime imports of fairchem v1, undeclared there
 #   "torch-sparse",
+#   "scipy<1.17",                # fairchem-core 1.10 imports the removed scipy.special.sph_harm
 #   "ase>=3.26",
 # ]
 #
