@@ -2,6 +2,7 @@
   "anthracene_293K_Sharma_S": {
     "initfile_path": "data/ref-trajs/anthracene_293K_Sharma_S/traj.extxyz",
     "n_frames": 16000,
+    "trajectory_length_ps": 8.0,
     "temperature": 293,
     "timestep": 0.5,
     "timestep_units": "fs",
@@ -16,6 +17,7 @@
   "bulkAg_600K_Kapil": {
     "initfile_path": "data/ref-trajs/bulkAg_600K_Kapil/traj.extxyz",
     "n_frames": 24881,
+    "trajectory_length_ps": 24.881,
     "temperature": 600,
     "timestep": 1,
     "timestep_units": "fs",
@@ -30,6 +32,7 @@
   "bulkAu_1500K_Kapil": {
     "initfile_path": "data/ref-trajs/bulkAu_1500K_Kapil/traj.extxyz",
     "n_frames": 20162,
+    "trajectory_length_ps": 20.162,
     "temperature": 1500,
     "timestep": 1,
     "timestep_units": "fs",
@@ -44,6 +47,7 @@
   "bulkCu_1000K_Kapil": {
     "initfile_path": "data/ref-trajs/bulkCu_1000K_Kapil/traj.extxyz",
     "n_frames": 36007,
+    "trajectory_length_ps": 36.007,
     "temperature": 1000,
     "timestep": 1,
     "timestep_units": "fs",
@@ -58,6 +62,7 @@
   "bulkCuAu_500K-Artrith_VASP": {
     "initfile_path": "data/ref-trajs/bulkCuAu_500K-Artrith_VASP/traj.extxyz",
     "n_frames": 1105,
+    "trajectory_length_ps": 1.105,
     "temperature": 500,
     "timestep": 1,
     "timestep_units": "fs",
@@ -73,6 +78,7 @@
   "bulkCuZrAl_1500K_A.Wadowski-J.Schmidt_VASP": {
     "initfile_path": "data/ref-trajs/bulkCuZrAl_1500K_A.Wadowski-J.Schmidt_VASP/traj.extxyz",
     "n_frames": 2718,
+    "trajectory_length_ps": 2.718,
     "temperature": 1500,
     "timestep": 1,
     "timestep_units": "fs",
@@ -87,6 +93,7 @@
   "bulkLiMgAlZnSn_600K_J_Schmidt_VASP": {
     "initfile_path": "data/ref-trajs/bulkLiMgAlZnSn_600K_J_Schmidt_VASP/traj.extxyz",
     "n_frames": 3015,
+    "trajectory_length_ps": 3.015,
     "temperature": 600,
     "timestep": 1,
     "timestep_units": "fs",
@@ -101,6 +108,7 @@
   "bulkLiMgAlZnSn_900K_J_Schmidt_VASP": {
     "initfile_path": "data/ref-trajs/bulkLiMgAlZnSn_900K_J_Schmidt_VASP/traj.extxyz",
     "n_frames": 2181,
+    "trajectory_length_ps": 2.181,
     "temperature": 900,
     "timestep": 1,
     "timestep_units": "fs",
@@ -115,6 +123,7 @@
   "bulkMoS2_300K_NO-VdW_J.Kioseoglou_VASP": {
     "initfile_path": "data/ref-trajs/bulkMoS2_300K_NO-VdW_J.Kioseoglou_VASP/traj.extxyz",
     "n_frames": 20000,
+    "trajectory_length_ps": 20.0,
     "temperature": 300,
     "timestep": 1,
     "timestep_units": "fs",
@@ -129,6 +138,7 @@
   "bulkPt3Co_300K_J.Kioseoglou_VASP": {
     "initfile_path": "data/ref-trajs/bulkPt3Co_300K_J.Kioseoglou_VASP/traj.extxyz",
     "n_frames": 20927,
+    "trajectory_length_ps": 20.927,
     "temperature": 300,
     "timestep": 1,
     "timestep_units": "fs",
@@ -143,6 +153,7 @@
   "CsSnI3_500K_Ivor_VASP": {
     "initfile_path": "data/ref-trajs/CsSnI3_500K_Ivor_VASP/traj.extxyz",
     "n_frames": 14758,
+    "trajectory_length_ps": 14.758,
     "temperature": 500,
     "timestep": 1,
     "timestep_units": "fs",
@@ -157,6 +168,7 @@
   "H_1050K_Rupp_QE": {
     "initfile_path": "data/ref-trajs/H_1050K_Rupp_QE/traj.extxyz",
     "n_frames": 1784,
+    "trajectory_length_ps": 0.3568,
     "temperature": 1050,
     "timestep": 0.2,
     "timestep_units": "fs",
@@ -171,6 +183,7 @@
   "MAPbBr3_300K_Ivor_VASP": {
     "initfile_path": "data/ref-trajs/MAPbBr3_300K_Ivor_VASP/traj.extxyz",
     "n_frames": 60000,
+    "trajectory_length_ps": 30.0,
     "temperature": 300,
     "timestep": 0.5,
     "timestep_units": "fs",
@@ -185,6 +198,7 @@
   "naphthalene_295K_Sharma_S": {
     "initfile_path": "data/ref-trajs/naphthalene_295K_Sharma_S/traj.extxyz",
     "n_frames": 7557,
+    "trajectory_length_ps": 3.7785,
     "temperature": 295,
     "timestep": 0.5,
     "timestep_units": "fs",
@@ -199,6 +213,7 @@
   "pentacene_295K_Sharma_S": {
     "initfile_path": "data/ref-trajs/pentacene_295K_Sharma_S/traj.extxyz",
     "n_frames": 15579,
+    "trajectory_length_ps": 7.7895,
     "temperature": 295,
     "timestep": 0.5,
     "timestep_units": "fs",
@@ -213,6 +228,7 @@
   "picene_295K_Sharma_S": {
     "initfile_path": "data/ref-trajs/picene_295K_Sharma_S/traj.extxyz",
     "n_frames": 14151,
+    "trajectory_length_ps": 7.0755,
     "temperature": 295,
     "timestep": 0.5,
     "timestep_units": "fs",
@@ -227,6 +243,7 @@
   "Pt111w24H2O_380K_Heenen_VASP": {
     "initfile_path": "data/ref-trajs/Pt111w24H2O_380K_Heenen_VASP/traj.extxyz",
     "n_frames": 3843,
+    "trajectory_length_ps": 3.843,
     "temperature": 380,
     "timestep": 1,
     "timestep_units": "fs",
@@ -242,6 +259,7 @@
   "tetracene_295K_Sharma_S": {
     "initfile_path": "data/ref-trajs/tetracene_295K_Sharma_S/traj.extxyz",
     "n_frames": 16000,
+    "trajectory_length_ps": 8.0,
     "temperature": 295,
     "timestep": 0.5,
     "timestep_units": "fs",
@@ -256,6 +274,7 @@
   "TiSe2_400K_Ivor_VASP": {
     "initfile_path": "data/ref-trajs/TiSe2_400K_Ivor_VASP/traj.extxyz",
     "n_frames": 14716,
+    "trajectory_length_ps": 14.716,
     "temperature": 400,
     "timestep": 1,
     "timestep_units": "fs",
