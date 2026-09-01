@@ -43,6 +43,10 @@
           "constraint": null,
           "status": "runtime_resolved",
           "index": "pytorch-cu128"
+        },
+        "tqdm": {
+          "constraint": ">=4.66",
+          "status": "constrained"
         }
       }
     },
@@ -233,6 +237,7 @@
       "model": {
         "identifier": "mh-1",
         "loader": "mace_mp(model='mh-1', return_raw_model=True, default_dtype='float32')",
+        "head": "omat_pbe",
         "version": null,
         "version_status": "named_registry_model"
       },
