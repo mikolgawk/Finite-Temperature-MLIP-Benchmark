@@ -5,6 +5,7 @@
 #   "numpy==2.1.3",
 #   "pandas==2.3.3",
 #   "matplotlib==3.11.1",
+#   "tqdm==4.70.0",
 #   "tensorpotential==0.5.7.2",
 #   "torch-sim-atomistic[vesin]==0.6.1",
 #   "torch==2.11.0+cu128",

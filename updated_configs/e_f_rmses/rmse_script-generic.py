@@ -29,6 +29,7 @@ from ase.io import read, write
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -243,7 +244,13 @@ def load_isolated_atom_energies(isolated_atom_files, calculator, calc_name=None)
     return ref_e0, mlip_e0
 
 
-def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=None):
+def normalize_energies(
+    frames_list,
+    isolated_atom_files,
+    calculator,
+    calc_name=None,
+    show_progress=True,
+):
     """
     Normalizes energies by subtracting per-element isolated-atom references
     (energy_rmse becomes an atomization-energy RMSE rather than a raw total
@@ -285,7 +292,15 @@ def normalize_energies(frames_list, isolated_atom_files, calculator, calc_name=N
     # Compute MLIP predictions, also keyed by frame index.
     mlip_data = {}  # frame index -> (energy, forces array)
 
-    for i, frame in enumerate(frames_list):
+    frame_progress = tqdm(
+        frames_list,
+        desc=f'{calc_name or "MLIP"} frames',
+        unit='frame',
+        leave=False,
+        dynamic_ncols=True,
+        disable=not show_progress,
+    )
+    for i, frame in enumerate(frame_progress):
         try:
             frame.calc = calculator
             forces = frame.get_forces()
@@ -374,6 +389,8 @@ def main():
                              'Default: ../data/e-f-predictions/<model>. Relative '
                              'paths resolve against this script.')
     parser.add_argument('--bins', type=int, default=50)
+    parser.add_argument('--no-progress', action='store_true',
+                        help='Disable trajectory and frame progress bars.')
     parser.add_argument('--force', action='store_true',
                         help='Recompute even if this model\'s summary CSV already '
                              'exists (default: skip models already done).')
@@ -436,7 +453,14 @@ def main():
     all_metrics = []
 
     print("\nProcessing files...")
-    for i, file_path in enumerate(file_paths, 1):
+    trajectory_progress = tqdm(
+        file_paths,
+        desc=f'{model_name} trajectories',
+        unit='traj',
+        dynamic_ncols=True,
+        disable=args.no_progress,
+    )
+    for i, file_path in enumerate(trajectory_progress, 1):
         print(f"\n[{i}/{len(file_paths)}] Processing: {file_path}")
 
         # Output directory
@@ -468,7 +492,13 @@ def main():
                 rmse_e,
                 rmse_f,
                 prediction_frames,
-            ) = normalize_energies(frames, isolated_atom_files, calc, calc_name)
+            ) = normalize_energies(
+                frames,
+                isolated_atom_files,
+                calc,
+                calc_name,
+                show_progress=not args.no_progress,
+            )
 
             predicted_trajectory_path = prediction_path(file_path, predictions_dir)
             predicted_trajectory_path.parent.mkdir(parents=True, exist_ok=True)

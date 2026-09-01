@@ -5,6 +5,7 @@
 #   "numpy==2.5.2",
 #   "pandas==3.0.5",
 #   "matplotlib==3.11.1",
+#   "tqdm==4.70.0",
 #   "torch-sim-atomistic[metatomic]==0.6.1",
 #   "metatomic-torchsim==0.1.3",
 #   "upet==0.2.6",

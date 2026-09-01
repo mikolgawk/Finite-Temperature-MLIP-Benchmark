@@ -5,6 +5,7 @@
 #   "numpy==1.26.4",
 #   "pandas==3.0.5",
 #   "matplotlib==3.11.1",
+#   "tqdm==4.70.0",
 #   "torch-sim-atomistic==0.5.2",
 #   "fairchem-core==1.10.0",
 #   "torch==2.4.1",
