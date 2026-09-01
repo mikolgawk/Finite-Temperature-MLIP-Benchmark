@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "ase>=3.26",
+#   "h5py>=3.11",
+#   "mdtraj>=1.10",
+#   "numpy>=1.26",
+#   "pandas>=2.2",
+# ]
+# ///
 
-import os
+from __future__ import annotations
+
+import argparse
 import csv
 import numpy as np
 import pandas as pd
 import mdtraj as mdt
-from ase.io import read
-from fractions import Fraction
+import h5py
+from ase.data import chemical_symbols
+from ase.io import iread
 from pathlib import Path
-import math
-import re
 
 
 # ============================================================
@@ -20,31 +31,16 @@ import re
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent / "data"
 
-# Reference and MLIP trajectories share the same per-system stride/dt, so a
-# single settings file drives both sides of the comparison.
-SETTINGS_CSV = BASE_DIR / "rdf_settings_ref.csv"
-
 RESULTS_DIR = BASE_DIR / "results"
 
 REF_TRAJ_BASE_DIR = DATA_DIR / "ref-trajs"
-MLIP_TRAJ_BASE_DIR = DATA_DIR / "mlip-trajs-20fs-tau"
-
-BY_SYSTEM_TYPE_OUTPUT_FILE = os.path.join(RESULTS_DIR, "rdf_similarity_scores_by_system_type_same_simulation_length.csv")
-
+MLIP_TRAJ_BASE_DIR = DATA_DIR / "mlip-trajs-torchsim-matched"
 
 # ============================================================
-# ASE → MDTraj (NO disk I/O, exact physics)
+# Trajectory loading
 # ============================================================
 
-def ase_to_mdtraj(traj):
-    """
-    Convert ASE trajectory (list[ase.Atoms]) to MDTraj Trajectory
-    """
-    # Positions: Å → nm
-    xyz = np.array([a.get_positions() for a in traj], dtype=np.float64) / 10.0
-
-    # Build topology from first frame
-    symbols = traj[0].get_chemical_symbols()
+def build_topology(symbols: list[str]) -> mdt.Topology:
     top = mdt.Topology()
     chain = top.add_chain()
     res = top.add_residue("SYS", chain)
@@ -56,14 +52,71 @@ def ase_to_mdtraj(traj):
             residue=res
         )
 
-    md_traj = mdt.Trajectory(xyz=xyz, topology=top)
+    return top
 
-    # Unit cell: Å → nm
-    cells = np.array([a.get_cell().array for a in traj], dtype=np.float64) / 10.0
-    md_traj.unitcell_vectors = cells
-    md_traj.unitcell_lengths = np.linalg.norm(cells, axis=2)
 
+def make_mdtraj(xyz_angstrom: np.ndarray, cells_angstrom: np.ndarray, symbols: list[str]) -> mdt.Trajectory:
+    """Build an MDTraj trajectory from arrays stored in Angstrom."""
+    if len(xyz_angstrom) == 0:
+        raise ValueError("trajectory contains no frames")
+
+    xyz_nm = np.asarray(xyz_angstrom, dtype=np.float32) / np.float32(10.0)
+    cells_nm = np.asarray(cells_angstrom, dtype=np.float32) / np.float32(10.0)
+    md_traj = mdt.Trajectory(xyz=xyz_nm, topology=build_topology(symbols))
+    md_traj.unitcell_vectors = cells_nm
     return md_traj
+
+
+def load_reference_trajectory(path: Path) -> mdt.Trajectory:
+    """Stream an ASE-readable reference trajectory into MDTraj."""
+    positions: list[np.ndarray] = []
+    cells: list[np.ndarray] = []
+    symbols: list[str] | None = None
+
+    for atoms in iread(path, index=":"):
+        if symbols is None:
+            symbols = atoms.get_chemical_symbols()
+        positions.append(np.asarray(atoms.positions, dtype=np.float32))
+        cells.append(np.asarray(atoms.cell.array, dtype=np.float32))
+
+    if symbols is None:
+        raise ValueError("trajectory contains no frames")
+
+    return make_mdtraj(np.stack(positions), np.stack(cells), symbols)
+
+
+def h5_frame_count(path: Path) -> int:
+    """Return the number of complete position frames in a TorchSim HDF5 file."""
+    with h5py.File(path, "r") as h5:
+        if "data/positions" not in h5:
+            raise ValueError("missing data/positions dataset")
+        return int(h5["data/positions"].shape[0])
+
+
+def load_mlip_trajectory(path: Path, n_frames: int) -> mdt.Trajectory:
+    """Load a TorchSim HDF5 trajectory without requiring torch-sim."""
+    with h5py.File(path, "r") as h5:
+        required = ("data/positions", "data/cell", "data/atomic_numbers")
+        missing = [name for name in required if name not in h5]
+        if missing:
+            raise ValueError(f"missing HDF5 datasets: {', '.join(missing)}")
+
+        positions = h5["data/positions"][:n_frames]
+        cells_dataset = h5["data/cell"]
+        cells = cells_dataset[:n_frames]
+        if len(cells) == 1 and n_frames > 1:
+            cells = np.repeat(cells, n_frames, axis=0)
+
+        atomic_numbers = np.asarray(h5["data/atomic_numbers"][0], dtype=int)
+
+    if len(positions) != n_frames or len(cells) != n_frames:
+        raise ValueError(
+            f"requested {n_frames} frames but found "
+            f"{len(positions)} position and {len(cells)} cell frames"
+        )
+
+    symbols = [chemical_symbols[number] for number in atomic_numbers]
+    return make_mdtraj(positions, cells, symbols)
 
 
 # ============================================================
@@ -115,8 +168,8 @@ def rdf_error(ref_rdf, test_rdf):
     return min(1.0, numerator / denominator) * 100.0
 
 
-def save_rdf_csv(r, g, path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def save_rdf_csv(r, g, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     np.savetxt(path, np.column_stack([r, g]), delimiter=',', header='r_A,g_r', comments='')
 
 
@@ -124,97 +177,11 @@ def save_rdf_csv(r, g, path):
 # Utilities
 # ============================================================
 
-def _normalize_system_name(name: str) -> str:
-    return "".join(ch.lower() for ch in name if ch.isalnum())
-
-
-def parse_system_temperature_from_dirname(dirname: str) -> tuple[str, int] | None:
-    # Example names: bulkAg_600K_Kapil, bulkCuAu_500K-Artrith_VASP
-    match = re.match(r"^(?P<system>[^_]+)_(?P<temp>\d+)K(?:\b|[_-].*)$", dirname)
-    if match is None:
-        return None
-
-    system = _normalize_system_name(match.group("system"))
-    temperature = int(match.group("temp"))
-    return system, temperature
-
-
-def load_vdos_settings(path: str) -> dict[tuple[str, int], dict[str, float | int]]:
-    settings: dict[tuple[str, int], dict[str, float | int]] = {}
-
-    with open(path, "r", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            system = _normalize_system_name(row["System"])
-            temperature = int(float(row["temperature"]))
-            stride = int(float(row["stride"]))
-            dt_fs = float(row["dt"])
-            settings[(system, temperature)] = {
-                "stride": stride,
-                "dt_fs": dt_fs,
-            }
-
-    return settings
-
-
-def _lcm_int(a: int, b: int) -> int:
-    return abs(a * b) // math.gcd(a, b)
-
-
-def _lcm_fraction(a: Fraction, b: Fraction) -> Fraction:
-    """Least common multiple for positive rational numbers."""
-    return Fraction(_lcm_int(a.numerator, b.numerator), math.gcd(a.denominator, b.denominator))
-
-
-def as_traj_list(frames):
-    if isinstance(frames, list):
-        return frames
-    return [frames]
-
-
-def contains_hydrogen(traj) -> bool:
-    if not traj:
-        return False
-    return "H" in set(traj[0].get_chemical_symbols())
-
-
-def matched_frame_counts(
-    n_ref_total: int,
-    n_mlip_total: int,
-    ref_dt_fs: float,
-    mlip_dt_fs: float,
-) -> tuple[int, int, float]:
-    """
-    Compute (n_ref_use, n_mlip_use, matched_time_fs) so that:
-      n_ref_use * ref_dt_fs == n_mlip_use * mlip_dt_fs
-    and matched time does not exceed either trajectory's available simulation time.
-    """
+def matched_frame_count(n_ref_total: int, n_mlip_total: int) -> int:
+    """Return the common prefix length for same-timestep trajectories."""
     if n_ref_total <= 0 or n_mlip_total <= 0:
-        return 0, 0, 0.0
-
-    ref_dt = Fraction(str(ref_dt_fs))
-    mlip_dt = Fraction(str(mlip_dt_fs))
-
-    common_time = _lcm_fraction(ref_dt, mlip_dt)
-    ref_time_max = n_ref_total * ref_dt
-    mlip_time_max = n_mlip_total * mlip_dt
-
-    n_common = min(ref_time_max // common_time, mlip_time_max // common_time)
-    if n_common <= 0:
-        return 0, 0, 0.0
-
-    matched_time = n_common * common_time
-    n_ref_use = int(matched_time / ref_dt)
-    n_mlip_use = int(matched_time / mlip_dt)
-
-    return n_ref_use, n_mlip_use, float(matched_time)
-
-
-def obtain_system_names(data_dir):
-    return [
-        name for name in os.listdir(data_dir)
-        if os.path.isdir(os.path.join(data_dir, name))
-    ]
+        return 0
+    return min(n_ref_total, n_mlip_total)
 
 
 # ============================================================
@@ -272,172 +239,218 @@ def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.Data
 
 
 # ============================================================
-# MAIN
+# Discovery and main program
 # ============================================================
 
-if __name__ == "__main__":
+def discover_mlip_trajectories(base_dir: Path) -> dict[str, dict[str, Path]]:
+    """Discover every completed ``nvt_<model>.h5`` trajectory."""
+    trajectories: dict[str, dict[str, Path]] = {}
+    for path in sorted(base_dir.glob("*/nvt_*.h5")):
+        model = path.stem.removeprefix("nvt_")
+        trajectories.setdefault(path.parent.name, {})[model] = path
+    return trajectories
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    ref_base = REF_TRAJ_BASE_DIR
-    mlip_base = MLIP_TRAJ_BASE_DIR
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Compute RDFs and RDF errors for matched TorchSim MLIP and reference trajectories."
+    )
+    parser.add_argument(
+        "--system",
+        action="append",
+        dest="systems",
+        help="process only this system (repeatable; default: all)",
+    )
+    parser.add_argument(
+        "--model",
+        action="append",
+        dest="models",
+        help="process only this model (repeatable; default: all discovered models)",
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=RESULTS_DIR,
+        help=f"output directory (default: {RESULTS_DIR})",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show discovered inputs without loading trajectories or computing RDFs",
+    )
+    return parser.parse_args()
 
-    model_names = [
-        'chgnet', 'mace-mp-0', 'grace-mp',
-        'mace-mpa-0', 'orb-v2',
-        'mattersim-v1-5M', 'grace-oam', 'orb-v3', 'orb-v3-direct', 'eSEN-30M-OAM', 'nequip', 'eq-v2-M-omat', 'pet-oam-xl', 'pet-omat-xl',
-        "mace-mh-omat", "uma-s-omat", "uma-m-omat"
-    ]
 
-    results = {m: [] for m in model_names}
-    detailed_results = {m: [] for m in model_names}
+def main() -> None:
+    args = parse_args()
+    results_dir = args.results_dir.resolve()
 
-    settings = load_vdos_settings(SETTINGS_CSV)
+    mlip_trajectories = discover_mlip_trajectories(MLIP_TRAJ_BASE_DIR)
+    reference_trajectories = {
+        path.parent.name: path
+        for path in sorted(REF_TRAJ_BASE_DIR.glob("*/traj.extxyz"))
+    }
 
-    systems = obtain_system_names(ref_base)
-    print(f"Found {len(systems)} systems")
+    selected_systems = set(args.systems) if args.systems else None
+    selected_models = set(args.models) if args.models else None
+    if selected_systems is not None:
+        reference_trajectories = {
+            system: path
+            for system, path in reference_trajectories.items()
+            if system in selected_systems
+        }
+        mlip_trajectories = {
+            system: models
+            for system, models in mlip_trajectories.items()
+            if system in selected_systems
+        }
+    if selected_models is not None:
+        mlip_trajectories = {
+            system: {
+                model: path
+                for model, path in models.items()
+                if model in selected_models
+            }
+            for system, models in mlip_trajectories.items()
+        }
 
-    for system in systems:
+    model_names = sorted({
+        model
+        for system_models in mlip_trajectories.values()
+        for model in system_models
+    })
+
+    print(
+        f"Found {len(reference_trajectories)} reference trajectories and "
+        f"{sum(len(models) for models in mlip_trajectories.values())} completed MLIP trajectories"
+    )
+    print(f"Models ({len(model_names)}): {', '.join(model_names)}")
+
+    if args.dry_run:
+        for system in sorted(reference_trajectories):
+            models = sorted(mlip_trajectories.get(system, {}))
+            print(f"{system}: {len(models)} MLIP trajectories")
+        return
+
+    if not reference_trajectories:
+        raise RuntimeError(f"No reference trajectories found in {REF_TRAJ_BASE_DIR}")
+    if not model_names:
+        raise RuntimeError(f"No completed MLIP trajectories found in {MLIP_TRAJ_BASE_DIR}")
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+    rdf_save_dir = results_dir / "rdf_same_simulation_length_saved"
+
+    results: dict[str, list[float] | float] = {model: [] for model in model_names}
+    detailed_results: dict[str, list[dict]] = {model: [] for model in model_names}
+
+    mlip_only_systems = sorted(set(mlip_trajectories) - set(reference_trajectories))
+    for system in mlip_only_systems:
+        print(f"[WARN] MLIP trajectories have no reference trajectory: {system}")
+
+    for system, ref_path in sorted(reference_trajectories.items()):
         print(f"\n=== System: {system} ===")
 
-        system_key = parse_system_temperature_from_dirname(system)
-        if system_key is None:
-            print(f"  [SKIP] Could not parse system/temperature from directory name: {system}")
+        try:
+            md_ref_all = load_reference_trajectory(ref_path)
+            ref_rdf_full = compute_rdf(md_ref_all)
+        except Exception as exc:
+            print(f"  [SKIP] Could not load/compute reference RDF: {exc}")
             continue
 
-        if system_key not in settings:
-            print(f"  [SKIP] Missing CSV settings for {system}")
-            continue
-
-        # Same dt applies to both the reference and the MLIP trajectory.
-        frame_dt_fs = float(settings[system_key]["dt_fs"])
-
-        # ---------- Reference ----------
-        ref_traj_path = os.path.join(ref_base, system, "traj.extxyz")
-        if not os.path.exists(ref_traj_path):
-            print(f"  [SKIP] Missing reference trajectory: {ref_traj_path}")
-            continue
-
-        ref_traj_all = as_traj_list(read(ref_traj_path, ":"))
-        if len(ref_traj_all) == 0:
-            print(f"  [SKIP] Empty reference trajectory: {ref_traj_path}")
-            continue
-
-        has_hydrogen = contains_hydrogen(ref_traj_all)
-
-        print(
-            f"  Reference frames={len(ref_traj_all)}, dt={frame_dt_fs:.3f} fs "
-            f"(contains H: {'yes' if has_hydrogen else 'no'})"
+        n_ref_total = md_ref_all.n_frames
+        print(f"  Reference frames={n_ref_total}")
+        save_rdf_csv(
+            ref_rdf_full[0],
+            ref_rdf_full[1],
+            rdf_save_dir / "reference" / f"{system}.csv",
         )
 
-        # Cache RDFs for truncated reference lengths used by multiple models.
-        ref_rdf_cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        # Almost all matched HDF5 files contain one additional initial frame.
+        # Cache the full reference RDF and any shorter prefixes needed by
+        # genuinely short but otherwise valid MLIP trajectories.
+        ref_rdf_cache: dict[int, tuple[np.ndarray, np.ndarray]] = {
+            n_ref_total: ref_rdf_full,
+        }
 
-        # ---------- Models ----------
-        for model in model_names:
+        system_models = mlip_trajectories.get(system, {})
+        for model, mlip_path in sorted(system_models.items()):
             print(f"  Model: {model}")
 
-            mlip_path = os.path.join(
-                mlip_base, system, f"nvt_{model}.extxyz"
-            )
+            try:
+                n_mlip_total = h5_frame_count(mlip_path)
+                n_frames_use = matched_frame_count(n_ref_total, n_mlip_total)
+                if n_frames_use <= 0:
+                    raise ValueError("no common frames")
 
-            if not os.path.exists(mlip_path):
-                print(f"    [SKIP] Missing MLIP trajectory: {mlip_path}")
-                continue
-
-            mlip_traj_all = as_traj_list(read(mlip_path, ":"))
-            if len(mlip_traj_all) == 0:
-                print(f"    [SKIP] Empty MLIP trajectory: {mlip_path}")
-                continue
-
-            n_ref_use, n_mlip_use, matched_time_fs = matched_frame_counts(
-                n_ref_total=len(ref_traj_all),
-                n_mlip_total=len(mlip_traj_all),
-                ref_dt_fs=frame_dt_fs,
-                mlip_dt_fs=frame_dt_fs,
-            )
-
-            if n_ref_use <= 0 or n_mlip_use <= 0:
-                print("    [SKIP] Could not find positive matched simulation time.")
-                continue
-
-            print(
-                f"    matched time={matched_time_fs:.3f} fs | "
-                f"ref frames={n_ref_use}/{len(ref_traj_all)} | "
-                f"mlip frames={n_mlip_use}/{len(mlip_traj_all)}"
-            )
-
-            ref_time_used = n_ref_use * frame_dt_fs
-            mlip_time_used = n_mlip_use * frame_dt_fs
-            if abs(ref_time_used - mlip_time_used) > 1e-12:
                 print(
-                    f"    [WARN] Time mismatch after truncation: "
-                    f"ref={ref_time_used:.6f} fs, mlip={mlip_time_used:.6f} fs"
+                    f"    matched frames={n_frames_use} | "
+                    f"ref={n_frames_use}/{n_ref_total} | "
+                    f"mlip={n_frames_use}/{n_mlip_total}"
                 )
 
-            ref_traj = ref_traj_all[:n_ref_use]
-            mlip_traj = mlip_traj_all[:n_mlip_use]
+                if n_frames_use not in ref_rdf_cache:
+                    ref_rdf_cache[n_frames_use] = compute_rdf(md_ref_all[:n_frames_use])
+                ref_rdf = ref_rdf_cache[n_frames_use]
 
-            if n_ref_use not in ref_rdf_cache:
-                md_ref = ase_to_mdtraj(ref_traj)
-                ref_rdf_cache[n_ref_use] = compute_rdf(md_ref)
+                # Preserve the exact shorter reference RDF used for a score.
+                if n_frames_use != n_ref_total:
+                    save_rdf_csv(
+                        ref_rdf[0],
+                        ref_rdf[1],
+                        rdf_save_dir / "reference_matched" / model / f"{system}.csv",
+                    )
 
-            ref_rdf = ref_rdf_cache[n_ref_use]
-            save_rdf_csv(
-                ref_rdf[0],
-                ref_rdf[1],
-                os.path.join(RESULTS_DIR, "rdf_same_simulation_length_saved", "reference", f"{system}__{model}.csv"),
-            )
-
-            md_mlip = ase_to_mdtraj(mlip_traj)
-
-            mlip_rdf = compute_rdf(md_mlip)
-            save_rdf_csv(mlip_rdf[0], mlip_rdf[1], os.path.join(RESULTS_DIR, "rdf_same_simulation_length_saved", "mlip", model, f"{system}.csv"))
-
-            error = rdf_error(ref_rdf, mlip_rdf)
+                md_mlip = load_mlip_trajectory(mlip_path, n_frames_use)
+                mlip_rdf = compute_rdf(md_mlip)
+                save_rdf_csv(
+                    mlip_rdf[0],
+                    mlip_rdf[1],
+                    rdf_save_dir / "mlip" / model / f"{system}.csv",
+                )
+                error = rdf_error(ref_rdf, mlip_rdf)
+            except Exception as exc:
+                print(f"    [SKIP] Could not load/compute MLIP RDF: {exc}")
+                continue
 
             print(f"    RDF error: {error:.6f} %")
-
+            assert isinstance(results[model], list)
             results[model].append(error)
-            detailed_results[model].append({
-                "System": system,
-                "RDF_Error": error
-            })
+            detailed_results[model].append({"System": system, "RDF_Error": error})
 
-    # ---------- Aggregate (per model, mean over all systems) ----------
     print("\n================ FINAL SCORES ================")
     for model in model_names:
-        if results[model]:
-            mean_error = float(np.mean(results[model]))
-        else:
-            mean_error = float("nan")
+        model_errors = results[model]
+        assert isinstance(model_errors, list)
+        mean_error = float(np.mean(model_errors)) if model_errors else float("nan")
         results[model] = mean_error
         print(f"{model:20s} : {mean_error:10.6f} %")
 
-    # -------- Save CSVs --------
-    with open(os.path.join(RESULTS_DIR, "rdf_similarity_scores_same_simulation_length.csv"), "w", newline="") as f:
+    with open(results_dir / "rdf_similarity_scores_same_simulation_length.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Calculator", "Mean RDF Error [%]"])
         for model, error in results.items():
             writer.writerow([model, f"{error:.3f}"])
 
     for model in model_names:
-        with open(os.path.join(RESULTS_DIR, f"rdf_similarity_scores_same_simulation_length_{model}.csv"), "w", newline="") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=["System", "RDF_Error"]
-            )
+        with open(
+            results_dir / f"rdf_similarity_scores_same_simulation_length_{model}.csv",
+            "w",
+            newline="",
+        ) as f:
+            writer = csv.DictWriter(f, fieldnames=["System", "RDF_Error"])
             writer.writeheader()
-            for row in detailed_results[model]:
-                writer.writerow(row)
+            writer.writerows(detailed_results[model])
 
     print("\nCSV files written successfully.")
-
-    # ---------- Aggregate by system type (directly from in-memory results) ----------
     print("\n================ AGGREGATING BY SYSTEM TYPE ================")
     results_by_type_df = aggregate_by_system_type(detailed_results)
-    results_by_type_df.to_csv(BY_SYSTEM_TYPE_OUTPUT_FILE)
+    by_type_output_file = results_dir / "rdf_similarity_scores_by_system_type_same_simulation_length.csv"
+    results_by_type_df.to_csv(by_type_output_file)
 
-    print(f"\nResults saved to {BY_SYSTEM_TYPE_OUTPUT_FILE}")
+    print(f"\nResults saved to {by_type_output_file}")
     print("\nSummary:")
     print(results_by_type_df.to_string())
+
+
+if __name__ == "__main__":
+    main()
