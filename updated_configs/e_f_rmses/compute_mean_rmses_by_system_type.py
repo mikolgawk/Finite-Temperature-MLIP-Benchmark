@@ -10,7 +10,6 @@ REQUIRED_COLUMNS = [
     'system',
     'energy_rmse',
     'force_rmse',
-    'mlip_force_eval_time_per_call_per_atom_s',
 ]
 
 SYSTEM_TYPES = [
@@ -101,25 +100,19 @@ def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     all_data = load_all_data(DATA_DIR)
 
-    metrics = ['energy_rmse', 'force_rmse', 'mlip_force_eval_time_per_call_per_atom_s']
+    metrics = ['energy_rmse', 'force_rmse']
 
     mapped_data = all_data[all_data['system_type'].notna()].copy()
 
     means_by_system_type = (
         mapped_data.groupby('system_type', as_index=False)[metrics]
         .mean(numeric_only=True)
-        .rename(columns={
-            'mlip_force_eval_time_per_call_per_atom_s': 'mean_force_eval_time_per_atom_s'
-        })
     )
     means_by_system_type = means_by_system_type.set_index('system_type').reindex(SYSTEM_TYPES).reset_index()
 
     means_by_system_type_and_model = (
         mapped_data.groupby(['system_type', 'calculator'], as_index=False)[metrics]
         .mean(numeric_only=True)
-        .rename(columns={
-            'mlip_force_eval_time_per_call_per_atom_s': 'mean_force_eval_time_per_atom_s'
-        })
         .sort_values(['system_type', 'calculator'], key=lambda c: c.map({t: i for i, t in enumerate(SYSTEM_TYPES)}) if c.name == 'system_type' else c)
     )
 

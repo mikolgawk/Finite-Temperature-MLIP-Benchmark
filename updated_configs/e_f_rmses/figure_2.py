@@ -70,7 +70,7 @@ all_data = pd.concat(all_frames, ignore_index=True)
 
 df = (
     all_data.groupby('calculator', as_index=False)[
-        ['energy_rmse', 'force_rmse', 'mlip_force_eval_time_per_call_per_atom_s']
+        ['energy_rmse', 'force_rmse']
     ]
     .mean(numeric_only=True)
 )
@@ -79,10 +79,7 @@ mean_summary = df[[
     'calculator',
     'energy_rmse',
     'force_rmse',
-    'mlip_force_eval_time_per_call_per_atom_s',
-]].rename(columns={
-    'mlip_force_eval_time_per_call_per_atom_s': 'mean_force_eval_time_per_atom_s'
-})
+]]
 mean_summary['calculator'] = mean_summary['calculator'].map(lambda name: CALCULATOR_RAW_NAMES.get(name, name))
 results_dir = BASE_DIR / 'results'
 plots_dir = BASE_DIR / 'plots'
@@ -353,8 +350,7 @@ plot_path = plots_dir / 'plot_e_f_rmses.pdf'
 plt.savefig(plot_path)
 print(f"Plot saved as {plot_path}")
 print(
-    "Saved mean_metrics_by_model.csv with per-model means for energy RMSE, force RMSE, "
-    "and force eval time per atom"
+    "Saved mean_metrics_by_model.csv with per-model means for energy and force RMSE"
 )
 print(
     f"Energy RMSE medians -> Tier 1: {t1_med_energy:.8f}, "
@@ -364,7 +360,4 @@ print(
     f"Force RMSE medians -> Tier 1: {t1_med_force:.8f}, "
     f"Tier 2: {t2_med_force:.8f}, Tier 3: {t3_med_force:.8f}, Tier 4: {t4_med_force:.8f}"
 )
-print("Mean force eval time per atom (s):")
-for _, row in mean_summary.sort_values('mean_force_eval_time_per_atom_s').iterrows():
-    print(f"  {row['calculator']}: {row['mean_force_eval_time_per_atom_s']:.6e}")
 plt.show()
