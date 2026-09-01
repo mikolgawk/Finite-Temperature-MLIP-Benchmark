@@ -6,17 +6,14 @@ calculator selected at runtime from model_calculators.json.
 Reads reference trajectories from ../data/ref-trajs and saves detailed
 per-trajectory results (histograms, comparison plots) into this script's
 own outputs/ directory, one subdirectory per trajectory. The per-model
-summary CSV is written to ../data/ as rmse-results-all_<model>.csv, the
-canonical name the figure and mean-aggregation scripts read.
+summary CSV is written to ../data/e-f-predictions/ as
+rmse-results-all_<model>.csv, with one row per evaluated system/temperature.
 
 Usage:
     MODEL_NAME=mace-mpa-0 uv run rmse_script-generic.py [--debug]
 
 The model-specific ``rmse_*.py`` entry points in this directory provide the
-dependencies and set ``MODEL_NAME`` automatically.  In addition to the RMSE
-summary, every run writes a trajectory mirroring each reference trajectory.
-Those files contain explicit ``REF_energy``/``REF_forces`` and
-``MLIP_energy``/``MLIP_forces`` values for every successfully evaluated frame.
+dependencies and set ``MODEL_NAME`` automatically.
 """
 
 import os
@@ -25,7 +22,7 @@ import json
 import argparse
 from collections import Counter
 import numpy as np
-from ase.io import read, write
+from ase.io import read
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -122,12 +119,6 @@ def get_file_names(directory=REF_TRAJ_DIR, extension='.extxyz', prefix='traj'):
 
     print(f"\nFound {len(file_paths)} trajectory files.")
     return sorted(file_paths)
-
-
-def prediction_path(file_path, predictions_dir):
-    """Return the prediction path mirroring a reference trajectory's layout."""
-    relative_path = Path(file_path).resolve().relative_to(REF_TRAJ_DIR.resolve())
-    return predictions_dir / relative_path
 
 
 def parse_system_info(file_path):
@@ -330,7 +321,6 @@ def normalize_energies(
     normalized_mlip_energies = []
     forces_ref_list = []
     forces_mlip_list = []
-    prediction_frames = []
     for i in common_indices:
         frame = frames_list[i]
         ref_energy, ref_force = ref_data[i]
@@ -341,21 +331,6 @@ def normalize_energies(
         normalized_mlip_energies.append(normalized_mlip_energy)
         forces_ref_list.append(ref_force.flatten())
         forces_mlip_list.append(mlip_force.flatten())
-
-        # ASE stores standard extxyz energy/forces in a SinglePointCalculator,
-        # which Atoms.copy() deliberately does not retain.  Materialize both
-        # reference and model values under explicit names in the output file.
-        # The source index makes a partially successful trajectory unambiguous.
-        prediction = frame.copy()
-        prediction.info['MLIP_calculator'] = calc_name or 'unknown'
-        prediction.info['MLIP_source_frame_index'] = i
-        prediction.info['REF_energy'] = float(ref_energy)
-        prediction.arrays['REF_forces'] = np.asarray(ref_force, dtype=float)
-        prediction.info['MLIP_energy'] = float(mlip_energy)
-        prediction.info['MLIP_normalized_energy'] = float(normalized_mlip_energy)
-        prediction.info['REF_normalized_energy'] = float(normalized_ref_energy)
-        prediction.arrays['MLIP_forces'] = np.asarray(mlip_force, dtype=float)
-        prediction_frames.append(prediction)
 
     energies_normalized_ref = np.array(normalized_ref_energies)
     energies_mlip = np.array(normalized_mlip_energies)
@@ -373,7 +348,7 @@ def normalize_energies(
         forces_ref,
         energy_rmse,
         force_rmse,
-        prediction_frames,
+        len(common_indices),
     )
 
 
@@ -381,13 +356,9 @@ def main():
     parser = argparse.ArgumentParser(description='Evaluate MLIP in-place')
     parser.add_argument('--debug', action='store_true', help='Debug mode')
     parser.add_argument('--output-dir', type=str, default=None,
-                        help='Global summary location. Default: the shared ../data '
-                             'directory that the figure scripts read from. Relative '
-                             'paths resolve against this script.')
-    parser.add_argument('--predictions-dir', type=str, default=None,
-                        help='Root directory for predicted extxyz trajectories. '
-                             'Default: ../data/e-f-predictions/<model>. Relative '
-                             'paths resolve against this script.')
+                        help='Global summary location. Default: '
+                             '../data/e-f-predictions, which the figure scripts '
+                             'read from. Relative paths resolve against this script.')
     parser.add_argument('--bins', type=int, default=50)
     parser.add_argument('--no-progress', action='store_true',
                         help='Disable trajectory and frame progress bars.')
@@ -401,24 +372,16 @@ def main():
     if model_name not in catalog:
         raise SystemExit(f"Set MODEL_NAME to one of: {', '.join(sorted(catalog))}")
 
-    # Setup global output directory. By default the per-model summary CSV lands
-    # in ../data/ under the canonical rmse-results-all_<model>.csv name, which is
-    # exactly what figure_2.py, figure_SI_4.py, and
-    # compute_mean_rmses_by_system_type.py glob for.
+    # By default each model's summary CSV lands in ../data/e-f-predictions/
+    # under the canonical rmse-results-all_<model>.csv name. Each row contains
+    # the RMSE summary for one evaluated system/temperature.
     if args.output_dir is None:
-        global_output_dir = DATA_DIR
+        global_output_dir = DATA_DIR / 'e-f-predictions'
     else:
         global_output_dir = Path(args.output_dir)
         if not global_output_dir.is_absolute():
             global_output_dir = BASE_DIR / global_output_dir
     global_output_dir.mkdir(exist_ok=True, parents=True)
-
-    if args.predictions_dir is None:
-        predictions_dir = DATA_DIR / 'e-f-predictions' / model_name
-    else:
-        predictions_dir = Path(args.predictions_dir)
-        if not predictions_dir.is_absolute():
-            predictions_dir = BASE_DIR / predictions_dir
 
     file_paths = get_file_names()
 
@@ -427,19 +390,10 @@ def main():
         return
 
     # Skip models whose summary CSV already exists (lets a batch sweep resume
-    # after an interruption without redoing finished models).  Both the summary
-    # and every prediction trajectory must exist before a run is considered
-    # complete; this also upgrades results made by the older summary-only code.
+    # after an interruption without redoing finished models).
     results_path = global_output_dir / f'rmse-results-all_{model_name}.csv'
-    expected_prediction_paths = [
-        prediction_path(file_path, predictions_dir) for file_path in file_paths
-    ]
-    outputs_complete = results_path.exists() and all(
-        path.exists() for path in expected_prediction_paths
-    )
-    if outputs_complete and not args.force:
-        print(f"✓ Summary and {len(expected_prediction_paths)} prediction trajectories "
-              f"already exist; skipping {model_name}. "
+    if results_path.exists() and not args.force:
+        print(f"✓ {results_path.name} already exists; skipping {model_name}. "
               f"Use --force to recompute.")
         return
 
@@ -491,7 +445,7 @@ def main():
                 f_ref,
                 rmse_e,
                 rmse_f,
-                prediction_frames,
+                n_evaluated_frames,
             ) = normalize_energies(
                 frames,
                 isolated_atom_files,
@@ -499,12 +453,6 @@ def main():
                 calc_name,
                 show_progress=not args.no_progress,
             )
-
-            predicted_trajectory_path = prediction_path(file_path, predictions_dir)
-            predicted_trajectory_path.parent.mkdir(parents=True, exist_ok=True)
-            write(predicted_trajectory_path, prediction_frames, format='extxyz')
-            print(f"   Saved {len(prediction_frames)} predicted frames to: "
-                  f"{predicted_trajectory_path}")
 
             # Metrics
             if e_mlip is not None and e_ref is not None:
@@ -521,7 +469,7 @@ def main():
                 'calculator': calc_name,
                 'natoms': natoms,
                 'n_reference_frames': len(frames),
-                'n_evaluated_frames': len(prediction_frames),
+                'n_evaluated_frames': n_evaluated_frames,
                 'energy_rmse': rmse_e,
                 'force_rmse': rmse_f,
                 # 'bias': bias,
