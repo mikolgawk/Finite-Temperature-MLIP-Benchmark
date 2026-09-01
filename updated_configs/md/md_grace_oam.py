@@ -128,9 +128,18 @@ class GraceModel(ModelInterface):
         n_real = pos.shape[0]
         dev = pos.device
 
+        # TPCalculator turns isolated ASE structures into a sufficiently large
+        # periodic cell before building its neighbour list.  Do the same here;
+        # Vesin otherwise sees a non-periodic zero-cell molecule.
+        nl_cell, nl_pbc = cell, state.pbc
+        if not bool(state.pbc.any()):
+            extent = torch.linalg.vector_norm(pos - pos[0], dim=1).max()
+            side = 2.0 * (extent + self._cutoff)
+            nl_cell = torch.eye(3, dtype=pos.dtype, device=dev).unsqueeze(0) * side
+            nl_pbc = torch.ones_like(state.pbc)
         mapping, sys_map, unit_shifts = vesin_nl_ts(
-            pos, cell, state.pbc, self._cutoff, state.system_idx)
-        shifts = compute_cell_shifts(cell, unit_shifts, sys_map)
+            pos, nl_cell, nl_pbc, self._cutoff, state.system_idx)
+        shifts = compute_cell_shifts(nl_cell, unit_shifts, sys_map)
         ind_i, ind_j = mapping[0], mapping[1]
         bond_vector = pos[ind_j] - pos[ind_i] + shifts
 
@@ -138,15 +147,20 @@ class GraceModel(ModelInterface):
         if bool((atomic_mu < 0).any()):
             raise ValueError("structure contains elements outside the model's element map")
 
-        # fake atom appended last; fake bonds attach to it with 52 A vectors beyond the cutoff
+        # Match TensorPotential's padding: only atoms with no real neighbours
+        # get a far-away bond; all remaining padded bonds are fake-to-fake.
         fake = n_real
-        n_bonds = ind_i.shape[0] + n_real
+        has_neighbour = torch.zeros(n_real, dtype=torch.bool, device=dev)
+        has_neighbour[ind_i] = True
+        isolated = torch.arange(n_real, device=dev)[~has_neighbour]
+        n_bonds = ind_i.shape[0] + isolated.shape[0]
         n_fill = self._bucket(n_bonds) - n_bonds
-        ind_i_p = torch.cat([ind_i, torch.arange(n_real, device=dev),
+        ind_i_p = torch.cat([ind_i, isolated,
                              torch.full((n_fill,), fake, device=dev)])
-        ind_j_p = torch.cat([ind_j, torch.full((n_real + n_fill,), fake, device=dev)])
+        ind_j_p = torch.cat([ind_j, torch.zeros_like(isolated),
+                             torch.full((n_fill,), fake, device=dev)])
         atomic_mu_p = torch.cat([atomic_mu, atomic_mu[:1]])
-        pad_vec = torch.full((n_real + n_fill, 3), FAR_AWAY,
+        pad_vec = torch.full((isolated.shape[0] + n_fill, 3), FAR_AWAY,
                              dtype=self._torch_float, device=dev)
         bond_vector_p = torch.cat([bond_vector.to(self._torch_float), pad_vec])
 
@@ -210,15 +224,15 @@ MODEL_NAME = "grace-oam"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim"
+OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 MODEL_PATH = REPO / "updated_configs" / "data" / "models" / "GRACE-2L-OMAT-large-ft-AM-fp32"
 
-SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1
 SY_STEPS = 3
 SEED = 42                     # Maxwell-Boltzmann velocity seed
 STATE_DTYPE = torch.float32
+VALIDATE_ONLY = os.environ.get("VALIDATE_ONLY") == "1"
 
 device = torch.device("cuda")
 
@@ -254,7 +268,8 @@ for name, meta in METADATA.items():
 
     out_dir = OUT_ROOT / name
     out_h5 = out_dir / f"nvt_{MODEL_NAME}.h5"
-    if out_h5.exists():
+    out_csv = out_dir / f"md_timing_{MODEL_NAME}.csv"
+    if out_csv.exists():
         print(f"[{MODEL_NAME}] {name}: output exists, skipping")
         continue
 
@@ -263,7 +278,8 @@ for name, meta in METADATA.items():
     tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
     thermostat = meta["thermostat_type"]
     stride = int(meta["position_print_stride"] or 1)
-    n_steps = round(SIMULATION_LENGTH_PS * 1000.0 / dt_fs)
+    trajectory_length_ps = float(meta["trajectory_length_ps"])
+    n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
 
     if thermostat == "Langevin":
         integrator = ts.Integrator.nvt_langevin
@@ -288,6 +304,8 @@ for name, meta in METADATA.items():
     de, df = model.validate(atoms0)
     print(f"[{MODEL_NAME}] {name}: bridge vs TPCalculator "
           f"|dE|/atom {de:.1e} eV, max|dF| {df:.1e} eV/A")
+    if VALIDATE_ONLY:
+        continue
 
     state = ts.initialize_state(atoms0, device, STATE_DTYPE)
     state.rng = SEED

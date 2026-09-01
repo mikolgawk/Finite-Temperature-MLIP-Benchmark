@@ -23,16 +23,13 @@ from ase import units
 from ase.md import MDLogger
 
 # Configuration parameters
-NVT_SIMULATION_LENGTH_PS = 0.2  # ps
-NVT_TIMESTEP = 1.0  # fs default
-NVT_HYDROGEN_TIMESTEP = 0.5  # fs
-NVT_CUAU_TIMESTEP = 2.0  # fs
 NVT_TAU = 25.0  # fs
 NVT_RECORD_INTERVAL = 1
 NVT_WARMUP_FRACTION = 0.1  # fraction of n_steps run untimed before production timing starts
 
 TRAJ_DIR = '../data/ref-trajs/'
-OUTPUT_DIR = '../data/output-trajs-timings-updated/'
+METADATA_PATH = os.path.join(TRAJ_DIR, 'md_metadata.json')
+OUTPUT_DIR = '../data/mlip-trajs-torchsim-matched/'
 SKIP_SYSTEMS = [
     'anthracene', 'naphthalene', 'pentacene', 'picene', 'tetracene',
     'H_1050K_Rupp_QE', 'Pt111w24H2O_380K_Heenen_VASP',
@@ -71,18 +68,8 @@ def build_calculator(model_entry):
     return eval(model_entry['calculator_expr'], namespace)
 
 
-def get_nvt_timestep(system_name, atoms):
-    if 'CuAu' in system_name:
-        return NVT_CUAU_TIMESTEP
-    if 'Pt111w24H2O' in system_name:
-        return NVT_TIMESTEP
-    if 'H' in set(atoms.get_chemical_symbols()):
-        return NVT_HYDROGEN_TIMESTEP
-    return NVT_TIMESTEP
-
-
-def get_nvt_n_steps(time_step):
-    return int(round(NVT_SIMULATION_LENGTH_PS * 1000.0 / time_step))
+def get_nvt_n_steps(time_step, trajectory_length_ps):
+    return int(round(trajectory_length_ps * 1000.0 / time_step))
 
 
 def synchronize_cuda():
@@ -244,6 +231,9 @@ def main():
     calculator = build_calculator(catalog[model_name])
     print(f"  ✓ Loaded {model_name}")
 
+    with open(METADATA_PATH) as f:
+        metadata = json.load(f)
+
     file_names, directories = get_file_names()
 
     if not file_names:
@@ -267,6 +257,12 @@ def main():
             print(f"Skipping {parent_dir} (organic molecule).")
             continue
 
+        if parent_dir not in metadata:
+            print(f"  ⚠ No MD metadata found for {parent_dir}, skipping")
+            continue
+
+        meta = metadata[parent_dir]
+
         frames = read_trajectory(file_path)
         if not frames:
             print("  ⚠ Skipping due to read error")
@@ -277,9 +273,10 @@ def main():
             print("  ⚠ Cannot extract temperature from directory name")
             continue
 
-        tempK = int(match.group(1))
+        tempK = float(meta["temperature"])
         init_structure = frames[0]
-        nvt_timestep = get_nvt_timestep(parent_dir, init_structure)
+        nvt_timestep = float(meta["timestep"])
+        trajectory_length_ps = float(meta["trajectory_length_ps"])
 
         print(f"\nCalculator: {model_name}")
         print(f"Temperature: {tempK} K")
@@ -296,7 +293,7 @@ def main():
         nvt_frames = nvt_simulation(
             init_structure,
             temperature=tempK,
-            n_steps=get_nvt_n_steps(nvt_timestep),
+            n_steps=get_nvt_n_steps(nvt_timestep, trajectory_length_ps),
             time_step=nvt_timestep,
             calculator=calculator,
             calculator_name=model_name,

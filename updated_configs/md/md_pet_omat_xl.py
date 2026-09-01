@@ -30,8 +30,13 @@ Run:  uv run md_pet_omat_xl.py
 
 import csv
 import json
+import os
 import time
 from pathlib import Path
+
+# Vesin reads this at import time.  PET's large cutoff produces 2,098
+# neighbors/atom for dense periodic H at 1050 K, above Vesin's 1,000 default.
+os.environ["VESIN_CUDA_MAX_PAIRS_PER_POINT"] = "4096"
 
 import torch
 
@@ -46,15 +51,15 @@ from ase.io import read
 from upet import get_upet
 
 from torch_sim.models.metatomic import MetatomicModel
+import metatomic_torchsim._neighbors as metatomic_neighbors
 
 # settings
 MODEL_NAME = "pet-omat-xl"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 METADATA_FILE = REPO / "updated_configs" /  "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim"
+OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
-SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1
 SY_STEPS = 3
@@ -62,6 +67,12 @@ SEED = 42                     # Maxwell-Boltzmann velocity seed
 STATE_DTYPE = torch.float32
 
 device = torch.device("cuda")
+
+# nvalchemiops' CUDA full-list implementation has a fixed per-atom neighbor
+# capacity (848 in the installed version).  Dense periodic H at 1050 K needs
+# 2,098 neighbors, so use metatomic-torchsim's Vesin fallback instead.
+# This must be set before MetatomicModel constructs its neighbor calculators.
+metatomic_neighbors.HAS_NVALCHEMIOPS = False
 
 # model
 # PET, xl size, OMat-only checkpoint (PBE, not MP-consistent), latest version as in
@@ -92,7 +103,8 @@ for name, meta in METADATA.items():
     tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
     thermostat = meta["thermostat_type"]
     stride = int(meta["position_print_stride"] or 1)
-    n_steps = round(SIMULATION_LENGTH_PS * 1000.0 / dt_fs)
+    trajectory_length_ps = float(meta["trajectory_length_ps"])
+    n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
 
     if thermostat == "Langevin":
         integrator = ts.Integrator.nvt_langevin

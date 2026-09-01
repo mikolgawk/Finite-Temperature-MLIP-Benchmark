@@ -61,9 +61,8 @@ MODEL_NAME = "chgnet"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim"
+OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
-SIMULATION_LENGTH_PS = 22.0
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
 SEED = 42
@@ -171,7 +170,7 @@ def main() -> None:
         out_h5 = out_dir / f"nvt_{MODEL_NAME}.h5"
         temporary_h5 = out_h5.with_suffix(".h5.inprogress")
         out_csv = out_dir / f"md_timing_{MODEL_NAME}.csv"
-        if out_h5.exists():
+        if out_csv.exists():
             print(f"[{MODEL_NAME}] {name}: output exists, skipping")
             continue
 
@@ -181,7 +180,8 @@ def main() -> None:
         tau_fs = float(tau_value) if tau_value is not None else None
         thermostat = meta["thermostat_type"]
         stride = int(meta["position_print_stride"] or 1)
-        n_steps = round(SIMULATION_LENGTH_PS * 1000.0 / timestep_fs)
+        trajectory_length_ps = float(meta["trajectory_length_ps"])
+        n_steps = round(trajectory_length_ps * 1000.0 / timestep_fs)
 
         atoms = read(init_file, index=0)
         atoms.calc = calculator

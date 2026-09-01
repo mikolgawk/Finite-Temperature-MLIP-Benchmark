@@ -1,0 +1,654 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "included": "Dedicated md_<model>.py production runners in this directory",
+    "excluded": [
+      "md_script-generic.py"
+    ],
+    "source_of_truth": "PEP 723 dependency blocks and model-construction calls in each script"
+  },
+  "version_policy": {
+    "exact": "An == constraint is present in the runner or a concrete model version is passed to the loader.",
+    "constrained": "The runner specifies a non-exact compatible range.",
+    "indirect": "The package is installed through a torch-sim extra and is not directly pinned by the runner.",
+    "runtime_resolved": "No concrete version is selected by the runner; the result can change when uv resolves the environment or a model registry default changes.",
+    "warning": "This inventory records declared constraints, not a lockfile. Entries marked indirect or runtime_resolved are not exactly reproducible without recording the resolved uv environment."
+  },
+  "calculators": {
+    "chgnet": {
+      "script": "md_chgnet.py",
+      "simulation_engine": "ase",
+      "adapter": "chgnet.model.dynamics.CHGNetCalculator",
+      "model": {
+        "loader": "CHGNet.load(use_device='cuda:0')",
+        "identifier": "package default pretrained checkpoint",
+        "version": null,
+        "version_status": "runtime_resolved"
+      },
+      "packages": {
+        "chgnet": {
+          "constraint": "==0.4.2",
+          "status": "exact"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        },
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "status": "exact",
+          "usage": "trajectory writer only"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        }
+      }
+    },
+    "eq-v2-M-omat": {
+      "script": "md_eq_v2_M_omat.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.fairchem_legacy.FairChemV1Model",
+      "model": {
+        "identifier": "eqV2_86M_omat_mp_salex.pt",
+        "source": "updated_configs/data/models/eqV2_86M_omat_mp_salex.pt",
+        "version": null,
+        "version_status": "local_checkpoint"
+      },
+      "packages": {
+        "fairchem-core": {
+          "constraint": "==1.10.0",
+          "status": "exact"
+        },
+        "torch-sim-atomistic": {
+          "constraint": "==0.5.2",
+          "status": "exact"
+        },
+        "torch": {
+          "constraint": "==2.4.1",
+          "status": "exact",
+          "index": "pytorch-cu124"
+        },
+        "torch-scatter": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pyg-cu124"
+        },
+        "torch-sparse": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pyg-cu124"
+        },
+        "scipy": {
+          "constraint": "<1.17",
+          "status": "constrained"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "eSEN-30M-OAM": {
+      "script": "md_esen_30M_OAM.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.fairchem_legacy.FairChemV1Model",
+      "model": {
+        "identifier": "esen_30m_oam.pt",
+        "source": "updated_configs/data/models/esen_30m_oam.pt",
+        "version": null,
+        "version_status": "local_checkpoint"
+      },
+      "packages": {
+        "fairchem-core": {
+          "constraint": "==1.10.0",
+          "status": "exact"
+        },
+        "torch-sim-atomistic": {
+          "constraint": "==0.5.2",
+          "status": "exact"
+        },
+        "torch": {
+          "constraint": "==2.4.1",
+          "status": "exact",
+          "index": "pytorch-cu124"
+        },
+        "torch-scatter": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pyg-cu124"
+        },
+        "torch-sparse": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pyg-cu124"
+        },
+        "scipy": {
+          "constraint": "<1.17",
+          "status": "constrained"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "grace-mp": {
+      "script": "md_grace_mp.py",
+      "simulation_engine": "torch-sim with a custom TensorFlow/DLPack adapter",
+      "adapter": "local GraceModel wrapping tensorpotential.calculator.TPCalculator",
+      "model": {
+        "identifier": "GRACE-2L-MP-r6",
+        "loader": "grace_fm('GRACE-2L-MP-r6', float_dtype='float64')",
+        "version": "r6",
+        "version_status": "exact_model_identifier"
+      },
+      "packages": {
+        "tensorpotential": {
+          "constraint": "==0.5.7.2",
+          "status": "exact"
+        },
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "vesin"
+          ],
+          "status": "exact"
+        },
+        "tensorflow": {
+          "constraint": ">=2.17,<2.20",
+          "status": "constrained",
+          "source": "uv override-dependencies"
+        },
+        "tf-keras": {
+          "constraint": "==2.19.*",
+          "status": "constrained"
+        },
+        "nvidia-cuda-nvcc-cu12": {
+          "constraint": "==12.8.*",
+          "status": "constrained"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "grace-oam": {
+      "script": "md_grace_oam.py",
+      "simulation_engine": "torch-sim with a custom TensorFlow/DLPack adapter",
+      "adapter": "local GraceModel wrapping tensorpotential.calculator.TPCalculator",
+      "model": {
+        "identifier": "GRACE-2L-OMAT-large-ft-AM-fp32",
+        "source": "updated_configs/data/models/GRACE-2L-OMAT-large-ft-AM-fp32",
+        "version": null,
+        "version_status": "local_fp32_cast_artifact"
+      },
+      "packages": {
+        "tensorpotential": {
+          "constraint": "==0.5.7.2",
+          "status": "exact"
+        },
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "vesin"
+          ],
+          "status": "exact"
+        },
+        "tensorflow": {
+          "constraint": ">=2.17,<2.20",
+          "status": "constrained",
+          "source": "uv override-dependencies"
+        },
+        "tf-keras": {
+          "constraint": "==2.19.*",
+          "status": "constrained"
+        },
+        "nvidia-cuda-nvcc-cu12": {
+          "constraint": "==12.8.*",
+          "status": "constrained"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "mace-mh-omat": {
+      "script": "md_mace_mh_omat.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.mace.MaceModel",
+      "model": {
+        "identifier": "mh-1",
+        "loader": "mace_mp(model='mh-1', return_raw_model=True, default_dtype='float32')",
+        "version": null,
+        "version_status": "named_registry_model"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "mace",
+            "vesin"
+          ],
+          "status": "exact"
+        },
+        "mace-torch": {
+          "constraint": ">=0.3.16",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 mace extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "mace-mp-0": {
+      "script": "md_mace_mp_0.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.mace.MaceModel",
+      "model": {
+        "identifier": "medium",
+        "loader": "mace_mp(model='medium', return_raw_model=True, default_dtype='float32')",
+        "version": "MACE-MP-0 family",
+        "version_status": "named_registry_model"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "mace",
+            "vesin"
+          ],
+          "status": "exact"
+        },
+        "mace-torch": {
+          "constraint": ">=0.3.16",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 mace extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "mace-mpa-0": {
+      "script": "md_mace_mpa_0.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.mace.MaceModel",
+      "model": {
+        "identifier": "mace-mpa-0-medium.model",
+        "source": "updated_configs/data/models/mace-mpa-0-medium.model",
+        "version": "MACE-MPA-0",
+        "version_status": "local_checkpoint"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "mace",
+            "vesin"
+          ],
+          "status": "exact"
+        },
+        "mace-torch": {
+          "constraint": ">=0.3.16",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 mace extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "mattersim-v1-5M": {
+      "script": "md_mattersim_v1_5M.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.mattersim.MatterSimModel",
+      "model": {
+        "identifier": "MatterSim-v1.0.0-5M.pth",
+        "loader": "Potential.from_checkpoint(load_path='MatterSim-v1.0.0-5M.pth', model_name='m3gnet')",
+        "version": "1.0.0",
+        "version_status": "exact_model_identifier"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "mattersim"
+          ],
+          "status": "exact"
+        },
+        "mattersim": {
+          "constraint": ">=1.2.5",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 mattersim extra"
+        },
+        "torch": {
+          "constraint": "==2.11.0+cu128",
+          "status": "exact",
+          "index": "pytorch-cu128"
+        },
+        "torchvision": {
+          "constraint": "==0.26.0+cu128",
+          "status": "exact",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "nequip": {
+      "script": "md_nequip.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.nequip_framework.NequIPFrameworkModel",
+      "model": {
+        "identifier": "mir-group__NequIP-OAM-XL__0.1.nequip.pth",
+        "source": "updated_configs/data/models/mir-group__NequIP-OAM-XL__0.1.nequip.pth",
+        "version": "0.1",
+        "version_status": "local_compiled_checkpoint"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "nequip"
+          ],
+          "status": "exact"
+        },
+        "nequip": {
+          "constraint": ">=0.17.1",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 nequip extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "orb-v2": {
+      "script": "md_orb_v2.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.orb.OrbModel",
+      "model": {
+        "identifier": "orb_v2",
+        "loader": "pretrained.orb_v2(device=device, precision='float32-highest')",
+        "version": "v2",
+        "version_status": "named_registry_model"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "orb"
+          ],
+          "status": "exact"
+        },
+        "orb-models": {
+          "constraint": ">=0.6.2",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 orb extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "orb-v3": {
+      "script": "md_orb_v3.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.orb.OrbModel",
+      "model": {
+        "identifier": "orb_v3_conservative_inf_mpa",
+        "loader": "pretrained.orb_v3_conservative_inf_mpa(device=device, precision='float32-highest')",
+        "version": "v3",
+        "version_status": "named_registry_model"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "orb"
+          ],
+          "status": "exact"
+        },
+        "orb-models": {
+          "constraint": ">=0.6.2",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 orb extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "orb-v3-direct": {
+      "script": "md_orb_v3_direct.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.orb.OrbModel",
+      "model": {
+        "identifier": "orb_v3_direct_20_mpa",
+        "loader": "pretrained.orb_v3_direct_20_mpa(device=device, precision='float32-highest')",
+        "version": "v3 direct 20",
+        "version_status": "named_registry_model"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "orb"
+          ],
+          "status": "exact"
+        },
+        "orb-models": {
+          "constraint": ">=0.6.2",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 orb extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "pet-oam-xl": {
+      "script": "md_pet_oam_xl.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.metatomic.MetatomicModel",
+      "model": {
+        "identifier": "pet-oam-xl",
+        "loader": "get_upet(model='pet-oam', size='xl', version='1.0.0')",
+        "version": "1.0.0",
+        "version_status": "exact"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "metatomic"
+          ],
+          "status": "exact"
+        },
+        "metatomic-torchsim": {
+          "constraint": "==0.1.3",
+          "status": "exact"
+        },
+        "upet": {
+          "constraint": ">=0.2.0",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 metatomic extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "pet-omat-xl": {
+      "script": "md_pet_omat_xl.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.metatomic.MetatomicModel",
+      "model": {
+        "identifier": "pet-omat-xl",
+        "loader": "get_upet(model='pet-omat', size='xl')",
+        "version": null,
+        "version_status": "runtime_resolved"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "metatomic"
+          ],
+          "status": "exact"
+        },
+        "metatomic-torchsim": {
+          "constraint": "==0.1.3",
+          "status": "exact"
+        },
+        "upet": {
+          "constraint": ">=0.2.0",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 metatomic extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "uma-m-omat": {
+      "script": "md_uma_m_omat.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.fairchem.FairChemModel",
+      "model": {
+        "identifier": "uma-m-1p1",
+        "task": "omat",
+        "version": "1p1",
+        "version_status": "exact_model_identifier"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "fairchem"
+          ],
+          "status": "exact"
+        },
+        "fairchem-core": {
+          "constraint": ">=2.20.0",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 fairchem extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    },
+    "uma-s-omat": {
+      "script": "md_uma_s_omat.py",
+      "simulation_engine": "torch-sim",
+      "adapter": "torch_sim.models.fairchem.FairChemModel",
+      "model": {
+        "identifier": "uma-s-1p1",
+        "task": "omat",
+        "version": "1p1",
+        "version_status": "exact_model_identifier"
+      },
+      "packages": {
+        "torch-sim-atomistic": {
+          "constraint": "==0.6.1",
+          "extras": [
+            "fairchem"
+          ],
+          "status": "exact"
+        },
+        "fairchem-core": {
+          "constraint": ">=2.20.0",
+          "status": "indirect",
+          "source": "torch-sim 0.6.1 fairchem extra"
+        },
+        "torch": {
+          "constraint": null,
+          "status": "runtime_resolved",
+          "index": "pytorch-cu128"
+        },
+        "ase": {
+          "constraint": ">=3.26",
+          "status": "constrained"
+        }
+      }
+    }
+  }
+}
