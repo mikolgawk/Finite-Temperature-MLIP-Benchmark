@@ -17,7 +17,7 @@
 # ///
 """Standalone energy/force-only eager NVT MD using NequIP-OAM-L.
 
-Run: uv run md_nequip_force_only.py
+Run: uv run torchsim-scripts/md_nequip.py
 Uses the repository's MD metadata and initial structures; no local helper
 scripts are required.
 """
@@ -38,7 +38,6 @@ import torch_sim as ts
 from ase.io import read
 
 from nequip.data import AtomicDataDict
-from nequip.model.modify_utils import modify
 from torch_sim.models.nequip_framework import NequIPFrameworkModel
 
 
@@ -77,35 +76,31 @@ def load_force_only_nequip(
         compile_mode="eager",
     )
 
-    # The packaged OAM model uses ForceStressOutput. Disable it so the wrapper
-    # below performs one gradient with respect to positions and none with
-    # respect to strain/cell displacement.
-    joint_output_layers = [
-        module
-        for module in calculator.model.modules()
-        if module.__class__.__name__ == "ForceStressOutput"
-    ]
-    if not joint_output_layers:
-        raise RuntimeError("NequIP package has no ForceStressOutput layer to disable")
+    # Packaged models carry their own NequIP code. Older ForceStressOutput
+    # implementations have no do_derivatives branch, so assigning that flag
+    # silently leaves their joint backward pass active. Remove the wrapper
+    # itself, retaining its energy function and every other model layer.
+    removed = 0
 
-    try:
-        energy_model = modify(
-            calculator.model,
-            [{"modifier": "disable_ForceStressOutput"}],
-        )
-    except RuntimeError:
-        # Older packaged-code snapshots may not expose the public modifier even
-        # though they use the same ForceStressOutput short-circuit flag.
-        energy_model = calculator.model
-        for layer in joint_output_layers:
-            layer.do_derivatives = False
+    def remove_joint_output(module):
+        nonlocal removed
+        if module.__class__.__name__ == "ForceStressOutput":
+            if not isinstance(getattr(module, "func", None), torch.nn.Module):
+                raise RuntimeError("Unsupported NequIP ForceStressOutput structure")
+            removed += 1
+            return remove_joint_output(module.func)
+        for name, child in list(module.named_children()):
+            replacement = remove_joint_output(child)
+            if replacement is not child:
+                setattr(module, name, replacement)
+        return module
 
-    if any(
-        layer.do_derivatives
-        for layer in energy_model.modules()
-        if layer.__class__.__name__ == "ForceStressOutput"
-    ):
-        raise RuntimeError("failed to disable NequIP's joint force/stress layer")
+    energy_model = remove_joint_output(calculator.model)
+    if removed == 0:
+        raise RuntimeError("NequIP package has no ForceStressOutput layer to remove")
+    if any(layer.__class__.__name__ == "ForceStressOutput"
+           for layer in energy_model.modules()):
+        raise RuntimeError("failed to remove NequIP's joint force/stress layer")
     calculator.model = PositionGradientOnly(energy_model).to(device).eval()
     calculator.compute_stress = False
     calculator.compute_forces = True
@@ -125,7 +120,7 @@ def assert_eager_module(model):
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parents[2]
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
