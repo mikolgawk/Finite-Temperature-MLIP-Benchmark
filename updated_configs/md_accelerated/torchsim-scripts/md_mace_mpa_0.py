@@ -3,28 +3,19 @@
 # dependencies = [
 #   "torch-sim-atomistic[mace,vesin]==0.6.1",
 #   "ase>=3.26",
-#   "torch",
 #   "cuequivariance-torch>=0.4",
 #   "cuequivariance-ops-torch-cu12",
 # ]
-#
-# [[tool.uv.index]]
-# name = "pytorch-cu128"
-# url = "https://download.pytorch.org/whl/cu128"
-# explicit = true
-#
-# [tool.uv.sources]
-# torch = { index = "pytorch-cu128" }
 # ///
-"""TorchSim NVT production MD — mace-mp-0.
+"""TorchSim NVT production MD — mace-mpa-0.
 
-Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json, which
-records how each reference AIMD was run. The trajectory is saved as HDF5
+Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json,
+which records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
-    <OUT_ROOT>/<system>/nvt_mace-mp-0.h5
+    <OUT_ROOT>/<system>/nvt_mace-mpa-0-compile.h5
 
-Run:  uv run md_mace_mp_0.py
+Run:  uv run md_mace_mpa_0.py
 """
 
 import csv
@@ -43,34 +34,37 @@ torch.backends.cudnn.benchmark = False
 import torch_sim as ts
 from ase.io import read
 
-from mace.calculators import mace_mp
 from torch_sim.models.mace import MaceModel
 from torch_sim.neighbors import vesin_nl_ts
 
 # settings
-MODEL_NAME = "mace-mp-0"
+MODEL_NAME = "mace-mpa-0-compile"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+CHECKPOINT = REPO / "updated_configs" / "data" / "models" / "mace-mpa-0-medium.model"
 
-SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1
 SY_STEPS = 3
 ACCELERATION = True           # cuEquivariance fused CUDA kernels for MACE
+COMPILE_MODE = "reduce-overhead"  # torch.compile + CUDA graphs around the CuEq model
 SEED = 42                     # Maxwell-Boltzmann velocity seed
 STATE_DTYPE = torch.float32
 
 device = torch.device("cuda")
 
 # model
+# local checkpoint file, loaded directly by the wrapper
 model = MaceModel(
-    model=mace_mp(model="medium", return_raw_model=True, default_dtype="float32"),
+    model=CHECKPOINT,
     device=device, dtype=torch.float32, compute_forces=True, compute_stress=False,
     enable_cueq=ACCELERATION,
-    neighbor_list_fn=vesin_nl_ts,  # default NVIDIA NL overflows on dense fluids like H at 1050 K
+    compile_mode=COMPILE_MODE,
+    neighbor_list_fn=vesin_nl_ts,  # robust for dense systems such as H at 1050 K
 )
+
 
 # NVT MD loop, one entry per system in the metadata file
 METADATA = json.loads(METADATA_FILE.read_text())
@@ -93,7 +87,8 @@ for name, meta in METADATA.items():
     tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
     thermostat = meta["thermostat_type"]
     stride = int(meta["position_print_stride"] or 1)
-    n_steps = round(SIMULATION_LENGTH_PS * 1000.0 / dt_fs)
+    trajectory_length_ps = float(meta["trajectory_length_ps"])
+    n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
 
     if thermostat == "Langevin":
         integrator = ts.Integrator.nvt_langevin
@@ -112,7 +107,7 @@ for name, meta in METADATA.items():
     else:
         raise SystemExit(f"{name}: unknown thermostat type {thermostat!r} in metadata")
 
-    atoms0 = read(init_file, index=0)                      # reference frame 0
+    atoms0 = read(init_file, index=0)                       # reference frame 0
     out_dir.mkdir(parents=True, exist_ok=True)
 
     state = ts.initialize_state(atoms0, device, STATE_DTYPE)
@@ -143,7 +138,7 @@ for name, meta in METADATA.items():
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
 
-    with open(out_dir / f"md_timing_{MODEL_NAME}.csv", "w", newline="") as f:
+    with open(out_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["calculator", "system", "temperature_K",
                                                "n_steps", "time_step_fs", "thermostat",
                                                "tau_fs", "record_interval",
@@ -156,7 +151,8 @@ for name, meta in METADATA.items():
                          "tau_fs": tau_fs, "record_interval": stride,
                          "elapsed_seconds": f"{elapsed:.2f}",
                          "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                         "engine": f"torch-sim-0.6.1{'+cueq' if ACCELERATION else ''}", "seed": SEED})
+                         "engine": (f"torch-sim-0.6.1{'+cueq' if ACCELERATION else ''}"
+                                    f"+compile-{COMPILE_MODE}"), "seed": SEED})
     print(f"[{MODEL_NAME}] {name}: saved {out_h5} "
           f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)")
 

@@ -2,21 +2,19 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #   "torch-sim-atomistic==0.6.1",
-#   "fairchem-core>=2.20.0",
+#   "orb-models",
 #   "ase>=3.26",
 # ]
 # ///
-"""TorchSim NVT production MD — uma-s-omat.
+"""Stress-free TorchSim NVT production MD — orb-v3.
 
-Port of updated_configs/md_production/md_script-generic.py: same protocol
-(Nose-Hoover chain, tchain=1, tdamp=20 fs, 22 ps, per-system timestep,
-temperature from the system directory name, initial structure = reference
-frame 0), run on torch-sim's GPU integrator. The trajectory is saved as HDF5 with
-positions and velocities every RECORD_INTERVAL steps:
+Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json,
+which records how each reference AIMD was run. The trajectory is saved as HDF5
+with positions and velocities:
 
-    <OUT_ROOT>/<system>/nvt_uma-s-omat.h5
+    <OUT_ROOT>/<system>/nvt_orb-v3-force-only.h5
 
-Run:  uv run md_uma_s_omat.py
+Run:  uv run md_orb_v3_force_only.py
 """
 
 import csv
@@ -35,44 +33,35 @@ torch.backends.cudnn.benchmark = False
 import torch_sim as ts
 from ase.io import read
 
-from torch_sim.models.fairchem import FairChemModel
+from orb_models.forcefield import pretrained
+from torch_sim.models.orb import OrbModel
 
 # settings
-MODEL_NAME = "uma-s-omat"
+MODEL_NAME = "orb-v3-force-only"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
-SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1
 SY_STEPS = 3
-ACCELERATION = True           # torch.compile + no activation checkpointing; fp32 numerics unchanged
+ACCELERATION = True           # torch.compile kernel fusion; same fp32 numerics
 SEED = 42                     # Maxwell-Boltzmann velocity seed
 STATE_DTYPE = torch.float32
 
 device = torch.device("cuda")
 
 # model
-# HF-gated checkpoint: run `huggingface-cli login` first
-# fairchem's torch-sim wrapper has no inference_settings passthrough; it calls
-# pretrained_mlip.get_predict_unit(...) internally, so inject settings at the factory.
-if ACCELERATION:
-    from dataclasses import replace
-    from fairchem.core import pretrained_mlip
-    from fairchem.core.units.mlip_unit import InferenceSettings
+# conservative variant
+orb_ff, adapter = pretrained.orb_v3_conservative_inf_mpa(
+    device=device,
+    precision="float32-highest",   # always true fp32 matmuls, never TF32
+    compile=ACCELERATION,
+)
+orb_ff.disable_stress()
+model = OrbModel(orb_ff, adapter, device=device, dtype=torch.float32)
 
-    _get_predict_unit = pretrained_mlip.get_predict_unit
-
-    def _accelerated(model_name, **kwargs):
-        kwargs.setdefault("inference_settings", replace(
-            InferenceSettings(), compile=True, activation_checkpointing=False))
-        return _get_predict_unit(model_name, **kwargs)
-
-    pretrained_mlip.get_predict_unit = _accelerated
-
-model = FairChemModel(model="uma-s-1p1", task_name="omat", device=device, compute_stress=False)
 
 # NVT MD loop, one entry per system in the metadata file
 METADATA = json.loads(METADATA_FILE.read_text())
@@ -95,7 +84,8 @@ for name, meta in METADATA.items():
     tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
     thermostat = meta["thermostat_type"]
     stride = int(meta["position_print_stride"] or 1)
-    n_steps = round(SIMULATION_LENGTH_PS * 1000.0 / dt_fs)
+    trajectory_length_ps = float(meta["trajectory_length_ps"])
+    n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
 
     if thermostat == "Langevin":
         integrator = ts.Integrator.nvt_langevin
@@ -114,7 +104,7 @@ for name, meta in METADATA.items():
     else:
         raise SystemExit(f"{name}: unknown thermostat type {thermostat!r} in metadata")
 
-    atoms0 = read(init_file, index=0)                      # reference frame 0
+    atoms0 = read(init_file, index=0)                       # reference frame 0
     out_dir.mkdir(parents=True, exist_ok=True)
 
     state = ts.initialize_state(atoms0, device, STATE_DTYPE)
@@ -145,7 +135,7 @@ for name, meta in METADATA.items():
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
 
-    with open(out_dir / f"md_timing_{MODEL_NAME}.csv", "w", newline="") as f:
+    with open(out_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["calculator", "system", "temperature_K",
                                                "n_steps", "time_step_fs", "thermostat",
                                                "tau_fs", "record_interval",
@@ -158,7 +148,7 @@ for name, meta in METADATA.items():
                          "tau_fs": tau_fs, "record_interval": stride,
                          "elapsed_seconds": f"{elapsed:.2f}",
                          "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                         "engine": f"torch-sim-0.6.1{'+compile' if ACCELERATION else ''}", "seed": SEED})
+                         "engine": f"torch-sim-0.6.1{'+compile' if ACCELERATION else ''}+force-only", "seed": SEED})
     print(f"[{MODEL_NAME}] {name}: saved {out_h5} "
           f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)")
 

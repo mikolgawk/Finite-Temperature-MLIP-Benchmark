@@ -1,22 +1,30 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "torch-sim-atomistic==0.6.1",
-#   "fairchem-core>=2.20.0",
+#   "torch-sim-atomistic[mace,vesin]==0.6.1",
 #   "ase>=3.26",
+#   "torch",
+#   "cuequivariance-torch>=0.4",
+#   "cuequivariance-ops-torch-cu12",
 # ]
+#
+# [[tool.uv.index]]
+# name = "pytorch-cu128"
+# url = "https://download.pytorch.org/whl/cu128"
+# explicit = true
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-cu128" }
 # ///
-"""TorchSim NVT production MD — uma-m-omat.
+"""TorchSim NVT production MD — mace-mh-omat.
 
-Port of updated_configs/md_production/md_script-generic.py: same protocol
-(Nose-Hoover chain, tchain=1, tdamp=20 fs, 22 ps, per-system timestep,
-temperature from the system directory name, initial structure = reference
-frame 0), run on torch-sim's GPU integrator. The trajectory is saved as HDF5 with
-positions and velocities every RECORD_INTERVAL steps:
+Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json, which
+records how each reference AIMD was run. The trajectory is saved as HDF5
+with positions and velocities:
 
-    <OUT_ROOT>/<system>/nvt_uma-m-omat.h5
+    <OUT_ROOT>/<system>/nvt_mace-mh-omat-compile.h5
 
-Run:  uv run md_uma_m_omat.py
+Run:  uv run md_mace_mh_omat.py
 """
 
 import csv
@@ -35,43 +43,37 @@ torch.backends.cudnn.benchmark = False
 import torch_sim as ts
 from ase.io import read
 
-from torch_sim.models.fairchem import FairChemModel
+from mace.calculators import mace_mp
+from torch_sim.models.mace import MaceModel
+from torch_sim.neighbors import vesin_nl_ts
 
 # settings
-MODEL_NAME = "uma-m-omat"
+MODEL_NAME = "mace-mh-omat-compile"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
-SIMULATION_LENGTH_PS = 22.0   # production length, same as the ASE benchmark
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1
 SY_STEPS = 3
-ACCELERATION = True           # torch.compile + no activation checkpointing; fp32 numerics unchanged
+ACCELERATION = True           # cuEquivariance fused CUDA kernels for MACE
+COMPILE_MODE = "reduce-overhead"  # torch.compile + CUDA graphs around the CuEq model
 SEED = 42                     # Maxwell-Boltzmann velocity seed
 STATE_DTYPE = torch.float32
 
 device = torch.device("cuda")
 
 # model
-# fairchem's torch-sim wrapper has no inference_settings passthrough; it calls
-# pretrained_mlip.get_predict_unit(...) internally, so inject settings at the factory.
-if ACCELERATION:
-    from dataclasses import replace
-    from fairchem.core import pretrained_mlip
-    from fairchem.core.units.mlip_unit import InferenceSettings
-
-    _get_predict_unit = pretrained_mlip.get_predict_unit
-
-    def _accelerated(model_name, **kwargs):
-        kwargs.setdefault("inference_settings", replace(
-            InferenceSettings(), compile=True, activation_checkpointing=False))
-        return _get_predict_unit(model_name, **kwargs)
-
-    pretrained_mlip.get_predict_unit = _accelerated
-
-model = FairChemModel(model="uma-m-1p1", task_name="omat", device=device, compute_stress=False)
+# mh-1 with the omat_pbe head
+model = MaceModel(
+    model=mace_mp(model="mh-1", return_raw_model=True, default_dtype="float32"),
+    device=device, dtype=torch.float32, compute_forces=True, compute_stress=False,
+    head="omat_pbe",
+    enable_cueq=ACCELERATION,
+    compile_mode=COMPILE_MODE,
+    neighbor_list_fn=vesin_nl_ts,  # default NVIDIA NL overflows on dense fluids like H at 1050 K
+)
 
 # NVT MD loop, one entry per system in the metadata file
 METADATA = json.loads(METADATA_FILE.read_text())
@@ -94,7 +96,8 @@ for name, meta in METADATA.items():
     tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
     thermostat = meta["thermostat_type"]
     stride = int(meta["position_print_stride"] or 1)
-    n_steps = round(SIMULATION_LENGTH_PS * 1000.0 / dt_fs)
+    trajectory_length_ps = float(meta["trajectory_length_ps"])
+    n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
 
     if thermostat == "Langevin":
         integrator = ts.Integrator.nvt_langevin
@@ -144,7 +147,7 @@ for name, meta in METADATA.items():
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
 
-    with open(out_dir / f"md_timing_{MODEL_NAME}.csv", "w", newline="") as f:
+    with open(out_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["calculator", "system", "temperature_K",
                                                "n_steps", "time_step_fs", "thermostat",
                                                "tau_fs", "record_interval",
@@ -157,7 +160,8 @@ for name, meta in METADATA.items():
                          "tau_fs": tau_fs, "record_interval": stride,
                          "elapsed_seconds": f"{elapsed:.2f}",
                          "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                         "engine": f"torch-sim-0.6.1{'+compile' if ACCELERATION else ''}", "seed": SEED})
+                         "engine": (f"torch-sim-0.6.1{'+cueq' if ACCELERATION else ''}"
+                                    f"+compile-{COMPILE_MODE}"), "seed": SEED})
     print(f"[{MODEL_NAME}] {name}: saved {out_h5} "
           f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)")
 
