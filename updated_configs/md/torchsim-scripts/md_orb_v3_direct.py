@@ -1,3 +1,32 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "torch-sim-atomistic[orb]==0.6.1",
+#   "orb-models==0.6.2",
+#   "ase>=3.26",
+#   "torch",
+# ]
+#
+# [[tool.uv.index]]
+# name = "pytorch-cu128"
+# url = "https://download.pytorch.org/whl/cu128"
+# explicit = true
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-cu128" }
+# ///
+"""Force-only eager TorchSim NVT production MD using direct-force ORB v3 MPA."""
+
+import torch
+
+torch.set_float32_matmul_precision("highest")
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+torch.backends.cudnn.benchmark = False
+
+from orb_models.forcefield import pretrained
+from torch_sim.models.orb import OrbModel
+
 """Shared production-MD loop for TorchSim model runners."""
 
 import csv
@@ -155,3 +184,58 @@ def run_torchsim_md(
         )
 
     print(f"[{model_name}] done.")
+"""Uncompiled PyTorch loaders for the separate eager MD runners."""
+
+
+def assert_eager_module(model):
+    """Reject TorchScript and torch.compile modules, including nested modules."""
+    import torch
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    for name, module in model.named_modules():
+        if isinstance(module, (torch.jit.ScriptModule, OptimizedModule)):
+            raise RuntimeError(f"Compiled module in eager model: {name or '<root>'}")
+        if getattr(module, "_compiled_call_impl", None) is not None:
+            raise RuntimeError(f"Compiled call in eager model: {name or '<root>'}")
+
+
+def load_eager_pet(*, model, size, version, checkpoint_path=None):
+    """Follow UPET 0.2.6's loader but omit its final torch.jit.script call."""
+    from upet._models import _get_upet_exported_atomistic_model
+    from huggingface_hub import hf_hub_download, try_to_load_from_cache
+
+    if checkpoint_path is None:
+        filename = f"models/{model}-{size}-v{version}.ckpt"
+        cached = try_to_load_from_cache("lab-cosmo/upet", filename)
+        checkpoint_path = cached if isinstance(cached, str) else hf_hub_download(
+            "lab-cosmo/upet", filename=filename
+        )
+    model = _get_upet_exported_atomistic_model(
+        model=model, size=size, version=version, checkpoint_path=checkpoint_path
+    )
+    model.eval()
+    for parameter in model.parameters():
+        parameter.requires_grad_(False)
+    assert_eager_module(model)
+    return model
+
+
+def main():
+    device = torch.device("cuda")
+    orb_ff, atoms_adapter = pretrained.orb_v3_direct_20_mpa(
+        device=device, precision="float32-highest", compile=False
+    )
+    # This prevents evaluation of the direct stress head.
+    orb_ff.disable_stress()
+    assert_eager_module(orb_ff)
+    model = OrbModel(orb_ff, atoms_adapter, device=device)
+
+    run_torchsim_md(
+        "orb-v3-direct-force-only-eager",
+        model,
+        "torch-sim-0.6.1+orb-models-0.6.2-force-only-eager",
+    )
+
+
+if __name__ == "__main__":
+    main()

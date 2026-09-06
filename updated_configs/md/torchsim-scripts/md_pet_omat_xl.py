@@ -1,7 +1,11 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "torch-sim-atomistic[mace,vesin]==0.6.1",
+#   "torch-sim-atomistic[metatomic]==0.6.1",
+#   "upet==0.2.6",
+#   "metatomic-torchsim==0.1.3",  # 0.1.4 calls vesin's NeighborList(skin=...),
+#                                 # a kwarg only added in vesin>=0.6, but 0.1.4
+#                                 # itself pins vesin<0.6 - always TypeErrors.
 #   "ase>=3.26",
 #   "torch",
 # ]
@@ -14,21 +18,26 @@
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
 # ///
-"""TorchSim NVT production MD — mace-mpa-0.
+"""Eager force-only TorchSim NVT production MD — pet-omat-xl.
 
 Per-system MD parameters come from data/ref-trajs/md_metadata.json, which
 records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
-    <OUT_ROOT>/<system>/nvt_mace-mpa-0.h5
+    <OUT_ROOT>/<system>/nvt_pet-omat-xl-force-only-eager.h5
 
-Run:  uv run md_mace_mpa_0.py
+Run:  uv run md_pet_omat_xl_force_only_eager.py
 """
 
 import csv
 import json
+import os
 import time
 from pathlib import Path
+
+# Vesin reads this at import time.  PET's large cutoff produces 2,098
+# neighbors/atom for dense periodic H at 1050 K, above Vesin's 1,000 default.
+os.environ["VESIN_CUDA_MAX_PAIRS_PER_POINT"] = "4096"
 
 import torch
 
@@ -40,9 +49,40 @@ torch.backends.cudnn.benchmark = False
 
 import torch_sim as ts
 from ase.io import read
+"""Uncompiled PyTorch loaders for the separate eager MD runners."""
 
-from torch_sim.models.mace import MaceModel
-from torch_sim.neighbors import vesin_nl_ts
+
+def assert_eager_module(model):
+    """Reject TorchScript and torch.compile modules, including nested modules."""
+    import torch
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    for name, module in model.named_modules():
+        if isinstance(module, (torch.jit.ScriptModule, OptimizedModule)):
+            raise RuntimeError(f"Compiled module in eager model: {name or '<root>'}")
+        if getattr(module, "_compiled_call_impl", None) is not None:
+            raise RuntimeError(f"Compiled call in eager model: {name or '<root>'}")
+
+
+def load_eager_pet(*, model, size, version, checkpoint_path=None):
+    """Follow UPET 0.2.6's loader but omit its final torch.jit.script call."""
+    from upet._models import _get_upet_exported_atomistic_model
+    from huggingface_hub import hf_hub_download, try_to_load_from_cache
+
+    if checkpoint_path is None:
+        filename = f"models/{model}-{size}-v{version}.ckpt"
+        cached = try_to_load_from_cache("lab-cosmo/upet", filename)
+        checkpoint_path = cached if isinstance(cached, str) else hf_hub_download(
+            "lab-cosmo/upet", filename=filename
+        )
+    model = _get_upet_exported_atomistic_model(
+        model=model, size=size, version=version, checkpoint_path=checkpoint_path
+    )
+    model.eval()
+    for parameter in model.parameters():
+        parameter.requires_grad_(False)
+    assert_eager_module(model)
+    return model
 """Shared production-MD loop for TorchSim model runners."""
 
 import csv
@@ -201,27 +241,41 @@ def run_torchsim_md(
 
     print(f"[{model_name}] done.")
 
-# settings
-MODEL_NAME = "mace-mpa-0"
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
-METADATA_FILE = REPO / "updated_configs" /  "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
-CHECKPOINT = REPO / "updated_configs" / "data" / "models" / "mace-mpa-0-medium.model"
+from torch_sim.models.metatomic import MetatomicModel
+import metatomic_torchsim._neighbors as metatomic_neighbors
 
-CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
-CHAIN_STEPS = 1
-SY_STEPS = 3
-SEED = 42                     # Maxwell-Boltzmann velocity seed
-STATE_DTYPE = torch.float32
+def main():
+    # settings
+    MODEL_NAME = "pet-omat-xl-force-only-eager"
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent.parent
+    METADATA_FILE = REPO / "updated_configs" /  "data" / "ref-trajs" / "md_metadata.json"
+    OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
-device = torch.device("cuda")
+    CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
+    CHAIN_STEPS = 1
+    SY_STEPS = 3
+    SEED = 42                     # Maxwell-Boltzmann velocity seed
+    STATE_DTYPE = torch.float32
 
-# model
-model = MaceModel(
-    model=CHECKPOINT,
-    device=device, dtype=torch.float32, compute_forces=True, compute_stress=False,
-    neighbor_list_fn=vesin_nl_ts,  # default NVIDIA NL overflows on dense fluids like H at 1050 K
-)
+    device = torch.device("cuda")
 
-run_torchsim_md(MODEL_NAME, model, "torch-sim-0.6.1")
+    # nvalchemiops' CUDA full-list implementation has a fixed per-atom neighbor
+    # capacity (848 in the installed version).  Dense periodic H at 1050 K needs
+    # 2,098 neighbors, so use metatomic-torchsim's Vesin fallback instead.
+    # This must be set before MetatomicModel constructs its neighbor calculators.
+    metatomic_neighbors.HAS_NVALCHEMIOPS = False
+
+    # model
+    # PET, xl size, OMat-only checkpoint (PBE, not MP-consistent), latest version as in
+    # the ASE benchmark
+    model = MetatomicModel(
+        model=load_eager_pet(model="pet-omat", size="xl", version="1.0.0"),
+        device=device, compute_stress=False,
+    )
+
+    run_torchsim_md(MODEL_NAME, model, "torch-sim-0.6.1+pet-eager-force-only")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,8 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "torch-sim-atomistic[mace,vesin]==0.6.1",
+#   "torch-sim-atomistic[nequip]==0.6.1",
+#   "nequip>=0.19.1",
 #   "ase>=3.26",
 #   "torch",
 # ]
@@ -14,45 +15,113 @@
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
 # ///
-"""TorchSim NVT production MD — mace-mpa-0.
+"""Standalone energy/force-only eager NVT MD using NequIP-OAM-L.
 
-Per-system MD parameters come from data/ref-trajs/md_metadata.json, which
-records how each reference AIMD was run. The trajectory is saved as HDF5
-with positions and velocities:
-
-    <OUT_ROOT>/<system>/nvt_mace-mpa-0.h5
-
-Run:  uv run md_mace_mpa_0.py
+Run: uv run md_nequip_force_only.py
+Uses the repository's MD metadata and initial structures; no local helper
+scripts are required.
 """
-
-import csv
-import json
-import time
-from pathlib import Path
 
 import torch
 
-# no TF32, no autotuned kernels
 torch.set_float32_matmul_precision("highest")
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 torch.backends.cudnn.benchmark = False
 
-import torch_sim as ts
-from ase.io import read
-
-from torch_sim.models.mace import MaceModel
-from torch_sim.neighbors import vesin_nl_ts
-"""Shared production-MD loop for TorchSim model runners."""
-
 import csv
 import json
 import time
 from pathlib import Path
 
-import torch
 import torch_sim as ts
 from ase.io import read
+
+from nequip.data import AtomicDataDict
+from nequip.model.modify_utils import modify
+from torch_sim.models.nequip_framework import NequIPFrameworkModel
+
+
+class PositionGradientOnly(torch.nn.Module):
+    """Add forces to an energy-only NequIP graph without cell differentiation."""
+
+    def __init__(self, energy_model: torch.nn.Module) -> None:
+        super().__init__()
+        self.energy_model = energy_model
+
+    def forward(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # Detaching makes positions an independent differentiation variable and
+        # deliberately leaves the cell outside the autograd graph.
+        positions = data[AtomicDataDict.POSITIONS_KEY].detach().requires_grad_(True)
+        data = dict(data)
+        data[AtomicDataDict.POSITIONS_KEY] = positions
+
+        output = self.energy_model(data)
+        energy = output[AtomicDataDict.TOTAL_ENERGY_KEY]
+        forces = -torch.autograd.grad(
+            energy.sum(), positions, create_graph=self.training
+        )[0]
+        output[AtomicDataDict.FORCE_KEY] = forces
+        return output
+
+
+def load_force_only_nequip(
+    model_source: str, device: torch.device | str
+) -> NequIPFrameworkModel:
+    """Load an OAM package and replace joint force/stress differentiation."""
+    calculator = NequIPFrameworkModel._from_saved_model(
+        model_path=model_source,
+        device=device,
+        chemical_species_to_atom_type_map=True,
+        allow_tf32=False,
+        compile_mode="eager",
+    )
+
+    # The packaged OAM model uses ForceStressOutput. Disable it so the wrapper
+    # below performs one gradient with respect to positions and none with
+    # respect to strain/cell displacement.
+    joint_output_layers = [
+        module
+        for module in calculator.model.modules()
+        if module.__class__.__name__ == "ForceStressOutput"
+    ]
+    if not joint_output_layers:
+        raise RuntimeError("NequIP package has no ForceStressOutput layer to disable")
+
+    try:
+        energy_model = modify(
+            calculator.model,
+            [{"modifier": "disable_ForceStressOutput"}],
+        )
+    except RuntimeError:
+        # Older packaged-code snapshots may not expose the public modifier even
+        # though they use the same ForceStressOutput short-circuit flag.
+        energy_model = calculator.model
+        for layer in joint_output_layers:
+            layer.do_derivatives = False
+
+    if any(
+        layer.do_derivatives
+        for layer in energy_model.modules()
+        if layer.__class__.__name__ == "ForceStressOutput"
+    ):
+        raise RuntimeError("failed to disable NequIP's joint force/stress layer")
+    calculator.model = PositionGradientOnly(energy_model).to(device).eval()
+    calculator.compute_stress = False
+    calculator.compute_forces = True
+    return calculator
+
+
+def assert_eager_module(model):
+    """Reject TorchScript and torch.compile modules, including nested modules."""
+    import torch
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    for name, module in model.named_modules():
+        if isinstance(module, (torch.jit.ScriptModule, OptimizedModule)):
+            raise RuntimeError(f"Compiled module in eager model: {name or '<root>'}")
+        if getattr(module, "_compiled_call_impl", None) is not None:
+            raise RuntimeError(f"Compiled call in eager model: {name or '<root>'}")
 
 
 HERE = Path(__file__).resolve().parent
@@ -201,27 +270,17 @@ def run_torchsim_md(
 
     print(f"[{model_name}] done.")
 
-# settings
-MODEL_NAME = "mace-mpa-0"
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
-METADATA_FILE = REPO / "updated_configs" /  "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
-CHECKPOINT = REPO / "updated_configs" / "data" / "models" / "mace-mpa-0-medium.model"
 
-CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
-CHAIN_STEPS = 1
-SY_STEPS = 3
-SEED = 42                     # Maxwell-Boltzmann velocity seed
-STATE_DTYPE = torch.float32
+def main():
+    device = torch.device("cuda")
+    model = load_force_only_nequip(
+        "nequip.net:mir-group/NequIP-OAM-L:0.1", device=device
+    )
+    assert_eager_module(model.model)
+    run_torchsim_md(
+        "nequip-oam-l-force-only", model, "torch-sim-0.6.1+nequip-eager-force-only"
+    )
 
-device = torch.device("cuda")
 
-# model
-model = MaceModel(
-    model=CHECKPOINT,
-    device=device, dtype=torch.float32, compute_forces=True, compute_stress=False,
-    neighbor_list_fn=vesin_nl_ts,  # default NVIDIA NL overflows on dense fluids like H at 1050 K
-)
-
-run_torchsim_md(MODEL_NAME, model, "torch-sim-0.6.1")
+if __name__ == "__main__":
+    main()
