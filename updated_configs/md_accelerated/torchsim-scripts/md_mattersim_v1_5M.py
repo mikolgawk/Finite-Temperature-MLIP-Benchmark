@@ -26,7 +26,7 @@ with positions and velocities:
 
     <OUT_ROOT>/<system>/nvt_mattersim-v1-5M-compile-force-only.h5
 
-Run:  uv run md_mattersim_v1_5M_force_only_compile.py
+Run:  uv run md_mattersim_v1_5M.py
 """
 
 import csv
