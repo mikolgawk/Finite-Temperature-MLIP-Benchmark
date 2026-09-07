@@ -243,9 +243,19 @@ def ensure_compiled_model() -> Path:
     return COMPILED_MODEL
 
 
+class ForceOnlyNequIPTorchSimCalc(NequIPTorchSimCalc):
+    """Load the custom energy/force export instead of the standard batch outputs."""
+
+    @classmethod
+    def _get_aoti_compile_target(cls) -> dict:
+        target = dict(super()._get_aoti_compile_target())
+        target["output"] = ["total_energy", "forces"]
+        return target
+
+
 def load_model() -> NequIPTorchSimCalc:
     compile_path = ensure_compiled_model()
-    model = NequIPTorchSimCalc.from_compiled_model(
+    model = ForceOnlyNequIPTorchSimCalc.from_compiled_model(
         compile_path=compile_path,
         device=DEVICE,
         chemical_species_to_atom_type_map=True,
