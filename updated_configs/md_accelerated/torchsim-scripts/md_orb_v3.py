@@ -39,7 +39,7 @@ from torch_sim.models.orb import OrbModel
 # settings
 MODEL_NAME = "orb-v3-force-only"
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parent.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 

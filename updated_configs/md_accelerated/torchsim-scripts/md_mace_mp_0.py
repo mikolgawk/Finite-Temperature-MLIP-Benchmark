@@ -41,7 +41,7 @@ from torch_sim.neighbors import vesin_nl_ts
 # settings
 MODEL_NAME = "mace-mp-0-compile"
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parent.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 

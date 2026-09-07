@@ -121,7 +121,7 @@ class ForceOnlyTorchSimWrapper(TorchSimWrapper):
 # settings
 MODEL_NAME = "mattersim-v1-5M-compile-force-only"
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parent.parent.parent
 METADATA_FILE = REPO / "updated_configs" /  "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 

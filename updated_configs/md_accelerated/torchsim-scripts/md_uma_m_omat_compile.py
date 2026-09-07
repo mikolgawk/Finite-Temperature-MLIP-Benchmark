@@ -80,7 +80,7 @@ if INFERENCE_MODE not in {"compile", "turbo"}:
 
 MODEL_NAME = f"uma-m-omat-{INFERENCE_MODE}-force-only"
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parent.parent.parent
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
