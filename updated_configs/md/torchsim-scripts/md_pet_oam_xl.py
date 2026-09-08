@@ -96,7 +96,7 @@ from ase.io import read
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parents[2]
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
@@ -248,7 +248,7 @@ def main():
     # settings
     MODEL_NAME = "pet-oam-xl-force-only-eager"
     HERE = Path(__file__).resolve().parent
-    REPO = HERE.parent.parent
+    REPO = HERE.parents[2]
     METADATA_FILE = REPO / "updated_configs" /  "data" / "ref-trajs" / "md_metadata.json"
     OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 

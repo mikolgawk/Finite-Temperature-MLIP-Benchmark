@@ -115,7 +115,7 @@ from ase.io import read
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parents[2]
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
@@ -262,7 +262,7 @@ def run_torchsim_md(
 
 
 def main():
-    checkpoint = Path(__file__).resolve().parent.parent / "data" / "models" / "esen_30m_oam.pt"
+    checkpoint = REPO / "updated_configs" / "data" / "models" / "esen_30m_oam.pt"
     model = load_force_only_legacy(checkpoint, "esen", torch.device("cuda"))
     run_torchsim_md(
         "eSEN-30M-OAM-force-only", model,

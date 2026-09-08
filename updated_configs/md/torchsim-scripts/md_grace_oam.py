@@ -152,7 +152,7 @@ from ase.io import read
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parents[2]
 METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
 
@@ -443,7 +443,7 @@ def main():
     # settings
     MODEL_NAME = "grace-oam-force-only-eager"
     HERE = Path(__file__).resolve().parent
-    REPO = HERE.parent.parent
+    REPO = HERE.parents[2]
     METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
     OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-matched"
     MODEL_PATH = REPO / "updated_configs" / "data" / "models" / "GRACE-2L-OMAT-large-ft-AM-fp32"
