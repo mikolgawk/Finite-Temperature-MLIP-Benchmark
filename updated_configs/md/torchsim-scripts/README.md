@@ -127,7 +127,15 @@ HDF5 trajectories save velocities, with force saving disabled. Timing CSVs recor
 the simulation settings, elapsed time, time per step, engine, and seed. Each
 system has a warmup evaluation before the timed integration.
 
-An existing timing CSV causes that model/system pair to be skipped. Rerunning
+If a system raises an exception during setup, warmup, integration, or timing
+output, the script reports the error, writes a **zero-byte timing CSV** (no header
+or rows), and continues to the next system. Any partial HDF5 trajectory may remain
+and should not be treated as a completed run. If the failure CSV cannot be written,
+that error is reported and the script still continues. Keyboard interrupts and
+model-loading failures before the system loop are not caught by this handler.
+
+An existing timing CSV, including an empty failure CSV, causes that model/system
+pair to be skipped. Remove the empty CSV to retry a failed pair. Rerunning
 the batch therefore skips completed pairs, but does not resume an interrupted
 trajectory from its last frame. To intentionally repeat a completed pair, move
 its existing trajectory and timing CSV aside before rerunning the model.
