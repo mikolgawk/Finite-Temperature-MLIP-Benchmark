@@ -289,101 +289,110 @@ def thermostat_settings(
 
 
 def run_system(name: str, meta: dict[str, object], model: NequIPTorchSimCalc) -> None:
-    init_file = REPO / str(meta["initfile_path"])
-    if not init_file.is_file():
-        print(f"[{MODEL_NAME}] {name}: init file missing, skipping ({init_file})")
-        return
-
     out_dir = OUT_ROOT / name
     out_h5 = out_dir / f"nvt_{MODEL_NAME}.h5"
     out_csv = out_dir / f"md_timing_{MODEL_NAME}.csv"
-    if out_h5.exists() and out_csv.exists():
+    if out_csv.exists():
         print(f"[{MODEL_NAME}] {name}: output exists, skipping")
         return
 
-    temperature_k = float(meta["temperature"])
-    timestep_fs = float(meta["timestep"])
-    tau_fs = float(meta["thermostat_coupling_constant"])
-    thermostat = str(meta["thermostat_type"])
-    stride = int(meta["position_print_stride"] or 1)
-    n_steps = round(float(meta["trajectory_length_ps"]) * 1000.0 / timestep_fs)
-    integrator, init_kwargs, step_kwargs = thermostat_settings(thermostat, tau_fs)
+    try:
+        init_file = REPO / str(meta["initfile_path"])
+        if not init_file.is_file():
+            print(f"[{MODEL_NAME}] {name}: init file missing, skipping ({init_file})")
+            return
 
-    atoms = read(init_file, index=0)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    state = ts.initialize_state(atoms, DEVICE, STATE_DTYPE)
-    state.rng = SEED
+        temperature_k = float(meta["temperature"])
+        timestep_fs = float(meta["timestep"])
+        tau_fs = float(meta["thermostat_coupling_constant"])
+        thermostat = str(meta["thermostat_type"])
+        stride = int(meta["position_print_stride"] or 1)
+        n_steps = round(float(meta["trajectory_length_ps"]) * 1000.0 / timestep_fs)
+        integrator, init_kwargs, step_kwargs = thermostat_settings(thermostat, tau_fs)
 
-    print(
-        f"[{MODEL_NAME}] {name}: T={temperature_k:.0f} K, dt={timestep_fs:g} fs, "
-        f"{thermostat} tau={tau_fs:g} fs, {n_steps} steps, {len(atoms)} atoms, "
-        f"stride {stride}"
-    )
-    torch.cuda.synchronize()
-    start = time.perf_counter()
+        atoms = read(init_file, index=0)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        state = ts.initialize_state(atoms, DEVICE, STATE_DTYPE)
+        state.rng = SEED
 
-    ts.integrate(
-        system=state,
-        model=model,
-        integrator=integrator,
-        n_steps=n_steps,
-        temperature=temperature_k,
-        timestep=timestep_fs / 1000.0,
-        init_kwargs=init_kwargs,
-        trajectory_reporter={
-            "filenames": [str(out_h5)],
-            "state_frequency": stride,
-            "state_kwargs": {"save_velocities": True, "save_forces": False},
-        },
-        pbar=True,
-        **step_kwargs,
-    )
-
-    torch.cuda.synchronize()
-    elapsed = time.perf_counter() - start
-
-    with out_csv.open("w", newline="") as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=[
-                "calculator",
-                "system",
-                "temperature_K",
-                "n_steps",
-                "time_step_fs",
-                "thermostat",
-                "tau_fs",
-                "record_interval",
-                "elapsed_seconds",
-                "seconds_per_step",
-                "engine",
-                "kernel",
-                "seed",
-            ],
+        print(
+            f"[{MODEL_NAME}] {name}: T={temperature_k:.0f} K, dt={timestep_fs:g} fs, "
+            f"{thermostat} tau={tau_fs:g} fs, {n_steps} steps, {len(atoms)} atoms, "
+            f"stride {stride}"
         )
-        writer.writeheader()
-        writer.writerow(
-            {
-                "calculator": MODEL_NAME,
-                "system": name,
-                "temperature_K": temperature_k,
-                "n_steps": n_steps,
-                "time_step_fs": timestep_fs,
-                "thermostat": thermostat,
-                "tau_fs": tau_fs,
-                "record_interval": stride,
-                "elapsed_seconds": f"{elapsed:.2f}",
-                "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                "engine": "torch-sim-0.6.1+aotinductor-force-only",
-                "kernel": "OpenEquivariance",
-                "seed": SEED,
-            }
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+
+        ts.integrate(
+            system=state,
+            model=model,
+            integrator=integrator,
+            n_steps=n_steps,
+            temperature=temperature_k,
+            timestep=timestep_fs / 1000.0,
+            init_kwargs=init_kwargs,
+            trajectory_reporter={
+                "filenames": [str(out_h5)],
+                "state_frequency": stride,
+                "state_kwargs": {"save_velocities": True, "save_forces": False},
+            },
+            pbar=True,
+            **step_kwargs,
         )
 
-    print(
-        f"[{MODEL_NAME}] {name}: saved {out_h5} "
-        f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)"
-    )
+        torch.cuda.synchronize()
+        elapsed = time.perf_counter() - start
+
+        with out_csv.open("w", newline="") as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=[
+                    "calculator",
+                    "system",
+                    "temperature_K",
+                    "n_steps",
+                    "time_step_fs",
+                    "thermostat",
+                    "tau_fs",
+                    "record_interval",
+                    "elapsed_seconds",
+                    "seconds_per_step",
+                    "engine",
+                    "kernel",
+                    "seed",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "calculator": MODEL_NAME,
+                    "system": name,
+                    "temperature_K": temperature_k,
+                    "n_steps": n_steps,
+                    "time_step_fs": timestep_fs,
+                    "thermostat": thermostat,
+                    "tau_fs": tau_fs,
+                    "record_interval": stride,
+                    "elapsed_seconds": f"{elapsed:.2f}",
+                    "seconds_per_step": f"{elapsed / n_steps:.6f}",
+                    "engine": "torch-sim-0.6.1+aotinductor-force-only",
+                    "kernel": "OpenEquivariance",
+                    "seed": SEED,
+                }
+            )
+
+        print(
+            f"[{MODEL_NAME}] {name}: saved {out_h5} "
+            f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)"
+        )
+    except Exception as exc:
+        print(f"[{MODEL_NAME}] {name}: FAILED ({type(exc).__name__}: {exc})")
+        # A zero-byte timing CSV marks this model/system as failed.
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_csv.write_bytes(b"")
+        except OSError as marker_error:
+            print(f"[{MODEL_NAME}] {name}: could not write failure CSV: {marker_error}")
 
 
 def main() -> None:

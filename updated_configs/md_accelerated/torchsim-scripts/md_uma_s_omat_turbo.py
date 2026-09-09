@@ -140,11 +140,6 @@ if INFERENCE_MODE == "turbo":
 METADATA = json.loads(METADATA_FILE.read_text())
 
 for name, meta in METADATA.items():
-    init_file = REPO / meta["initfile_path"]
-    if not init_file.is_file():
-        print(f"[{MODEL_NAME}] {name}: init file missing, skipping ({init_file})")
-        continue
-
     out_dir = OUT_ROOT / name
     out_h5 = out_dir / f"nvt_{MODEL_NAME}.h5"
     out_csv = out_dir / f"md_timing_{MODEL_NAME}.csv"
@@ -152,77 +147,91 @@ for name, meta in METADATA.items():
         print(f"[{MODEL_NAME}] {name}: output exists, skipping")
         continue
 
-    temp_k = float(meta["temperature"])
-    dt_fs = float(meta["timestep"])                        # timestep_units: fs
-    tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
-    thermostat = meta["thermostat_type"]
-    stride = int(meta["position_print_stride"] or 1)
-    trajectory_length_ps = float(meta["trajectory_length_ps"])
-    n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
+    try:
+        init_file = REPO / meta["initfile_path"]
+        if not init_file.is_file():
+            print(f"[{MODEL_NAME}] {name}: init file missing, skipping ({init_file})")
+            continue
 
-    if thermostat == "Langevin":
-        integrator = ts.Integrator.nvt_langevin
-        init_kwargs = {}
-        step_kwargs = {"gamma": 1000.0 / tau_fs}           # 1/tau, in ps^-1
-    elif thermostat == "Nose-Hoover":
-        integrator = ts.Integrator.nvt_nose_hoover
-        init_kwargs = {"tau": tau_fs / 1000.0,             # ps
-                       "chain_length": CHAIN_LENGTH,
-                       "chain_steps": CHAIN_STEPS, "sy_steps": SY_STEPS}
-        step_kwargs = {}
-    elif thermostat.lower().startswith("velocity"):        # velocity rescaling, Bussi CSVR
-        integrator = ts.Integrator.nvt_vrescale
-        init_kwargs = {}
-        step_kwargs = {"tau": tau_fs / 1000.0}             # ps
-    else:
-        raise SystemExit(f"{name}: unknown thermostat type {thermostat!r} in metadata")
+        temp_k = float(meta["temperature"])
+        dt_fs = float(meta["timestep"])                        # timestep_units: fs
+        tau_fs = float(meta["thermostat_coupling_constant"])   # coupling units: fs
+        thermostat = meta["thermostat_type"]
+        stride = int(meta["position_print_stride"] or 1)
+        trajectory_length_ps = float(meta["trajectory_length_ps"])
+        n_steps = round(trajectory_length_ps * 1000.0 / dt_fs)
 
-    atoms0 = read(init_file, index=0)                       # reference frame 0
-    out_dir.mkdir(parents=True, exist_ok=True)
+        if thermostat == "Langevin":
+            integrator = ts.Integrator.nvt_langevin
+            init_kwargs = {}
+            step_kwargs = {"gamma": 1000.0 / tau_fs}           # 1/tau, in ps^-1
+        elif thermostat == "Nose-Hoover":
+            integrator = ts.Integrator.nvt_nose_hoover
+            init_kwargs = {"tau": tau_fs / 1000.0,             # ps
+                           "chain_length": CHAIN_LENGTH,
+                           "chain_steps": CHAIN_STEPS, "sy_steps": SY_STEPS}
+            step_kwargs = {}
+        elif thermostat.lower().startswith("velocity"):        # velocity rescaling, Bussi CSVR
+            integrator = ts.Integrator.nvt_vrescale
+            init_kwargs = {}
+            step_kwargs = {"tau": tau_fs / 1000.0}             # ps
+        else:
+            raise SystemExit(f"{name}: unknown thermostat type {thermostat!r} in metadata")
 
-    state = ts.initialize_state(atoms0, device, STATE_DTYPE)
-    state.rng = SEED
+        atoms0 = read(init_file, index=0)                       # reference frame 0
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[{MODEL_NAME}] {name}: T={temp_k:.0f} K, dt={dt_fs} fs, {thermostat} "
-          f"tau={tau_fs} fs, {n_steps} steps, {len(atoms0)} atoms, stride {stride}")
-    torch.cuda.synchronize()
-    t0 = time.perf_counter()
+        state = ts.initialize_state(atoms0, device, STATE_DTYPE)
+        state.rng = SEED
 
-    ts.integrate(
-        system=state,
-        model=model,
-        integrator=integrator,
-        n_steps=n_steps,
-        temperature=temp_k,                  # Kelvin
-        timestep=dt_fs / 1000.0,             # picoseconds, torch-sim metal units
-        init_kwargs=init_kwargs,
-        trajectory_reporter={
-            "filenames": [str(out_h5)],
-            "state_frequency": stride,
-            "state_kwargs": {"save_velocities": True, "save_forces": False},
-        },
-        pbar=True,
-        **step_kwargs,
-    )
+        print(f"[{MODEL_NAME}] {name}: T={temp_k:.0f} K, dt={dt_fs} fs, {thermostat} "
+              f"tau={tau_fs} fs, {n_steps} steps, {len(atoms0)} atoms, stride {stride}")
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
 
-    torch.cuda.synchronize()
-    elapsed = time.perf_counter() - t0
+        ts.integrate(
+            system=state,
+            model=model,
+            integrator=integrator,
+            n_steps=n_steps,
+            temperature=temp_k,                  # Kelvin
+            timestep=dt_fs / 1000.0,             # picoseconds, torch-sim metal units
+            init_kwargs=init_kwargs,
+            trajectory_reporter={
+                "filenames": [str(out_h5)],
+                "state_frequency": stride,
+                "state_kwargs": {"save_velocities": True, "save_forces": False},
+            },
+            pbar=True,
+            **step_kwargs,
+        )
 
-    with open(out_csv, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["calculator", "system", "temperature_K",
-                                               "n_steps", "time_step_fs", "thermostat",
-                                               "tau_fs", "record_interval",
-                                               "elapsed_seconds", "seconds_per_step",
-                                               "engine", "seed"])
-        writer.writeheader()
-        writer.writerow({"calculator": MODEL_NAME, "system": name,
-                         "temperature_K": temp_k, "n_steps": n_steps,
-                         "time_step_fs": dt_fs, "thermostat": thermostat,
-                         "tau_fs": tau_fs, "record_interval": stride,
-                         "elapsed_seconds": f"{elapsed:.2f}",
-                         "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                         "engine": f"torch-sim-0.6.1+{INFERENCE_MODE}", "seed": SEED})
-    print(f"[{MODEL_NAME}] {name}: saved {out_h5} "
-          f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)")
+        torch.cuda.synchronize()
+        elapsed = time.perf_counter() - t0
+
+        with open(out_csv, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["calculator", "system", "temperature_K",
+                                                   "n_steps", "time_step_fs", "thermostat",
+                                                   "tau_fs", "record_interval",
+                                                   "elapsed_seconds", "seconds_per_step",
+                                                   "engine", "seed"])
+            writer.writeheader()
+            writer.writerow({"calculator": MODEL_NAME, "system": name,
+                             "temperature_K": temp_k, "n_steps": n_steps,
+                             "time_step_fs": dt_fs, "thermostat": thermostat,
+                             "tau_fs": tau_fs, "record_interval": stride,
+                             "elapsed_seconds": f"{elapsed:.2f}",
+                             "seconds_per_step": f"{elapsed / n_steps:.6f}",
+                             "engine": f"torch-sim-0.6.1+{INFERENCE_MODE}", "seed": SEED})
+        print(f"[{MODEL_NAME}] {name}: saved {out_h5} "
+              f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)")
+    except Exception as exc:
+        print(f"[{MODEL_NAME}] {name}: FAILED ({type(exc).__name__}: {exc})")
+        # A zero-byte timing CSV marks this model/system as failed.
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_csv.write_bytes(b"")
+        except OSError as marker_error:
+            print(f"[{MODEL_NAME}] {name}: could not write failure CSV: {marker_error}")
 
 print(f"[{MODEL_NAME}] done.")
