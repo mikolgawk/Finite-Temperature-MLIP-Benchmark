@@ -69,7 +69,7 @@ settings come from the metadata file and constants in each script.
 
 | Script | Model |
 | --- | --- |
-| `md_eq_v2_M_omat.py` | EquiformerV2 M OMat |
+| `md_eq_v2_M_omat.py` | EquiformerV2 M OMat mp salex |
 | `md_esen_30M_OAM.py` | eSEN 30M OAM |
 | `md_grace_mp.py` | GRACE MP |
 | `md_grace_oam.py` | GRACE OAM |
