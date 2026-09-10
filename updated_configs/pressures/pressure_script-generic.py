@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["numpy", "pandas", "ase>=3.26", "h5py", "matplotlib"]
+# ///
 """
-Generic pressure script: computes per-frame stress and trajectory-average
+Default: run the stored-stress HDF5/extxyz pipeline (see pressure_pipeline.py --help).
+Use --legacy for the historical calculator/CSV timing workflow below.
+
+Legacy pressure script: computes per-frame stress and trajectory-average
 pressure for MLIP trajectories, matching MLIP and reference trajectories to
 the same simulation length, using a calculator selected at runtime from
 model_calculators.json.
@@ -494,6 +501,7 @@ def main() -> None:
                         "mlip_time_used_fs": float(mlip_time_used),
                         "matched_time_fs": float(matched_time_fs),
                         "frame_index": frame_index,
+                        **{f"stress_{c}_eV_A3": float(stress[i, j]) for c, (i, j) in zip(("xx", "yy", "zz", "yz", "xz", "xy"), ((0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)))},
                         "pressure_GPa": pressure_gpa,
                         "pressure_mode": mode,
                         "plane_used": plane_used,
@@ -560,4 +568,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--legacy" in sys.argv:
+        sys.argv.remove("--legacy")
+        main()
+    else:
+        from pressure_pipeline import main as run_pressure_pipeline
+        run_pressure_pipeline()

@@ -11,7 +11,7 @@ import pandas as pd
 EXCLUDED_MODELS = {"pet-mad"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_PRESSURES_DIR = SCRIPT_DIR.parent / "data" / "results" / "same-simulation-length"
+DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results"
 DEFAULT_REFERENCE_FILE = DEFAULT_PRESSURES_DIR / "reference_pressure_per_frame_same_simulation_length.csv"
 DEFAULT_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
 DEFAULT_PAIR_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "pressure_pair_similarity_same_simulation_length.csv"
@@ -69,7 +69,7 @@ def pressure_column_name(columns: list[str]) -> str:
 
 
 def structure_from_trajectory_file(path_like: str) -> str:
-    return Path(str(path_like)).parent.name
+    return str(path_like).replace(chr(92), "/").split("/")[-2]
 
 
 def parse_model_name(file_path: Path, suffix: str) -> str:
@@ -204,13 +204,16 @@ def build_pair_rows(
         if model_df.empty:
             continue
 
-        common_systems = sorted(set(ref_df["system"]) & set(model_df["system"]))
+        matched_reference = pressures_dir / "references" / f"{model_file.name.removesuffix(model_file_suffix)}.csv"
+        model_ref_df = (load_pressure_per_frame_csv(matched_reference, deduplicate_reference=True)
+                        if matched_reference.is_file() else ref_df)
+        common_systems = sorted(set(model_ref_df["system"]) & set(model_df["system"]))
         if not common_systems:
             print(f"[WARN] {model_name}: no overlapping systems with reference")
             continue
 
         for system in common_systems:
-            ref_vals = ref_df.loc[ref_df["system"] == system, "pressure_GPa"].to_numpy(dtype=float)
+            ref_vals = model_ref_df.loc[model_ref_df["system"] == system, "pressure_GPa"].to_numpy(dtype=float)
             mlip_vals = model_df.loc[model_df["system"] == system, "pressure_GPa"].to_numpy(dtype=float)
             score = pressure_histogram_similarity(ref_vals, mlip_vals, bins=bins)
             if not score or not np.isfinite(score["pressure_similarity"]):
@@ -225,7 +228,7 @@ def build_pair_rows(
                     "n_ref_frames": int(ref_vals.size),
                     "n_mlip_frames": int(mlip_vals.size),
                     "bins": int(bins),
-                    "reference_file": str(reference_file),
+                    "reference_file": str(matched_reference if matched_reference.is_file() else reference_file),
                     "model_file": str(model_file),
                 }
             )
