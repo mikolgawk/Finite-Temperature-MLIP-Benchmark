@@ -233,24 +233,103 @@ data/models/                            Local model checkpoints
 
 ## Usage
 
-Each stage is invoked with the model selected via the `MODEL_NAME`
-environment variable, from inside the stage directory:
+### Updated TorchSim MD
+
+The current runners are in `updated_configs/md/torchsim-scripts/` (baseline/eager
+inference) and `updated_configs/md_accelerated/torchsim-scripts/` (model-specific
+acceleration, including compiled inference and UMA compile/turbo variants).
+Select the model by its `md_*.py` filename. These scripts do not use the legacy
+`MODEL_NAME` environment variable or `md_script-generic.py` interface.
+
+#### Prerequisites and inputs
+
+Use a Linux/WSL Bash shell with `uv` on `PATH` and a CUDA-capable NVIDIA GPU.
+Each script's inline `# /// script` block declares its Python and model-specific
+dependencies; `uv run --script` creates the corresponding environment. Python
+3.12 satisfies the runners' Python constraints. Allow package/model downloads
+on the first run. Accelerated models may need a CUDA toolkit and compiler for
+kernel compilation; accelerated NequIP defaults to `/usr/local/cuda`, overridable
+with `NEQUIP_CUDA_HOME`.
+
+Both workflows read `updated_configs/data/ref-trajs/md_metadata.json`. Each entry
+specifies `initfile_path`, `temperature`, `timestep` (fs), `thermostat_type`,
+`thermostat_coupling_constant` (fs), `position_print_stride`, and
+`trajectory_length_ps`. These settings govern the current runs, superseding the
+older fixed-duration settings above. Runners read the first initial-structure
+frame and derive the step count from trajectory length and timestep.
+
+**Initial structure paths are relative to the repository root.** The supplied
+metadata uses `data/ref-trajs/<system>/traj.extxyz`. Place reference trajectories
+there or edit `initfile_path` to match your layout. Missing initial structures
+are logged and skipped. The metadata itself stays under
+`updated_configs/data/ref-trajs/`.
+
+Provide local checkpoints required by the selected script under
+`updated_configs/data/models/`; inspect its model construction settings for exact
+filenames. For example, baseline `md_mace_mpa_0.py` expects
+`mace-mpa-0-medium.model`. Other runners download pretrained models and may need
+model-host access/authentication. Baseline GRACE-OAM additionally requires its
+eager instruction YAML and matching fp32 checkpoint: set `GRACE_OAM_POTENTIAL`
+to the YAML and `GRACE_OAM_CHECKPOINT` to the checkpoint prefix (without `.index`)
+if they are outside the default GRACE cache. A SavedModel alone is insufficient
+for that eager runner.
+
+#### Run one model
+
+Run these commands from the repository root:
 
 ```bash
-# Run NVT MD production for one model over all reference systems
-cd updated_configs/md_production
-MODEL_NAME=mace-mpa-0 python md_script-generic.py
+# Baseline MD
+CUDA_VISIBLE_DEVICES=0 uv run --script updated_configs/md/torchsim-scripts/md_mace_mpa_0.py
 
-# Compute energy/force RMSEs against AIMD reference trajectories
-cd ../e_f_rmses
-MODEL_NAME=mace-mpa-0 python rmse_script-generic.py
+# Accelerated MD
+CUDA_VISIBLE_DEVICES=0 uv run --script updated_configs/md_accelerated/torchsim-scripts/md_mace_mpa_0.py
 
-# Compute pressures, matched to the reference simulation length
-cd ../pressures
-MODEL_NAME=mace-mpa-0 python pressure_script-generic.py
+# Separate UMA acceleration variants
+CUDA_VISIBLE_DEVICES=0 uv run --script updated_configs/md_accelerated/torchsim-scripts/md_uma_s_omat_compile.py
+CUDA_VISIBLE_DEVICES=0 uv run --script updated_configs/md_accelerated/torchsim-scripts/md_uma_s_omat_turbo.py
 ```
 
-An unset or unrecognized `MODEL_NAME` fails immediately with the list of
-valid names. MD production skips any system whose output trajectory already
-exists, so reruns are resumable.
+Replace the filename with another `md_*.py` in the chosen directory. Each runner
+processes every system in the metadata. `CUDA_VISIBLE_DEVICES` selects the GPU;
+data paths are resolved from the script location.
 
+#### Run all models
+
+From the repository root:
+
+```bash
+# Preview commands without running simulations
+bash updated_configs/md/torchsim-scripts/run_all_md.sh --dry-run
+bash updated_configs/md_accelerated/torchsim-scripts/run_all_md.sh --dry-run
+
+# Launch either workflow
+CUDA_VISIBLE_DEVICES=0 bash updated_configs/md/torchsim-scripts/run_all_md.sh
+CUDA_VISIBLE_DEVICES=0 bash updated_configs/md_accelerated/torchsim-scripts/run_all_md.sh
+```
+
+Each launcher changes to its own directory and runs all adjacent `md_*.py` files
+sequentially with `uv run --script`. Per-model logs go to that directory's
+`logs/md/<timestamp>_<pid>/`. A script failure does not stop subsequent models;
+the launcher reports failures at the end and exits nonzero if a script or logging
+command failed. `--dry-run` lists commands only; it does not validate dependencies,
+checkpoints, or GPU availability.
+
+#### Outputs and reruns
+
+| Workflow | Output directory (relative to repository root) |
+| --- | --- |
+| Baseline MD | `updated_configs/data/mlip-trajs-torchsim-matched/` |
+| Accelerated MD | `updated_configs/data/mlip-trajs-torchsim-accelerated/` |
+
+Each system gets `nvt_<model>.h5` (positions and velocities at the metadata stride)
+and `md_timing_<model>.csv` (runtime and MD settings). Names use the script's
+internal `MODEL_NAME`, which may include an acceleration suffix.
+
+An existing timing CSV makes the runner skip that model/system, including a
+**zero-byte CSV marking a failed run**. Check logs and CSVs even if the batch exits
+successfully, because runners catch per-system exceptions internally. To retry,
+fix the cause, remove the failed system's zero-byte CSV, and move aside or remove
+any partial HDF5 trajectory before rerunning. To repeat a completed run, move aside
+its CSV and trajectory first. Reruns restart from the initial structure; they do
+not resume partial trajectories.
