@@ -34,7 +34,16 @@ DATA_DIR = BASE_DIR.parent / "data"
 RESULTS_DIR = BASE_DIR / "results"
 
 REF_TRAJ_BASE_DIR = DATA_DIR / "ref-trajs"
-MLIP_TRAJ_BASE_DIR = DATA_DIR / "mlip-trajs-torchsim-matched"
+# Each source gets its own results directory, including models with the same name.
+MLIP_TRAJ_DIRS = {
+    name: DATA_DIR / name
+    for name in (
+        "mlip-trajs-ase",
+        "mlip-trajs-torchsim",
+        "mlip-trajs-ase-accelerated",
+        "mlip-trajs-torchsim-accelerated",
+    )
+}
 
 # ============================================================
 # Trajectory loading
@@ -103,7 +112,8 @@ def load_mlip_trajectory(path: Path, n_frames: int) -> mdt.Trajectory:
 
         positions = h5["data/positions"][:n_frames]
         cells_dataset = h5["data/cell"]
-        cells = cells_dataset[:n_frames]
+        # HDF5 stores lattice vectors as columns; MDTraj expects rows.
+        cells = cells_dataset[:n_frames].swapaxes(-1, -2)
         if len(cells) == 1 and n_frames > 1:
             cells = np.repeat(cells, n_frames, axis=0)
 
@@ -243,7 +253,7 @@ def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.Data
 # ============================================================
 
 def discover_mlip_trajectories(base_dir: Path) -> dict[str, dict[str, Path]]:
-    """Discover every completed ``nvt_<model>.h5`` trajectory."""
+    """Discover every available ``nvt_<model>.h5`` trajectory."""
     trajectories: dict[str, dict[str, Path]] = {}
     for path in sorted(base_dir.glob("*/nvt_*.h5")):
         model = path.stem.removeprefix("nvt_")
@@ -253,7 +263,14 @@ def discover_mlip_trajectories(base_dir: Path) -> dict[str, dict[str, Path]]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute RDFs and RDF errors for matched TorchSim MLIP and reference trajectories."
+        description="Compute RDFs and RDF errors for all four ASE/TorchSim trajectory directories."
+    )
+    parser.add_argument(
+        "--source",
+        action="append",
+        choices=tuple(MLIP_TRAJ_DIRS),
+        dest="sources",
+        help="trajectory directory to process (repeatable; default: all four)",
     )
     parser.add_argument(
         "--system",
@@ -281,11 +298,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    results_dir = args.results_dir.resolve()
-
-    mlip_trajectories = discover_mlip_trajectories(MLIP_TRAJ_BASE_DIR)
+def process_source(args: argparse.Namespace, source: str) -> None:
+    results_dir = args.results_dir.resolve() / source
+    trajectory_dir = MLIP_TRAJ_DIRS[source]
+    print(f"\n=== Trajectory source: {trajectory_dir} ===")
+    print(f"Results directory: {results_dir}")
+    mlip_trajectories = discover_mlip_trajectories(trajectory_dir)
     reference_trajectories = {
         path.parent.name: path
         for path in sorted(REF_TRAJ_BASE_DIR.glob("*/traj.extxyz"))
@@ -322,7 +340,7 @@ def main() -> None:
 
     print(
         f"Found {len(reference_trajectories)} reference trajectories and "
-        f"{sum(len(models) for models in mlip_trajectories.values())} completed MLIP trajectories"
+        f"{sum(len(models) for models in mlip_trajectories.values())} available MLIP trajectories"
     )
     print(f"Models ({len(model_names)}): {', '.join(model_names)}")
 
@@ -335,7 +353,8 @@ def main() -> None:
     if not reference_trajectories:
         raise RuntimeError(f"No reference trajectories found in {REF_TRAJ_BASE_DIR}")
     if not model_names:
-        raise RuntimeError(f"No completed MLIP trajectories found in {MLIP_TRAJ_BASE_DIR}")
+        print(f"[SKIP] No matching MLIP trajectories found in {trajectory_dir}")
+        return
 
     results_dir.mkdir(parents=True, exist_ok=True)
     rdf_save_dir = results_dir / "rdf_same_simulation_length_saved"
@@ -443,6 +462,9 @@ def main() -> None:
 
     print("\nCSV files written successfully.")
     print("\n================ AGGREGATING BY SYSTEM TYPE ================")
+    if not any(detailed_results.values()):
+        print(f"[WARN] No valid RDF scores for {source}; skipping system-type aggregation")
+        return
     results_by_type_df = aggregate_by_system_type(detailed_results)
     by_type_output_file = results_dir / "rdf_similarity_scores_by_system_type_same_simulation_length.csv"
     results_by_type_df.to_csv(by_type_output_file)
@@ -450,6 +472,12 @@ def main() -> None:
     print(f"\nResults saved to {by_type_output_file}")
     print("\nSummary:")
     print(results_by_type_df.to_string())
+
+
+def main() -> None:
+    args = parse_args()
+    for source in dict.fromkeys(args.sources or MLIP_TRAJ_DIRS):
+        process_source(args, source)
 
 
 if __name__ == "__main__":
