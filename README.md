@@ -251,20 +251,6 @@ CUDA_VISIBLE_DEVICES=0 bash updated_configs/md_accelerated/torchsim-scripts/run_
 These launchers run models **sequentially**, saving logs under the script directory's
 `logs/md/`. Add `--dry-run` to preview commands.
 
-To run all models **concurrently**, use this Bash loop instead:
-
-```bash
-scripts=updated_configs/md/torchsim-scripts  # or updated_configs/md_accelerated/torchsim-scripts
-mkdir -p "$scripts/logs/parallel"
-for script in "$scripts"/md_*.py; do
-    CUDA_VISIBLE_DEVICES=0 uv run --script "$script" > "$scripts/logs/parallel/$(basename "$script" .py).log" 2>&1 &
-done
-wait
-```
-
-This shares GPU 0 across all models and requires enough GPU memory. Use sequential
-runs for timing comparisons, since concurrent models compete for GPU resources.
-
 For a single model, run `uv run --script <path-to-md_model.py>`.
 Trajectories and timing CSVs are saved per system under
 `updated_configs/data/mlip-trajs-torchsim-matched/` (baseline) or
