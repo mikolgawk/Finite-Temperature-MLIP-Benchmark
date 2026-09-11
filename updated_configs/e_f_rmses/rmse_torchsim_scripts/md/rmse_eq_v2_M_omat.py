@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "torch-sim-atomistic==0.5.2",  # 0.6.1 needs torch>=2.8, fairchem 1.x pins <2.5;
 #                                  # 0.5.2 has the same integrate API incl. nvt_vrescale
 #   "fairchem-core==1.10.0",       # v1: only API that loads this legacy checkpoint

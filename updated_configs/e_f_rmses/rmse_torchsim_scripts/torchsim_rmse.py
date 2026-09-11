@@ -21,6 +21,7 @@ def early_cli(script):
     parser.add_argument('--raw-energies', action='store_true', help='Disable isolated-atom energy corrections.')
     parser.add_argument('--max-frames', type=int, help='Evaluate at most this many frames per trajectory.')
     parser.add_argument('--force', action='store_true', help='Recompute existing results.')
+    parser.add_argument('--no-progress', action='store_true', help='Disable trajectory and frame progress bars.')
     parser.add_argument('--debug', action='store_true')
     _ARGS = parser.parse_args()
     if _ARGS.max_frames is not None and _ARGS.max_frames < 1:
@@ -61,6 +62,30 @@ def correction_files(system, args):
     return {}
 
 
+def count_extxyz_frames(path, limit=None):
+    """Count frames cheaply so the frame progress bar has a useful total."""
+    try:
+        count = 0
+        with path.open() as handle:
+            while limit is None or count < limit:
+                line = handle.readline()
+                if not line:
+                    break
+                if not line.strip():
+                    continue
+                n_atoms = int(line)
+                if not handle.readline():
+                    raise ValueError('missing extended-XYZ comment line')
+                for _ in range(n_atoms):
+                    if not handle.readline():
+                        raise ValueError('truncated extended-XYZ frame')
+                count += 1
+        return count
+    except (OSError, ValueError):
+        # ASE will provide the authoritative parse error during evaluation.
+        return None
+
+
 def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
              require_stress_disabled=True, warmup=True, validate=None):
     """Evaluate the MD model on reference frames, without integrating dynamics.
@@ -72,6 +97,7 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     import numpy as np
     import torch
     from ase.io import iread, read
+    from tqdm.auto import tqdm
     args = _ARGS
     dtype = state_dtype if state_dtype is not None else torch.float32
     device = torch.device('cuda')
@@ -85,7 +111,16 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
         print(f'{output} exists; use --force to recompute.')
         return
     rows, failures, offsets = [], [], {}
-    for path in files:
+    progress_enabled = not args.no_progress
+    progress_print = tqdm.write if progress_enabled else print
+    file_iterator = tqdm(
+        files,
+        desc=f'{model_name}: trajectories',
+        unit='trajectory',
+        dynamic_ncols=True,
+        disable=not progress_enabled,
+    )
+    for path in file_iterator:
         system = path.parent.name.split('_')[0]
         match = re.search(r'(\d+)K', path.parent.name)
         temperature = int(match[1]) if match else 0
@@ -103,7 +138,16 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
             n_eval = n_ref = n_components = 0
             natoms = None
             iterator = iread(path, index=':' if args.max_frames is None else f':{args.max_frames}')
-            for index, atoms in enumerate(iterator):
+            frame_iterator = tqdm(
+                iterator,
+                total=count_extxyz_frames(path, args.max_frames),
+                desc=path.parent.name,
+                unit='frame',
+                leave=False,
+                dynamic_ncols=True,
+                disable=not progress_enabled,
+            )
+            for index, atoms in enumerate(frame_iterator):
                 n_ref += 1
                 try:
                     er, fr = reference(atoms)
@@ -129,11 +173,12 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
                              energy_rmse=np.sqrt(e_squared / n_eval),
                              force_rmse=np.sqrt(f_squared / n_components),
                              trajectory=str(path), engine=engine))
-            print(f'{path.parent.name}: E RMSE={rows[-1]["energy_rmse"]:.6g} eV/atom; '
-                  f'F RMSE={rows[-1]["force_rmse"]:.6g} eV/Angstrom ({n_eval}/{n_ref} frames)')
+            progress_print(f'{path.parent.name}: E RMSE={rows[-1]["energy_rmse"]:.6g} eV/atom; '
+                           f'F RMSE={rows[-1]["force_rmse"]:.6g} eV/Angstrom '
+                           f'({n_eval}/{n_ref} frames)')
         except Exception as exc:
             failures.append({'file': str(path), 'error': str(exc)})
-            print(f'FAILED {path}: {exc}')
+            progress_print(f'FAILED {path}: {exc}')
     # Keep a failure marker so an incomplete summary is never silently skipped.
     if failures:
         failure_file.write_text(json.dumps(failures, indent=2) + '\n')

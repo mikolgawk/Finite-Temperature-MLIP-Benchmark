@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "torch-sim-atomistic==0.6.1",
 #   "fairchem-core",
 #   "ase>=3.26",

@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "torch-sim-atomistic[orb]==0.6.1",
 #   "orb-models==0.6.2",
 #   "ase>=3.26",

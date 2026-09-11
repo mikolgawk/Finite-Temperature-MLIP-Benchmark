@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "torch-sim-atomistic[mace,vesin]==0.6.1",
 #   "ase>=3.26",
 #   "cuequivariance-torch>=0.4",
