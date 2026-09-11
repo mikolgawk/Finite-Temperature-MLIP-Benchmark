@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "h5py>=3.11", "numpy>=1.26",
 #   "nequip>=0.19.1",
 #   "ase>=3.26",

@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "ase>=3.26", "h5py>=3.11", "numpy>=1.26,<2",
 #   "tensorpotential==0.5.7.2", "nvidia-cuda-nvcc-cu12==12.8.*",
 #   "tf-keras==2.19.*", "torch",

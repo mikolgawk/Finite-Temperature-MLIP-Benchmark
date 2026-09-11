@@ -1,6 +1,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "ase>=3.26", "fairchem-core==1.10.0", "h5py>=3.11",
 #   "numpy==1.26.4", "scipy<1.17", "torch==2.4.1",
 #   "torch-scatter", "torch-sparse",

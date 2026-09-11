@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
-# dependencies = ["ase>=3.26", "h5py>=3.11", "mace-torch==0.3.16", "numpy>=1.26", "torch"]
+# dependencies = ["tqdm>=4.66", "ase>=3.26", "h5py>=3.11", "mace-torch==0.3.16", "numpy>=1.26", "torch"]
 # [[tool.uv.index]]
 # name = "pytorch-cu128"
 # url = "https://download.pytorch.org/whl/cu128"
