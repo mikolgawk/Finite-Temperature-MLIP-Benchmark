@@ -134,6 +134,11 @@ and should not be treated as a completed run. If the failure CSV cannot be writt
 that error is reported and the script still continues. Keyboard interrupts and
 model-loading failures before the system loop are not caught by this handler.
 
+GRACE-OAM runs each system in a fresh subprocess so native TensorFlow/CUDA
+aborts also produce an empty failure CSV and allow the remaining systems to run.
+The model is loaded anew for each system; worker startup failures are also marked
+as failures for that pair. Interrupts and termination stop the runner.
+
 An existing timing CSV, including an empty failure CSV, causes that model/system
 pair to be skipped. Remove the empty CSV to retry a failed pair. Rerunning
 the batch therefore skips completed pairs, but does not resume an interrupted

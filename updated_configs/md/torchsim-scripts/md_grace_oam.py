@@ -41,8 +41,53 @@ import csv
 import json
 import math
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
+
+
+def supervise_systems():
+    """Keep native TensorFlow/CUDA crashes local to one model/system."""
+    repo = Path(__file__).resolve().parents[3]
+    metadata = json.loads(
+        (repo / "updated_configs/data/ref-trajs/md_metadata.json").read_text()
+    )
+    output = repo / "updated_configs/data/mlip-trajs-torchsim-matched"
+    model_name = "grace-oam-force-only-eager"
+    for name, meta in metadata.items():
+        marker = output / name / f"md_timing_{model_name}.csv"
+        if marker.exists():
+            print(f"[{model_name}] {name}: output exists, skipping", flush=True)
+            continue
+        if not (repo / meta["initfile_path"]).is_file():
+            print(f"[{model_name}] {name}: init file missing, skipping", flush=True)
+            continue
+        print(f"[{model_name}] {name}: starting isolated worker", flush=True)
+        env = dict(os.environ, GRACE_MD_SYSTEM=name, PYTHONUNBUFFERED="1")
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve())], env=env)
+        if result.returncode in (-2, -15, 130, 143):
+            raise SystemExit(128 - result.returncode if result.returncode < 0 else result.returncode)
+        if result.returncode:
+            print(
+                f"[{model_name}] {name}: FAILED (worker exit {result.returncode}), skipping",
+                flush=True,
+            )
+            # Match the existing Python-exception failure marker convention.
+            # Do not overwrite a completed timing file if shutdown failed.
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch(exist_ok=True)
+    print(f"[{model_name}] done.", flush=True)
+
+
+# Start workers before importing either GPU runtime: a native abort cannot be
+# caught by Python, and the supervisor must remain independent of CUDA state.
+if __name__ == "__main__" and "GRACE_MD_SYSTEM" not in os.environ:
+    try:
+        supervise_systems()
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    raise SystemExit(0)
 
 import torch
 
@@ -181,6 +226,8 @@ def run_torchsim_md(
         raise ValueError(f"{model_name} still reports compute_stress=True")
 
     for name, meta in metadata.items():
+        if os.environ.get("GRACE_MD_SYSTEM", name) != name:
+            continue
         out_dir = OUT_ROOT / name
         out_h5 = out_dir / f"nvt_{model_name}.h5"
         out_csv = out_dir / f"md_timing_{model_name}.csv"
