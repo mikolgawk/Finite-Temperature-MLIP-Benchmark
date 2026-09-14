@@ -12,7 +12,7 @@ from ase import Atoms
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import write
 import pressure_pipeline as pipeline
-from get_model_pressure_errors import build_pair_rows
+from get_model_pressure_errors import build_pair_rows, write_metric_outputs
 
 HERE = Path(__file__).resolve().parent
 
@@ -100,6 +100,48 @@ class PressurePipelineTests(unittest.TestCase):
         pd.concat([ref,tail]).to_csv(full_ref,index=False)
         score = build_pair_rows(output, full_ref, pipeline.SUFFIX, 8)
         self.assertAlmostEqual(score.pressure_similarity.iloc[0], 1)
+
+    def test_nested_evaluator_outputs_use_sibling_references_and_keep_mode(self):
+        results = self.root / "results"
+        for mode in ("md_eager", "md_accelerated"):
+            output = results / "torchsim" / mode
+            references = output / "references"
+            references.mkdir(parents=True)
+            trajectory = self.root / "trajectories" / self.structure / "nvt_test.h5"
+            model_file = output / f"test{pipeline.SUFFIX}"
+            pd.DataFrame(
+                {
+                    "trajectory_file": [str(trajectory)] * 3,
+                    "frame_index": [0, 1, 2],
+                    "pressure_GPa": [0.0, 1.0, 2.0],
+                }
+            ).to_csv(model_file, index=False)
+            pd.DataFrame(
+                {
+                    "trajectory_file": [
+                        str(self.root / "reference" / self.structure / "traj.extxyz")
+                    ] * 3,
+                    "frame_index": [0, 1, 2],
+                    "pressure_GPa": [0.0, 1.0, 2.0],
+                }
+            ).to_csv(references / "test.csv", index=False)
+
+        pairs = build_pair_rows(results, None, pipeline.SUFFIX, 8)
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual(set(pairs.backend), {"torchsim"})
+        self.assertEqual(set(pairs["mode"]), {"md_eager", "md_accelerated"})
+        self.assertTrue(pairs.reference_file.str.contains("/references/test.csv").all())
+
+        _, model_means, _ = write_metric_outputs(
+            pairs,
+            self.root / "pairs.csv",
+            self.root / "system-model.csv",
+            self.root / "models.csv",
+            self.root / "model-system-type.csv",
+            None,
+        )
+        self.assertEqual(len(model_means), 2)
+        self.assertEqual(set(model_means["mode"]), {"md_eager", "md_accelerated"})
 
 
 if __name__ == "__main__":

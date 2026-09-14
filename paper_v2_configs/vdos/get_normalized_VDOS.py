@@ -41,7 +41,7 @@ RESULTS_DIR = SCRIPT_DIR / "results"
 
 SOURCES = (
     "mlip-trajs-ase",
-    "mlip-trajs-torchsim",
+    "mlip-trajs-torchsim-eager",
     "mlip-trajs-ase-accelerated",
     "mlip-trajs-torchsim-accelerated",
 )

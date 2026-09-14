@@ -42,7 +42,7 @@ FIGURE_SI_14_SCRIPT = SCRIPT_DIR / "figure_SI_14.py"
 
 SOURCES = (
     "mlip-trajs-ase",
-    "mlip-trajs-torchsim",
+    "mlip-trajs-torchsim-eager",
     "mlip-trajs-ase-accelerated",
     "mlip-trajs-torchsim-accelerated",
 )

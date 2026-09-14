@@ -39,7 +39,7 @@ MLIP_TRAJ_DIRS = {
     name: DATA_DIR / name
     for name in (
         "mlip-trajs-ase",
-        "mlip-trajs-torchsim",
+        "mlip-trajs-torchsim-eager",
         "mlip-trajs-ase-accelerated",
         "mlip-trajs-torchsim-accelerated",
     )

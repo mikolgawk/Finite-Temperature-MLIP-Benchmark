@@ -27,7 +27,7 @@ from vesin import NeighborList
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TIMING_SCRIPT = SCRIPT_DIR / "plot-model-timings.py"
-DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim"
+DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
 DEFAULT_ACCELERATED_TIMINGS_DIR = (
 	SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-accelerated"
 )

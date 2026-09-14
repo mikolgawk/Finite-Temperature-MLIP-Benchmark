@@ -12,7 +12,6 @@ EXCLUDED_MODELS = {"pet-mad"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results"
-DEFAULT_REFERENCE_FILE = DEFAULT_PRESSURES_DIR / "reference_pressure_per_frame_same_simulation_length.csv"
 DEFAULT_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
 DEFAULT_PAIR_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "pressure_pair_similarity_same_simulation_length.csv"
 DEFAULT_SYSTEM_MODEL_MEAN_OUTPUT_FILE = (
@@ -172,15 +171,19 @@ def pressure_histogram_similarity(
 
 def build_pair_rows(
     pressures_dir: Path,
-    reference_file: Path,
+    reference_file: Path | None,
     model_file_suffix: str,
     bins: int,
 ) -> pd.DataFrame:
-    ref_df = load_pressure_per_frame_csv(reference_file, deduplicate_reference=True)
-    if ref_df.empty:
-        raise RuntimeError(f"No usable reference rows in {reference_file}")
+    fallback_ref_df = None
+    if reference_file is not None and reference_file.is_file():
+        fallback_ref_df = load_pressure_per_frame_csv(
+            reference_file, deduplicate_reference=True
+        )
+        if fallback_ref_df.empty:
+            raise RuntimeError(f"No usable reference rows in {reference_file}")
 
-    model_files = sorted(pressures_dir.glob(f"*{model_file_suffix}"))
+    model_files = sorted(pressures_dir.rglob(f"*{model_file_suffix}"))
     model_files = [p for p in model_files if not p.name.startswith("reference_")]
     if not model_files:
         raise FileNotFoundError(
@@ -195,6 +198,14 @@ def build_pair_rows(
         if model_name.lower() in excluded_models_lower:
             continue
 
+        relative_parent = model_file.parent.relative_to(pressures_dir).parts
+        if len(relative_parent) >= 2:
+            backend, mode = relative_parent[-2:]
+        elif relative_parent:
+            backend, mode = "", relative_parent[-1]
+        else:
+            backend = mode = ""
+
         try:
             model_df = load_pressure_per_frame_csv(model_file, deduplicate_reference=False)
         except Exception as exc:
@@ -204,9 +215,26 @@ def build_pair_rows(
         if model_df.empty:
             continue
 
-        matched_reference = pressures_dir / "references" / f"{model_file.name.removesuffix(model_file_suffix)}.csv"
-        model_ref_df = (load_pressure_per_frame_csv(matched_reference, deduplicate_reference=True)
-                        if matched_reference.is_file() else ref_df)
+        matched_reference = (
+            model_file.parent
+            / "references"
+            / f"{model_file.name.removesuffix(model_file_suffix)}.csv"
+        )
+        if matched_reference.is_file():
+            model_ref_df = load_pressure_per_frame_csv(
+                matched_reference, deduplicate_reference=True
+            )
+            reference_used = matched_reference
+        elif fallback_ref_df is not None:
+            model_ref_df = fallback_ref_df
+            assert reference_file is not None
+            reference_used = reference_file
+        else:
+            print(
+                f"[WARN] Skipping {model_file}: no matched reference at "
+                f"{matched_reference} and no fallback reference was supplied"
+            )
+            continue
         common_systems = sorted(set(model_ref_df["system"]) & set(model_df["system"]))
         if not common_systems:
             print(f"[WARN] {model_name}: no overlapping systems with reference")
@@ -224,11 +252,13 @@ def build_pair_rows(
                     "system": system,
                     "system_type": infer_system_type(system),
                     "mlip_model": model_name,
+                    "backend": backend,
+                    "mode": mode,
                     **score,
                     "n_ref_frames": int(ref_vals.size),
                     "n_mlip_frames": int(mlip_vals.size),
                     "bins": int(bins),
-                    "reference_file": str(matched_reference if matched_reference.is_file() else reference_file),
+                    "reference_file": str(reference_used),
                     "model_file": str(model_file),
                 }
             )
@@ -237,7 +267,9 @@ def build_pair_rows(
     if out_df.empty:
         raise RuntimeError("No pressure histogram similarity rows were computed.")
 
-    return out_df.sort_values(["system", "mlip_model"]).reset_index(drop=True)
+    return out_df.sort_values(
+        ["backend", "mode", "system", "mlip_model"]
+    ).reset_index(drop=True)
 
 
 def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataFrame | None:
@@ -278,11 +310,16 @@ def write_metric_outputs(
     pair_output_file.parent.mkdir(parents=True, exist_ok=True)
     pair_df.to_csv(pair_output_file, index=False)
 
+    provenance = [column for column in ("backend", "mode") if column in pair_df]
+    system_model_keys = [*provenance, "system", "mlip_model"]
+    model_keys = [*provenance, "mlip_model"]
+    model_system_type_keys = [*provenance, "mlip_model", "system_type"]
+
     system_model_mean_df = (
-        pair_df.groupby(["system", "mlip_model"], as_index=False)["pressure_similarity"]
+        pair_df.groupby(system_model_keys, as_index=False)["pressure_similarity"]
         .mean()
         .rename(columns={"pressure_similarity": "mean_pressure_similarity"})
-        .sort_values(["system", "mlip_model"])
+        .sort_values([*provenance, "system", "mlip_model"])
         .reset_index(drop=True)
     )
     system_model_mean_df["mean_pressure_similarity_percent"] = (
@@ -296,7 +333,7 @@ def write_metric_outputs(
     system_model_mean_df.to_csv(system_model_mean_output_file, index=False)
 
     model_mean_df = (
-        system_model_mean_df.groupby("mlip_model", as_index=False)["mean_pressure_similarity"]
+        system_model_mean_df.groupby(model_keys, as_index=False)["mean_pressure_similarity"]
         .mean()
         .rename(columns={"mean_pressure_similarity": "final_mean_pressure_similarity"})
         .sort_values("final_mean_pressure_similarity", ascending=False)
@@ -328,10 +365,10 @@ def write_metric_outputs(
     model_mean_df.to_csv(model_mean_output_file, index=False)
 
     model_system_type_mean_df = (
-        pair_df.groupby(["mlip_model", "system_type"], as_index=False)["pressure_similarity"]
+        pair_df.groupby(model_system_type_keys, as_index=False)["pressure_similarity"]
         .mean()
         .rename(columns={"pressure_similarity": "mean_pressure_similarity"})
-        .sort_values(["mlip_model", "system_type"])
+        .sort_values([*provenance, "mlip_model", "system_type"])
         .reset_index(drop=True)
     )
     model_system_type_mean_df["mean_pressure_similarity_percent"] = (
@@ -349,7 +386,7 @@ def write_metric_outputs(
 
 def compute_pressure_metric(
     pressures_dir: Path,
-    reference_file: Path,
+    reference_file: Path | None,
     model_file_suffix: str,
     bins: int,
     pair_output_file: Path,
@@ -362,9 +399,6 @@ def compute_pressure_metric(
         raise ValueError("--bins must be >= 2")
     if not pressures_dir.is_dir():
         raise NotADirectoryError(f"Pressures directory not found: {pressures_dir}")
-    if not reference_file.is_file():
-        raise FileNotFoundError(f"Reference per-frame CSV not found: {reference_file}")
-
     pair_df = build_pair_rows(
         pressures_dir=pressures_dir,
         reference_file=reference_file,
@@ -417,8 +451,11 @@ def main() -> None:
     parser.add_argument(
         "--reference-file",
         type=Path,
-        default=DEFAULT_REFERENCE_FILE,
-        help="Reference per-frame pressure CSV file.",
+        default=None,
+        help=(
+            "Optional fallback reference per-frame pressure CSV. By default, each "
+            "model uses the matched CSV in its sibling references/ directory."
+        ),
     )
     parser.add_argument(
         "--model-file-suffix",
@@ -476,7 +513,7 @@ def main() -> None:
     model_mean_output_file = args.model_mean_output_file or args.output_file
     compute_pressure_metric(
         pressures_dir=Path(args.pressures_dir).resolve(),
-        reference_file=Path(args.reference_file).resolve(),
+        reference_file=Path(args.reference_file).resolve() if args.reference_file else None,
         model_file_suffix=args.model_file_suffix,
         bins=args.bins,
         pair_output_file=Path(args.pair_output_file).resolve(),

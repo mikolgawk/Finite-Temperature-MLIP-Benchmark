@@ -157,7 +157,7 @@ from ase.io import read
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-matched-stress"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-eager-stress"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
@@ -477,7 +477,7 @@ def main():
     HERE = Path(__file__).resolve().parent
     REPO = HERE.parents[3]
     METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
-    OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-matched-stress"
+    OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-eager-stress"
     MODEL_PATH = REPO / "paper_v2_configs" / "data" / "models" / "GRACE-2L-OMAT-large-ft-AM-fp32"
 
     CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark

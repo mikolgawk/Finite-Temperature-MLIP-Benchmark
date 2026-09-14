@@ -4,7 +4,7 @@ import re
 import pandas as pd
 
 
-DATA_DIR = Path(__file__).resolve().parent.parent / 'data' / 'e-f-predictions'
+DATA_DIR = Path(__file__).resolve().parent / 'data' / 'e-f-predictions'
 RESULTS_DIR = Path(__file__).resolve().parent / 'results'
 REQUIRED_COLUMNS = [
     'system',
@@ -54,7 +54,7 @@ def infer_system_type(system: str) -> str:
 
 
 def list_rmse_csv_files(data_dir: Path) -> list[Path]:
-    return sorted(data_dir.glob('rmse-results-all_*.csv'))
+    return sorted(data_dir.rglob('rmse-results-all_*.csv'))
 
 
 def extract_model_name(csv_path: Path) -> str:

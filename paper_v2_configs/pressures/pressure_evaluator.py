@@ -26,7 +26,7 @@ def early_cli(script, backend: str) -> None:
     accelerated = "md_accelerated" in _SCRIPT.parts
     family = "md_accelerated" if accelerated else "md_eager"
     default_trajectories = data / (
-        "mlip-trajs-torchsim-accelerated" if accelerated else "mlip-trajs-torchsim"
+        "mlip-trajs-torchsim-accelerated" if accelerated else "mlip-trajs-torchsim-eager"
     )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--traj-dir", type=Path, default=default_trajectories)
@@ -51,17 +51,22 @@ def early_cli(script, backend: str) -> None:
 
 def _trajectory_model(model_name: str) -> str:
     """Map stress-enabled evaluator names back to production trajectory names."""
-    name = model_name
-    for suffix in ("-compile-stress", "-turbo-stress", "-stress"):
-        if name.endswith(suffix):
-            replacement = suffix.removesuffix("-stress")
-            name = name.removesuffix(suffix) + replacement
-            break
+    name = model_name.replace("-force-only", "").replace("-stress", "")
+    if name.endswith("-eager"):
+        name = name.removesuffix("-eager")
     if name == "nequip-oam-l":
         return "nequip"
-    if name == "mattersim-v1-5M-compile":
-        return "mattersim-v1-5M"
     return name
+
+
+def _trajectory_paths(directory: Path, model_name: str) -> list[Path]:
+    """Find trajectories by canonical model name, independent of property tags."""
+    expected = _trajectory_model(model_name)
+    return sorted(
+        path
+        for path in directory.rglob("nvt_*.h5")
+        if _trajectory_model(path.stem.removeprefix("nvt_")) == expected
+    )
 
 
 def _stress_matrix(value):
@@ -139,11 +144,11 @@ def _run(model_name: str, predict, engine: str) -> None:
     args = _ARGS
     if args is None:
         raise RuntimeError("early_cli() must be called before run_pressure()")
-    trajectory_model = args.trajectory_model or _trajectory_model(model_name)
-    paths = sorted(args.traj_dir.rglob(f"nvt_{trajectory_model}.h5"))
+    trajectory_model = _trajectory_model(args.trajectory_model or model_name)
+    paths = _trajectory_paths(args.traj_dir, trajectory_model)
     if not paths:
         raise SystemExit(
-            f"No nvt_{trajectory_model}.h5 trajectories found under {args.traj_dir}"
+            f"No trajectories for {trajectory_model!r} found under {args.traj_dir}"
         )
     metadata = json.loads(args.metadata.read_text())
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +168,12 @@ def _run(model_name: str, predict, engine: str) -> None:
             continue
         try:
             meta = metadata[system]
+            if (
+                "stress_print_stride" in meta
+                and meta["stress_print_stride"] is None
+            ):
+                print(f"SKIPPED {system}: reference trajectory has no stress")
+                continue
             reference_path = args.ref_dir / system / "traj.extxyz"
             reference = _reference_pressures(reference_path, meta)
             model_rows = []

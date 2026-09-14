@@ -23,7 +23,7 @@ frames with default options and retain individual logs; failures do not stop the
 remaining runners.
 
 Defaults read `paper_v2_configs/data/ref-trajs/traj*.extxyz` recursively and write
-`paper_v2_configs/data/e-f-predictions-ase/{md_eager,md-accelerated}/rmse-results-all_<model>.csv`.
+`paper_v2_configs/e_f_rmses/data/e-f-predictions-ase/{md_eager,md-accelerated}/rmse-results-all_<model>.csv`.
 The CSV schema matches the TorchSim evaluators. Energy RMSE is in eV/atom;
 force RMSE is over Cartesian components in eV/Angstrom. Isolated-atom corrections
 for hydrogen and the acenes match the TorchSim evaluators. Failed evaluations

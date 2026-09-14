@@ -64,8 +64,8 @@ def is_molecular_crystal(system):
     )
 
 # Read and aggregate data from per-model RMSE CSV files
-data_dir = BASE_DIR.parent / 'data' / 'e-f-predictions'
-csv_files = sorted(data_dir.glob('rmse-results-all_*.csv'))
+data_dir = BASE_DIR / 'data' / 'e-f-predictions'
+csv_files = sorted(data_dir.rglob('rmse-results-all_*.csv'))
 
 if not csv_files:
     raise FileNotFoundError(f'No rmse-results-all_*.csv files found in {data_dir}')

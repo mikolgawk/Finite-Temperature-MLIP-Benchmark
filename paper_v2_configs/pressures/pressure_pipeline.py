@@ -175,7 +175,7 @@ def run_pipeline(args):
     output.mkdir(parents=True, exist_ok=True)
     (output / "references").mkdir(exist_ok=True)
     reference_csv = read_reference_csv(args.reference_file, metadata, args.reference_first_step) if args.reference_file else None
-    roots = args.traj_dir or [DATA / "mlip-trajs-torchsim-matched-stress", DATA / "mlip-trajs-torchsim-accelerated-stress", DATA / "mlip-trajs-ase-accelerated-stress"]
+    roots = args.traj_dir or [DATA / "mlip-trajs-torchsim-eager-stress", DATA / "mlip-trajs-torchsim-accelerated-stress", DATA / "mlip-trajs-ase-accelerated-stress"]
     paths = sorted({p.resolve() for root in roots for p in root.rglob(f"{args.prefix or 'nvt_'}*") if p.suffix in {".h5", ".hdf5", ".extxyz", ".xyz"}})
     if args.model:
         paths = [p for p in paths if p.stem.removeprefix("nvt_").lower() == args.model.lower()]

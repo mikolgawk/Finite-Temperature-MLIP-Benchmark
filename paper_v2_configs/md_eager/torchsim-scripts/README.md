@@ -117,7 +117,7 @@ overrides; the checkpoint value is a prefix without `.index`.
 Simulation results are written under:
 
 ```text
-paper_v2_configs/data/mlip-trajs-torchsim-matched/<system>/
+paper_v2_configs/data/mlip-trajs-torchsim-eager/<system>/
     nvt_<model-name>.h5
     md_timing_<model-name>.csv
 ```

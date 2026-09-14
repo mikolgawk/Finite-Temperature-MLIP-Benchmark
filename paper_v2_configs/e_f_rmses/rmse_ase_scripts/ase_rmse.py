@@ -14,11 +14,15 @@ def early_cli(script):
     """Parse options before importing heavyweight model dependencies."""
     global _ARGS, _SCRIPT
     _SCRIPT = Path(script).resolve()
-    data = Path(__file__).resolve().parents[2] / 'data'
+    benchmark_data = Path(__file__).resolve().parents[2] / 'data'
+    results_data = Path(__file__).resolve().parent.parent / 'data'
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--ref-dir', type=Path, default=data / 'ref-trajs')
-    parser.add_argument('--output-dir', type=Path, default=data / 'e-f-predictions-ase' / _SCRIPT.parent.name)
-    parser.add_argument('--isolated-atom-dir', type=Path, default=data / 'Hydrogen_E0')
+    parser.add_argument('--ref-dir', type=Path, default=benchmark_data / 'ref-trajs')
+    parser.add_argument(
+        '--output-dir', type=Path,
+        default=results_data / 'e-f-predictions-ase' / _SCRIPT.parent.name,
+    )
+    parser.add_argument('--isolated-atom-dir', type=Path, default=benchmark_data / 'Hydrogen_E0')
     parser.add_argument('--raw-energies', action='store_true', help='Disable isolated-atom energy corrections.')
     parser.add_argument('--max-frames', type=int, help='Evaluate at most this many frames per trajectory.')
     parser.add_argument('--force', action='store_true', help='Recompute existing results.')

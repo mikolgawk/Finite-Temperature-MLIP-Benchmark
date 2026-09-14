@@ -96,7 +96,7 @@ from ase.io import read
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-matched"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-eager"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
@@ -115,7 +115,7 @@ def main():
     HERE = Path(__file__).resolve().parent
     REPO = HERE.parents[3]
     METADATA_FILE = REPO / "paper_v2_configs" /  "data" / "ref-trajs" / "md_metadata.json"
-    OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-matched"
+    OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-eager"
 
     CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
     CHAIN_STEPS = 1

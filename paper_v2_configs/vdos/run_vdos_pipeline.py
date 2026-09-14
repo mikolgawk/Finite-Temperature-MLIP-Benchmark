@@ -39,7 +39,7 @@ MODEL_OUTPUT = "vdos_model_mean_ev_normalized_same_simulation_length.csv"
 
 SOURCES = (
     "mlip-trajs-ase",
-    "mlip-trajs-torchsim",
+    "mlip-trajs-torchsim-eager",
     "mlip-trajs-ase-accelerated",
     "mlip-trajs-torchsim-accelerated",
 )

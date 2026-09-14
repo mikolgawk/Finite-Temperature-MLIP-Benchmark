@@ -21,7 +21,7 @@ import seaborn as sns
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim"
+DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
 DEFAULT_ACCELERATED_TIMINGS_DIR = (
 	SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-accelerated"
 )

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Plot Pareto front for average RDF/VDOS/pressure error vs force eval time.
+"""Plot Pareto front for average RDF/VDOS/pressure error vs MD step time.
 
 Objectives:
 - minimize average RDF/VDOS/pressure error [%]
-- minimize mean force evaluation time per atom [ms]
+- minimize mean MD time per step [ms]
 
 Definitions:
     E_RDF  = RDF error [%]
@@ -81,6 +81,15 @@ def normalize_model_name(name: str) -> str:
 	return str(name).strip().lower()
 
 
+def metric_model_key(name: str) -> str:
+	"""Normalize property/execution tags only when joining metric tables."""
+	name = normalize_model_name(name)
+	name = name.replace("-force-only", "").replace("-stress", "")
+	if name.endswith("-eager"):
+		name = name.removesuffix("-eager")
+	return {"nequip-oam-l": "nequip"}.get(name, name)
+
+
 def display_name(model: str) -> str:
 	normalized = normalize_model_name(model)
 	return CALCULATOR_DISPLAY_NAMES.get(normalized, model)
@@ -103,22 +112,23 @@ TIER_COLORS = {
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = SCRIPT_DIR.parent
+DEFAULT_SOURCE = "mlip-trajs-torchsim-eager"
 
-TIMINGS_DIR = Path("/home/mjgawkowski/phd_mlip_matbench_benchmarks/scripts/timings_fp32_v100")
 
-DEFAULT_COMBINED_METRICS_FILE = (
-	SCRIPTS_DIR
-	/ "metric-correlations-scripts-final"
-	/ "results"
-	/ "vdos_rdf_model_means_merged_same_simulation_length.csv"
-)
+def source_input_paths(source: str) -> tuple[Path, Path, Path, str]:
+	"""Return timing/RDF/VDOS inputs and pressure mode for a V2 source."""
+	return (
+		SCRIPTS_DIR / "data" / source,
+		SCRIPTS_DIR / "rdfs" / "results" / source
+		/ "rdf_similarity_scores_same_simulation_length.csv",
+		SCRIPTS_DIR / "vdos" / "results" / source
+		/ "vdos_model_mean_ev_normalized_same_simulation_length.csv",
+		"md_accelerated" if source.endswith("-accelerated") else "md_eager",
+	)
+
 
 DEFAULT_PRESSURE_METRICS_FILE = (
-	SCRIPTS_DIR
-	/ "pressure-scripts-final"
-	/ "results"
-	/ "same-simulation-length"
-	/ "model_pressure_error_metric.csv"
+	SCRIPTS_DIR / "pressures" / "results" / "model_pressure_error_metric.csv"
 )
 
 DEFAULT_OUTPUT_FILE = (
@@ -155,7 +165,22 @@ def _prepare_pressure_df(
 	pressure_df: pd.DataFrame,
 	pressure_scale_gpa: float,
 	clip_pressure_error: bool,
+	backend: str | None = None,
+	mode: str | None = None,
 ) -> pd.DataFrame:
+	if backend is not None and "backend" in pressure_df.columns:
+		pressure_df = pressure_df.loc[
+			pressure_df["backend"].astype(str).str.lower() == backend.lower()
+		].copy()
+	if mode is not None and "mode" in pressure_df.columns:
+		pressure_df = pressure_df.loc[
+			pressure_df["mode"].astype(str).str.lower() == mode.lower()
+		].copy()
+	if pressure_df.empty:
+		raise ValueError(
+			f"No pressure metrics remain after filtering for backend={backend!r}, mode={mode!r}."
+		)
+
 	model_col = _pick_first_existing(set(pressure_df.columns), ["model", "mlip_model", "calculator"])
 	if model_col is None:
 		raise ValueError("Pressure metrics file must contain one of: model, mlip_model, calculator.")
@@ -213,7 +238,7 @@ def _prepare_pressure_df(
 			cols.append(col)
 
 	out = pressure_df[cols].copy()
-	out["model"] = out[model_col].map(normalize_model_name)
+	out["model"] = out[model_col].map(metric_model_key)
 
 	if pressure_mae_col is not None:
 		out["Pressure MAE [GPa]"] = pd.to_numeric(out[pressure_mae_col], errors="coerce")
@@ -279,13 +304,14 @@ def compute_combined_error(df: pd.DataFrame) -> pd.Series:
 
 
 def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
-	"""Return DataFrame with columns [model, mean_time_per_step_ms] from timings_fp32_v100."""
+	"""Return mean step time for every model with valid timing CSVs."""
+	if not timings_dir.is_dir():
+		raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 	model_timings: dict[str, list[float]] = {}
 	all_systems = [d for d in timings_dir.iterdir() if d.is_dir()]
-	complete_systems = [d for d in all_systems if len(list(d.glob("md_timing_*.csv"))) == 15]
-	for system_dir in sorted(complete_systems):
+	for system_dir in sorted(all_systems):
 		for csv_path in sorted(system_dir.glob("md_timing_*.csv")):
-			model_name = csv_path.stem.removeprefix("md_timing_")
+			model_name = metric_model_key(csv_path.stem.removeprefix("md_timing_"))
 			try:
 				df = pd.read_csv(csv_path)
 				sps = float(df["seconds_per_step"].iloc[0])
@@ -293,20 +319,93 @@ def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
 			except Exception:
 				pass
 	rows = [
-		{"model": normalize_model_name(m), "mean_time_per_step_ms": float(np.mean(vals)) * 1000}
+		{"model": m, "mean_time_per_step_ms": float(np.mean(vals)) * 1000}
 		for m, vals in model_timings.items()
 	]
+	if not rows:
+		raise ValueError(f"No valid md_timing_*.csv files found under {timings_dir}")
 	return pd.DataFrame(rows)
 
 
+def load_rdf_vdos_metrics(
+	rdf_metrics_file: Path,
+	vdos_metrics_file: Path,
+) -> pd.DataFrame:
+	"""Merge the source-specific RDF and VDOS outputs produced by V2."""
+	rdf_df = pd.read_csv(rdf_metrics_file)
+	vdos_df = pd.read_csv(vdos_metrics_file)
+
+	rdf_model_col = _pick_first_existing(
+		set(rdf_df.columns), ["model", "Calculator", "calculator"]
+	)
+	rdf_error_col = _pick_first_existing(
+		set(rdf_df.columns),
+		["rdf_error_percent", "RDF Error [%]", "Mean RDF Error [%]", "rdf_error", "RDF_Error"],
+	)
+	rdf_similarity_col = _pick_first_existing(
+		set(rdf_df.columns),
+		["rdf_similarity_percent", "RDF Similarity [%]", "rdf_similarity"],
+	)
+	if rdf_model_col is None or (rdf_error_col is None and rdf_similarity_col is None):
+		raise ValueError(
+			f"RDF metrics file {rdf_metrics_file} needs a model column and an RDF error/similarity column."
+		)
+
+	vdos_model_col = _pick_first_existing(
+		set(vdos_df.columns), ["model", "Calculator", "calculator"]
+	)
+	vdos_error_col = _pick_first_existing(
+		set(vdos_df.columns),
+		["vdos_error_percent", "VDOS Error [%]", "Mean VDOS Error [%]", "vdos_error"],
+	)
+	if vdos_model_col is None or vdos_error_col is None:
+		raise ValueError(
+			f"VDOS metrics file {vdos_metrics_file} needs a model column and a VDOS error column."
+		)
+
+	rdf = pd.DataFrame({"model": rdf_df[rdf_model_col].map(metric_model_key)})
+	if rdf_error_col is not None:
+		rdf["RDF Error [%]"] = _as_percent(rdf_df[rdf_error_col])
+	else:
+		rdf["RDF Error [%]"] = 100.0 - _as_percent(rdf_df[rdf_similarity_col])
+	rdf["RDF Similarity [%]"] = 100.0 - rdf["RDF Error [%]"]
+	rdf = rdf.groupby("model", as_index=False).mean(numeric_only=True)
+
+	vdos = pd.DataFrame(
+		{
+			"model": vdos_df[vdos_model_col].map(metric_model_key),
+			"VDOS Error [%]": _as_percent(vdos_df[vdos_error_col]),
+		}
+	).groupby("model", as_index=False).mean(numeric_only=True)
+
+	merged = rdf.merge(vdos, on="model", how="inner")
+	if merged.empty:
+		raise ValueError(
+			f"No overlapping models between {rdf_metrics_file} and {vdos_metrics_file}."
+		)
+	return merged
+
+
 def load_and_merge(
-	combined_metrics_file: Path,
+	timings_dir: Path,
 	pressure_metrics_file: Path,
 	pressure_scale_gpa: float,
 	clip_pressure_error: bool,
+	combined_metrics_file: Path | None = None,
+	rdf_metrics_file: Path | None = None,
+	vdos_metrics_file: Path | None = None,
+	pressure_backend: str | None = None,
+	pressure_mode: str | None = None,
 ) -> pd.DataFrame:
-	timings_df = load_model_avg_timings(TIMINGS_DIR)
-	combined_df = pd.read_csv(combined_metrics_file)
+	timings_df = load_model_avg_timings(timings_dir)
+	if combined_metrics_file is not None:
+		combined_df = pd.read_csv(combined_metrics_file)
+	else:
+		if rdf_metrics_file is None or vdos_metrics_file is None:
+			raise ValueError(
+				"Supply --combined-metrics-file or both --rdf-metrics-file and --vdos-metrics-file."
+			)
+		combined_df = load_rdf_vdos_metrics(rdf_metrics_file, vdos_metrics_file)
 	pressure_df = pd.read_csv(pressure_metrics_file)
 
 	combined_needed = {"model"}
@@ -365,12 +464,15 @@ def load_and_merge(
 			combined_keep_cols.append(col)
 
 	combined_small = combined_df[combined_keep_cols].copy()
-	combined_small["model"] = combined_small["model"].map(normalize_model_name)
+	combined_small["model"] = combined_small["model"].map(metric_model_key)
+	combined_small = combined_small.groupby("model", as_index=False).mean(numeric_only=True)
 
 	pressure_small = _prepare_pressure_df(
 		pressure_df=pressure_df,
 		pressure_scale_gpa=pressure_scale_gpa,
 		clip_pressure_error=clip_pressure_error,
+		backend=pressure_backend,
+		mode=pressure_mode,
 	)
 
 	merged = pd.merge(
@@ -463,16 +565,16 @@ def is_pareto_optimal(df: pd.DataFrame) -> np.ndarray:
 def model_tier(model_name: str) -> str:
 	model_name = normalize_model_name(model_name)
 
-	if model_name in TIER_1:
+	if model_name in map(normalize_model_name, TIER_1):
 		return "Tier 1"
 
-	if model_name in TIER_2:
+	if model_name in map(normalize_model_name, TIER_2):
 		return "Tier 2"
 
-	if model_name in TIER_3:
+	if model_name in map(normalize_model_name, TIER_3):
 		return "Tier 3"
 
-	if model_name in TIER_4:
+	if model_name in map(normalize_model_name, TIER_4):
 		return "Tier 4"
 
 	return "Other"
@@ -602,15 +704,37 @@ def main() -> None:
 	)
 
 	parser.add_argument(
+		"--source",
+		choices=("mlip-trajs-torchsim-eager", "mlip-trajs-torchsim-accelerated"),
+		default=DEFAULT_SOURCE,
+		help="V2 trajectory source used to derive default timing, RDF, and VDOS inputs.",
+	)
+
+	parser.add_argument(
 		"--timings-dir",
-		default=str(TIMINGS_DIR),
-		help="Directory containing per-system md_timing_*.csv files (timings_fp32_v100).",
+		default=None,
+		help="Directory containing per-system md_timing_*.csv files (default: data/<source>).",
 	)
 
 	parser.add_argument(
 		"--combined-metrics-file",
-		default=str(DEFAULT_COMBINED_METRICS_FILE),
-		help="CSV with RDF similarity/error and VDOS error percentages by model.",
+		default=None,
+		help=(
+			"Optional pre-merged RDF/VDOS CSV. When omitted, the V2 RDF and VDOS "
+			"outputs are merged directly."
+		),
+	)
+
+	parser.add_argument(
+		"--rdf-metrics-file",
+		default=None,
+		help="RDF model metrics CSV (default: rdfs/results/<source>/...).",
+	)
+
+	parser.add_argument(
+		"--vdos-metrics-file",
+		default=None,
+		help="VDOS model metrics CSV (default: vdos/results/<source>/...).",
 	)
 
 	parser.add_argument(
@@ -622,6 +746,18 @@ def main() -> None:
 			"pressure_similarity_percent, final_mean_pressure_error_percent, or "
 			"pressure_error_percent. MAE columns are still accepted as a fallback."
 		),
+	)
+
+	parser.add_argument(
+		"--pressure-backend",
+		default="torchsim",
+		help="Pressure backend to select when the metrics CSV contains provenance.",
+	)
+
+	parser.add_argument(
+		"--pressure-mode",
+		default=None,
+		help="Pressure mode to select (default: md_eager or md_accelerated from --source).",
 	)
 
 	parser.add_argument(
@@ -656,12 +792,29 @@ def main() -> None:
 	)
 
 	args = parser.parse_args()
+	source = args.source
+	default_timings, default_rdf, default_vdos, default_pressure_mode = source_input_paths(source)
+	timings_dir = Path(args.timings_dir) if args.timings_dir else default_timings
+	rdf_metrics_file = (
+		Path(args.rdf_metrics_file) if args.rdf_metrics_file else default_rdf
+	)
+	vdos_metrics_file = (
+		Path(args.vdos_metrics_file) if args.vdos_metrics_file else default_vdos
+	)
+	pressure_mode = args.pressure_mode or default_pressure_mode
 
 	merged = load_and_merge(
-		combined_metrics_file=Path(args.combined_metrics_file),
+		timings_dir=timings_dir,
+		combined_metrics_file=(
+			Path(args.combined_metrics_file) if args.combined_metrics_file else None
+		),
+		rdf_metrics_file=rdf_metrics_file,
+		vdos_metrics_file=vdos_metrics_file,
 		pressure_metrics_file=Path(args.pressure_metrics_file),
 		pressure_scale_gpa=args.pressure_scale_gpa,
 		clip_pressure_error=not args.no_pressure_clip,
+		pressure_backend=args.pressure_backend,
+		pressure_mode=pressure_mode,
 	)
 
 	output_csv = Path(args.output_csv)

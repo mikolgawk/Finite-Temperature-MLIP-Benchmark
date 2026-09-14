@@ -29,6 +29,26 @@ class ConstantStress(Calculator):
 
 
 class PressureEvaluatorTests(unittest.TestCase):
+    def test_trajectory_model_tags_are_canonicalized_for_lookup(self):
+        self.assertEqual(evaluator._trajectory_model("orb-v3-force-only-eager"), "orb-v3")
+        self.assertEqual(evaluator._trajectory_model("orb-v3-stress-eager"), "orb-v3")
+        self.assertEqual(evaluator._trajectory_model("pet-oam-xl-force-only-torchscript"),
+                         "pet-oam-xl-torchscript")
+        self.assertEqual(evaluator._trajectory_model("pet-oam-xl-stress-torchscript"),
+                         "pet-oam-xl-torchscript")
+        self.assertEqual(evaluator._trajectory_model("nequip-oam-l-force-only"), "nequip")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            trajectory = (
+                Path(temporary) / "system" / "nvt_orb-v3-force-only-eager.h5"
+            )
+            trajectory.parent.mkdir()
+            trajectory.touch()
+            self.assertEqual(
+                evaluator._trajectory_paths(Path(temporary), "orb-v3-stress-eager"),
+                [trajectory],
+            )
+
     def test_ase_evaluator_reads_existing_hdf5_without_running_md(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -41,6 +61,21 @@ class PressureEvaluatorTests(unittest.TestCase):
                 handle.create_dataset("data/positions", data=np.zeros((4, 1, 3)))
                 handle.create_dataset(
                     "data/cell", data=np.repeat(np.diag([3.0, 4.0, 5.0])[None], 4, axis=0)
+                )
+                handle.create_dataset("steps/positions", data=[0, 2, 4, 6])
+
+            no_stress_system = "bulkCuAu_500K_test"
+            no_stress_trajectory = (
+                root / "trajectories" / no_stress_system / "nvt_dummy.h5"
+            )
+            no_stress_trajectory.parent.mkdir(parents=True)
+            with h5py.File(no_stress_trajectory, "w") as handle:
+                handle.create_dataset("data/atomic_numbers", data=[[29]])
+                handle.create_dataset("data/pbc", data=[True, True, True])
+                handle.create_dataset("data/positions", data=np.zeros((4, 1, 3)))
+                handle.create_dataset(
+                    "data/cell",
+                    data=np.repeat(np.diag([3.0, 4.0, 5.0])[None], 4, axis=0),
                 )
                 handle.create_dataset("steps/positions", data=[0, 2, 4, 6])
 
@@ -58,7 +93,12 @@ class PressureEvaluatorTests(unittest.TestCase):
 
             metadata = root / "metadata.json"
             metadata.write_text(json.dumps({
-                system: {"timestep": 1.0, "position_print_stride": 2}
+                system: {"timestep": 1.0, "position_print_stride": 2},
+                no_stress_system: {
+                    "timestep": 1.0,
+                    "position_print_stride": 2,
+                    "stress_print_stride": None,
+                },
             }))
             output = root / "output"
             evaluator._ARGS = Namespace(
@@ -82,6 +122,7 @@ class PressureEvaluatorTests(unittest.TestCase):
             full = pd.read_csv(output / "dummy_stress_per_frame.csv")
             self.assertEqual(len(full), 4)
             self.assertTrue((output / "references" / "dummy.csv").is_file())
+            self.assertFalse((output / "dummy_pressure_failures.json").exists())
 
 
 if __name__ == "__main__":

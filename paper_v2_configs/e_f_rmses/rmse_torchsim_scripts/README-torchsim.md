@@ -34,8 +34,8 @@ required isolated-atom files produce explicit failures. `--raw-energies` disable
 these corrections. Predictions use the TorchSim model directly, including for
 isolated atoms.
 
-Summaries are written to `paper_v2_configs/data/e-f-predictions/md_eager/` and
-`paper_v2_configs/data/e-f-predictions/md-accelerated/`, respectively, as
+Summaries are written to `paper_v2_configs/e_f_rmses/data/e-f-predictions/md_eager/`
+and `paper_v2_configs/e_f_rmses/data/e-f-predictions/md-accelerated/`, respectively, as
 `rmse-results-all_<MD model name>.csv`. Failed frames are excluded from both sides
 of the comparison and recorded in `.failures.json` sidecars. Any failure produces
 a nonzero exit status. Incomplete runs are retried; completed summaries are skipped
