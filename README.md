@@ -76,33 +76,7 @@ paper_v2_configs/pressures/model_calculators.json -->
 ### Shared physical protocol
 
 Both `paper_v2_configs/md/` and `paper_v2_configs/md_accelerated/` run the same
-physical workload. The word **accelerated** refers to faster model inference,
-not to a biased or enhanced-sampling MD method. No boost potential is added.
-
-- Ensemble: NVT.
-- Initial structure: frame 0 of each reference `traj.extxyz`.
-- Temperature, timestep, thermostat, thermostat coupling time, trajectory
-  length, and output stride: read from `md_metadata.json`.
-- Number of integration steps:
-  `round(trajectory_length_ps * 1000 / timestep_fs)`.
-- Random seed: 42.
-- Nose-Hoover settings: chain length 1 and one chain substep. TorchSim uses
-  third-order Suzuki-Yoshida integration (`sy_steps = 3`).
-- Thermostat mapping: `Nose-Hoover` uses Nose-Hoover-chain NVT;
-  `velocity rescaling` uses Bussi stochastic velocity rescaling; `Langevin` is
-  supported with friction `1 / tau`, although no current metadata entry uses it.
-- Workload: energy and forces only, with stress and virials disabled.
-- Trajectory contents: positions, cells, and velocities in HDF5; forces are not
-  stored. The current position and energy print strides are 1 for every system.
-- Timing: the CUDA device is synchronized immediately before and after the MD
-  loop. A timing CSV records elapsed time and seconds per step. Baseline
-  TorchSim runners normally perform one untimed initial energy/force evaluation;
-  compilation/export setup is model-specific in the accelerated runners.
-
-The ASE and TorchSim implementations use equivalent physical settings. ASE maps
-the metadata to `NoseHooverChainNVT`, `Bussi`, or `Langevin`, initializes
-Maxwell-Boltzmann velocities with seed 42, and also writes an MD energy log.
-TorchSim maps the same metadata to its corresponding NVT integrator.
+physical workload. **Accelerated** settings refer to faster model inference.
 
 ### Per-system settings
 
