@@ -29,7 +29,7 @@ expected inputs, and current caveats.
 
 ## Evaluating a new potential
 
-Use the two baseline entry points in `custom_model_evaluation/` with factories
+Use the two baseline entry points in `custom_model_evaluation/` with functions
 that construct your ASE calculator and TorchSim model. Start with a one-step
 check on one system:
 
