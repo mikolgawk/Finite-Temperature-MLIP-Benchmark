@@ -44,7 +44,7 @@ The main V2 directories are:
 
 | Directory | Contents |
 | --- | --- |
-| `data/` | Reference metadata. |
+| `data/` | Reference metadata, can be accessed here <https://liveuclac-my.sharepoint.com/:f:/g/personal/ucapgaw_ucl_ac_uk/IgDVLaV3scIoRrNqO_GcZgpFAZFw4slacdg6_dNUyIWn1fw?e=ifA7Id> |
 | `md/` | Baseline, non-accelerated NVT MD implementations for ASE and TorchSim. |
 | `md_accelerated/` | NVT MD with model-specific inference acceleration for ASE and TorchSim. |
 | `e_f_rmses/` | Energy/force evaluation on reference, baseline-MD, and accelerated-MD structures. |
@@ -237,12 +237,24 @@ This includes a zero-byte CSV, which is used as a failure marker. Remove the
 empty timing CSV and any partial HDF5 trajectory before retrying a failed pair.
 Missing initial structures are reported and skipped. -->
 
+## Running V2 ASE MD
+
+To run ASE MD simply use
+
+```bash
+# Run every baseline TorchSim model sequentially.
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md/ase-scripts/run_all_md.sh
+
+# Run every accelerated TorchSim variant sequentially.
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md_accelerated/ase-scripts/run_all_md.sh
+```
+
 ## Evaluating a custom model
 
 `custom_model_evaluation/` is intended to let a model developer run the same
 benchmark protocol as `paper_v2_configs/` without adding their model to the
 paper's fixed 17-model catalog. The developer supplies one native ASE runner
-and one TorchSim runner; the model-independent analysis stages then consume
+and one TorchSim runner. The model-independent analysis stages then consume
 their trajectories and timings.
 
 Four production-MD entry points backed by two shared runners are provided. Each
