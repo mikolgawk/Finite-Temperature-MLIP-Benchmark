@@ -70,7 +70,6 @@ paper_v2_configs/md/md_calculator_versions.json
 paper_v2_configs/md_accelerated/model_calculators.json
 paper_v2_configs/e_f_rmses/model_calculators.json
 paper_v2_configs/pressures/model_calculators.json -->
-```
 
 ## V2 MD settings
 
