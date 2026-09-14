@@ -21,8 +21,23 @@ CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md_eager/torchsim-scripts/run_all_m
 CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md_accelerated/torchsim-scripts/run_all_md.sh
 ```
 
-Next, generate the energy/force, pressure, RDF, and VDOS metrics before running
-the scripts in [`paper_v2_configs/pareto_plots/`](paper_v2_configs/pareto_plots/).
+Obtain the model-specific energy/force and pressure evaluations first:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/e_f_rmses/rmse_torchsim_scripts/md_eager/run_all_rmses.sh
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/e_f_rmses/rmse_torchsim_scripts/md-accelerated/run_all_rmses.sh
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/pressures/md_eager/torchsim-scripts/run_all_pressures.sh
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/pressures/md_accelerated/torchsim-scripts/run_all_pressures.sh
+```
+
+Then generate all four metric sets with the `uv` script:
+
+```bash
+uv run --script paper_v2_configs/generate_metrics.py
+```
+
+Next, run the scripts in
+[`paper_v2_configs/pareto_plots/`](paper_v2_configs/pareto_plots/).
 See the [V2 MD instructions](INFO.md#running-v2-torchsim-md) and
 [analysis-pipeline guide](INFO.md#analysis-pipeline) for the entry points,
 expected inputs, and current caveats.
