@@ -46,7 +46,7 @@ The main V2 directories are:
 
 | Directory | Contents |
 | --- | --- |
-| `data/` | Reference metadata, can be accessed here <https://liveuclac-my.sharepoint.com/:f:/g/personal/ucapgaw_ucl_ac_uk/IgDVLaV3scIoRrNqO_GcZgpFAZFw4slacdg6_dNUyIWn1fw?e=ifA7Id> |
+| `data/` | Reference metadata, can be accessed here [ref_trajs]<https://liveuclac-my.sharepoint.com/:f:/g/personal/ucapgaw_ucl_ac_uk/IgDVLaV3scIoRrNqO_GcZgpFAZFw4slacdg6_dNUyIWn1fw?e=ifA7Id> |
 | `md_eager/` | Baseline, eager NVT MD implementations for ASE and TorchSim. |
 | `md_accelerated/` | NVT MD with model-specific inference acceleration for ASE and TorchSim. |
 | `e_f_rmses/` | Energy/force evaluation on reference, baseline-MD, and accelerated-MD structures. |
