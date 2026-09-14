@@ -74,7 +74,7 @@ device = torch.device("cuda")
 # model
 # fairchem's torch-sim wrapper has no inference_settings passthrough; it calls
 # pretrained_mlip.get_predict_unit(...) internally, so inject the named mode at
-# the factory.
+# model setup.
 from fairchem.core import pretrained_mlip
 from fairchem.core.units.mlip_unit import InferenceSettings
 

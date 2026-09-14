@@ -5,7 +5,7 @@ The user module must expose a zero-argument function that returns an ASE
 
     python md_custom_model.py \
         --model-name my-model \
-        --factory /path/to/my_model.py:make_calculator
+        --model-loader /path/to/my_model.py:make_calculator
 
 Model-specific dependencies belong in the user's environment (or in inline
 ``uv`` metadata in their model module).  This runner deliberately requests
@@ -51,14 +51,14 @@ TIMING_FIELDS = (
 )
 
 
-def parse_factory_spec(value: str) -> tuple[str, str]:
+def parse_model_loader_spec(value: str) -> tuple[str, str]:
     """Split MODULE[:FUNCTION], defaulting to ``make_calculator``."""
     module, separator, function = value.rpartition(":")
     if not separator:
         return value, "make_calculator"
     if not module or not function:
         raise argparse.ArgumentTypeError(
-            "factory must be MODULE[:FUNCTION] or /path/to/file.py[:FUNCTION]"
+            "model loader must be MODULE[:FUNCTION] or /path/to/file.py[:FUNCTION]"
         )
     return module, function
 
@@ -81,13 +81,13 @@ def load_module(module_ref: str) -> ModuleType:
     return importlib.import_module(module_ref)
 
 
-def load_factory(value: str) -> Callable[[], Any]:
-    module_ref, function_name = parse_factory_spec(value)
+def load_model_loader(value: str) -> Callable[[], Any]:
+    module_ref, function_name = parse_model_loader_spec(value)
     module = load_module(module_ref)
-    factory = getattr(module, function_name, None)
-    if not callable(factory):
-        raise TypeError(f"{value!r} does not identify a callable factory")
-    return factory
+    model_loader = getattr(module, function_name, None)
+    if not callable(model_loader):
+        raise TypeError(f"{value!r} does not identify a callable model loader")
+    return model_loader
 
 
 def safe_model_name(value: str) -> str:
@@ -115,7 +115,7 @@ def parse_args(
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name", required=True, type=safe_model_name)
     parser.add_argument(
-        "--factory",
+        "--model-loader",
         required=True,
         help="dotted module or .py file, optionally followed by :FUNCTION",
     )
@@ -321,7 +321,7 @@ def validate_calculator(calculator: Any) -> None:
     from ase.calculators.calculator import Calculator
 
     if not isinstance(calculator, Calculator):
-        raise TypeError("ASE factory must return an ase Calculator instance")
+        raise TypeError("ASE model loader must return an ase Calculator instance")
     properties = set(getattr(calculator, "implemented_properties", ()))
     missing = {"energy", "forces"} - properties
     if missing:
@@ -483,11 +483,11 @@ def main(argv: list[str] | None = None, *, accelerated: bool = False) -> int:
     metadata = json.loads(args.metadata.read_text())
     selected = select_metadata(metadata, args.systems)
     configure_strict_torch_precision()
-    factory = load_factory(args.factory)
+    model_loader = load_model_loader(args.model_loader)
 
     shared_calculator = None
     if not args.calculator_per_system:
-        shared_calculator = factory()
+        shared_calculator = model_loader()
         validate_calculator(shared_calculator)
 
     failures: list[tuple[str, Exception]] = []
@@ -495,7 +495,7 @@ def main(argv: list[str] | None = None, *, accelerated: bool = False) -> int:
         try:
             calculator = shared_calculator
             if calculator is None:
-                calculator = factory()
+                calculator = model_loader()
                 validate_calculator(calculator)
             run_system(
                 name=name,

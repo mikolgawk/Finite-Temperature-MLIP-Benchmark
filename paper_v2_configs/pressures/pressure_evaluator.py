@@ -248,7 +248,7 @@ def _run(model_name: str, predict, engine: str) -> None:
     print(f"Saved {summary_output}")
 
 
-def run_ase_pressure(model_name, calculator_factory, engine="ase", *, per_system_calculator=False, **_):
+def run_ase_pressure(model_name, make_calculator, engine="ase", *, per_system_calculator=False, **_):
     """Evaluate ASE-calculator stress on saved frames, without integration."""
     shared_calculator = None
 
@@ -259,10 +259,10 @@ def run_ase_pressure(model_name, calculator_factory, engine="ase", *, per_system
 
         if per_system_calculator:
             if calculator is None:
-                calculator = calculator_factory()
+                calculator = make_calculator()
         else:
             if shared_calculator is None:
-                shared_calculator = calculator_factory()
+                shared_calculator = make_calculator()
             calculator = shared_calculator
         frame = atoms.copy()
         frame.info["charge"] = int(frame.info.get("charge", 0))

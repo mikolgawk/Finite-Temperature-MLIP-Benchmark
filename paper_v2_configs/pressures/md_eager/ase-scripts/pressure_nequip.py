@@ -153,13 +153,13 @@ def make_integrator(atoms, thermostat: str, temperature_k: float,
 
 def run_ase_md(
     model_name: str,
-    calculator_factory: Callable[[], object],
+    make_calculator: Callable[[], object],
     engine: str,
     synchronize: Callable[[], None] = synchronize_cuda,
 ) -> None:
     """Run an ASE calculator over every system in the MD metadata."""
     metadata = json.loads(METADATA_FILE.read_text())
-    calculator = calculator_factory()
+    calculator = make_calculator()
     if "stress" not in calculator.implemented_properties:
         raise RuntimeError("Pressure calculator must support stress")
     run_name = f"{model_name}-ase"

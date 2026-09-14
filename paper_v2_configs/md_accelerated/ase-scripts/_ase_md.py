@@ -114,7 +114,7 @@ def make_integrator(atoms, thermostat: str, temperature_k: float,
 
 def run_ase_md(
     model_name: str,
-    calculator_factory: Callable[[], object],
+    make_calculator: Callable[[], object],
     engine: str,
     synchronize: Callable[[], None] = synchronize_cuda,
     *, per_system_calculator: bool = False,
@@ -152,7 +152,7 @@ def run_ase_md(
 
         atoms = read(init_file, index=0)
         if calculator is None or per_system_calculator:
-            calculator = calculator_factory()
+            calculator = make_calculator()
             if "stress" in calculator.implemented_properties:
                 raise RuntimeError("ASE production calculator must disable stress")
         atoms.calc = calculator

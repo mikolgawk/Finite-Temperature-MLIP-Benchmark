@@ -85,7 +85,7 @@ def count_extxyz_frames(path, limit=None):
         return None
 
 
-def run_rmse(model_name, calculator_factory, engine='ase', *,
+def run_rmse(model_name, make_calculator, engine='ase', *,
              per_system_calculator=False):
     """Evaluate reference frames with the matching MD calculator, without MD."""
     import numpy as np
@@ -118,7 +118,7 @@ def run_rmse(model_name, calculator_factory, engine='ase', *,
         temperature = int(match[1]) if match else 0
         try:
             if calculator is None or per_system_calculator:
-                calculator = calculator_factory()
+                calculator = make_calculator()
                 offsets.clear()
             e0 = {}
             for symbol, atom_path in correction_files(system, args).items():

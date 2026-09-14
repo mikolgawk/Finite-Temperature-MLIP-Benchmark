@@ -260,7 +260,7 @@ and one TorchSim runner. The model-independent analysis stages then consume
 their trajectories and timings.
 
 Four production-MD entry points backed by two shared runners are provided. Each
-loads a model factory from a Python module, runs every system in the V2
+loads a model-construction function from a Python module, runs every system in the V2
 metadata, and writes trajectories and timings in the schema consumed by the
 analysis pipeline:
 
@@ -336,7 +336,7 @@ compatible object. For production MD it must provide:
 - stress disabled so the timed MD workload remains energy/force only.
 
 Put the model-specific setup in a small Python module with a zero-argument
-factory. The runner loads either a file path or an importable module:
+zero-argument function. The runner loads either a file path or an importable module:
 
 ```python
 # my_ase_model.py
@@ -352,18 +352,18 @@ reference-matched workload:
 ```bash
 python custom_model_evaluation/md_eager/ase-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_ase_model.py:make_calculator \
+  --model-loader ./my_ase_model.py:make_calculator \
   --system bulkAg_600K_Kapil \
   --max-steps 1 \
   --output-root /tmp/my-model-ase-smoke
 
 python custom_model_evaluation/md_eager/ase-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_ase_model.py:make_calculator
+  --model-loader ./my_ase_model.py:make_calculator
 ```
 
 Install ASE, NumPy, and h5py alongside the dependencies required by the custom
-calculator. The calculator factory is called outside the timing boundary.
+calculator. The calculator-loading function is called outside the timing boundary.
 
 A second, stress-enabled calculator is required by the pressure stage. Its ASE
 stress must use the ASE sign convention and eV/Angstrom^3 units. Pressure is
@@ -378,7 +378,7 @@ It must use the same checkpoint, dtype policy, cutoff, and physical model as the
 ASE adapter. It must expose the `device` and `dtype` attributes required by
 `torch_sim.integrate`. Production stress must be disabled.
 
-The TorchSim runner uses the same factory convention:
+The TorchSim runner uses the same model-loading convention:
 
 ```python
 # my_torchsim_model.py
@@ -391,19 +391,19 @@ def make_model():
 ```bash
 python custom_model_evaluation/md_eager/torchsim-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_torchsim_model.py:make_model \
+  --model-loader ./my_torchsim_model.py:make_model \
   --system bulkAg_600K_Kapil \
   --max-steps 1 \
   --output-root /tmp/my-model-torchsim-smoke
 
 python custom_model_evaluation/md_eager/torchsim-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_torchsim_model.py:make_model
+  --model-loader ./my_torchsim_model.py:make_model
 ```
 
 Install TorchSim, PyTorch, ASE, and h5py alongside the custom model's own
-dependencies. Use `--device` and `--dtype` to match the model factory. The
-factory is called once, and the first energy/force evaluation for every system
+dependencies. Use `--device` and `--dtype` to match the model. The loading
+function is called once, and the first energy/force evaluation for every system
 is kept outside the reported MD timing.
 
 ### Accelerated adapters
@@ -418,8 +418,8 @@ baseline entry points. Their different defaults are:
 | TorchSim | `data/mlip-trajs-torchsim-accelerated/` | `torch-sim+custom-accelerated` |
 
 The entry points do not guess how to optimize an arbitrary model. The supplied
-factory must return the accelerated implementation, with compilation or
-artifact loading performed while the factory runs. For example:
+model-loading function must return the accelerated implementation, with
+compilation or artifact loading performed before it returns. For example:
 
 ```python
 # my_accelerated_torchsim_model.py
@@ -438,25 +438,25 @@ Run a smoke test and then the full accelerated workloads with:
 ```bash
 python custom_model_evaluation/md_accelerated/ase-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_accelerated_ase_model.py:make_calculator \
+  --model-loader ./my_accelerated_ase_model.py:make_calculator \
   --system bulkAg_600K_Kapil \
   --max-steps 1 \
   --output-root /tmp/my-model-ase-accelerated-smoke
 
 python custom_model_evaluation/md_accelerated/ase-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_accelerated_ase_model.py:make_calculator
+  --model-loader ./my_accelerated_ase_model.py:make_calculator
 
 python custom_model_evaluation/md_accelerated/torchsim-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_accelerated_torchsim_model.py:make_model \
+  --model-loader ./my_accelerated_torchsim_model.py:make_model \
   --system bulkAg_600K_Kapil \
   --max-steps 1 \
   --output-root /tmp/my-model-torchsim-accelerated-smoke
 
 python custom_model_evaluation/md_accelerated/torchsim-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_accelerated_torchsim_model.py:make_model
+  --model-loader ./my_accelerated_torchsim_model.py:make_model
 ```
 
 If no native TorchSim adapter exists, the custom wrapper is responsible for:
@@ -520,7 +520,7 @@ A typical implementation sequence is:
 
 1. Use the default V2 reference metadata, or copy it and its referenced AIMD
    trajectories under `custom_model_evaluation/data/ref-trajs/`.
-2. Implement the ASE and TorchSim factory modules, then run the generic scripts
+2. Implement the ASE and TorchSim model modules, then run the generic scripts
    with `--system` and `--max-steps` for a short validation. Compare their
    initial energy/force output.
 3. Run the complete reference-matched NVT workload with both engines. Confirm

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Accelerated ASE entry point for custom-model V2 production MD.
 
-The supplied factory must construct the accelerated calculator. Compilation,
+The supplied model loader must construct the accelerated calculator. Compilation,
 artifact loading, and other setup happen before the MD timing boundary.
 """
 

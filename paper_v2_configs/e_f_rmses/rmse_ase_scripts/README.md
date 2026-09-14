@@ -30,7 +30,7 @@ for hydrogen and the acenes match the TorchSim evaluators. Failed evaluations
 produce a `.failures.json` sidecar and a nonzero exit status.
 
 The standard source `md_chgnet.py` contains a self-import rather than a usable
-calculator factory. Its RMSE counterpart uses the accelerated source's native
+calculator-loading function. Its RMSE counterpart uses the accelerated source's native
 CHGNet energy/force-only calculator with `torch.compile` removed.
 
 Validation: all 36 Python runners pass `--help` without importing model packages;

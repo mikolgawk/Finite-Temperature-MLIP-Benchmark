@@ -36,13 +36,13 @@ check on one system:
 ```bash
 python custom_model_evaluation/md_eager/ase-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_ase_model.py:make_calculator \
+  --model-loader ./my_ase_model.py:make_calculator \
   --system bulkAg_600K_Kapil \
   --max-steps 1
 
 python custom_model_evaluation/md_eager/torchsim-scripts/md_custom_model.py \
   --model-name my-model \
-  --factory ./my_torchsim_model.py:make_model \
+  --model-loader ./my_torchsim_model.py:make_model \
   --system bulkAg_600K_Kapil \
   --max-steps 1
 ```
@@ -50,5 +50,5 @@ python custom_model_evaluation/md_eager/torchsim-scripts/md_custom_model.py \
 Remove `--system` and `--max-steps` to evaluate every V2 system. Optional
 accelerated entry points are available under `custom_model_evaluation/md_accelerated/`.
 The runners produce V2-compatible trajectories and timings; follow the
-[custom-model guide](INFO.md#evaluating-a-custom-model) for factory setup,
+[custom-model guide](INFO.md#evaluating-a-custom-model) for model setup,
 accelerated adapters, output validation, and the remaining analysis stages.

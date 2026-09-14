@@ -5,7 +5,7 @@ TorchSim-compatible callable model.  For example::
 
     python md_custom_model.py \
         --model-name my-model \
-        --factory /path/to/my_model.py:make_model
+        --model-loader /path/to/my_model.py:make_model
 
 The model receives a TorchSim state and must return total ``energy`` and
 ``forces`` tensors in eV and eV/Angstrom.  Production stress must be disabled.
@@ -51,14 +51,14 @@ TIMING_FIELDS = (
 )
 
 
-def parse_factory_spec(value: str) -> tuple[str, str]:
+def parse_model_loader_spec(value: str) -> tuple[str, str]:
     """Split MODULE[:FUNCTION], defaulting to ``make_model``."""
     module, separator, function = value.rpartition(":")
     if not separator:
         return value, "make_model"
     if not module or not function:
         raise argparse.ArgumentTypeError(
-            "factory must be MODULE[:FUNCTION] or /path/to/file.py[:FUNCTION]"
+            "model loader must be MODULE[:FUNCTION] or /path/to/file.py[:FUNCTION]"
         )
     return module, function
 
@@ -81,13 +81,13 @@ def load_module(module_ref: str) -> ModuleType:
     return importlib.import_module(module_ref)
 
 
-def load_factory(value: str) -> Callable[[], Any]:
-    module_ref, function_name = parse_factory_spec(value)
+def load_model_loader(value: str) -> Callable[[], Any]:
+    module_ref, function_name = parse_model_loader_spec(value)
     module = load_module(module_ref)
-    factory = getattr(module, function_name, None)
-    if not callable(factory):
-        raise TypeError(f"{value!r} does not identify a callable factory")
-    return factory
+    model_loader = getattr(module, function_name, None)
+    if not callable(model_loader):
+        raise TypeError(f"{value!r} does not identify a callable model loader")
+    return model_loader
 
 
 def safe_model_name(value: str) -> str:
@@ -114,7 +114,7 @@ def parse_args(
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-name", required=True, type=safe_model_name)
     parser.add_argument(
-        "--factory",
+        "--model-loader",
         required=True,
         help="dotted module or .py file, optionally followed by :FUNCTION",
     )
@@ -215,7 +215,7 @@ def validate_model_configuration(model: Any, device: Any, dtype: Any) -> None:
     import torch
 
     if not callable(model):
-        raise TypeError("TorchSim factory must return a callable model")
+        raise TypeError("TorchSim model loader must return a callable model")
     if not hasattr(model, "device") or not hasattr(model, "dtype"):
         raise TypeError(
             "TorchSim model must expose .device and .dtype attributes used by "
@@ -226,7 +226,7 @@ def validate_model_configuration(model: Any, device: Any, dtype: Any) -> None:
         raise ValueError(
             "runner/model device or dtype mismatch: "
             f"runner=({device}, {dtype}), model=({model_device}, {model.dtype}); "
-            "change --device/--dtype or the factory"
+            "change --device/--dtype or the model loader"
         )
     if bool(getattr(model, "compute_stress", False)):
         raise ValueError(
@@ -438,7 +438,7 @@ def main(argv: list[str] | None = None, *, accelerated: bool = False) -> int:
     torch.backends.cudnn.allow_tf32 = False
     torch.backends.cudnn.benchmark = False
     dtype = getattr(torch, args.dtype)
-    model = load_factory(args.factory)()
+    model = load_model_loader(args.model_loader)()
     validate_model_configuration(model, device, dtype)
 
     failures: list[tuple[str, Exception]] = []
