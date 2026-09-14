@@ -34,9 +34,9 @@ The main V2 directories are:
 | `pareto_plots/` | Timing, system-size scaling, and combined accuracy/speed plots. |
 
 The V2 calculator catalog contains 17 models: CHGNet, EquiformerV2,
-eSEN-30M-OAM, GRACE MP, GRACE OAM, MACE-MH-OMAT, MACE-MP-0, MACE-MPA-0,
-MatterSim v1 5M, NequIP OAM L, ORB v2, ORB v3, ORB v3 direct, PET OAM XL,
-PET OMat XL, UMA S OMat, and UMA M OMat. Dedicated runner coverage differs
+eSEN-30M-OAM, GRACE-2L-MPtrj, GRACE-2L-OAM, MACE-MH-1-OMAT, MACE-MP-0, MACE-MPA-0,
+MatterSim-v1.0.0-5M, NequIP-OAM-L, orb-v2, orb-v3-conservative, orb-v3-direct, PET-OAM-XL,
+PET-OMAT-XL, UMA-S-P1, and UMA-M-P1. Dedicated runner coverage differs
 slightly between workflows; the available `md_*.py` files are the source of
 truth for a particular runner directory.
 
@@ -207,10 +207,25 @@ paper's fixed 17-model catalog. The developer supplies one native ASE runner
 and one TorchSim runner; the model-independent analysis stages then consume
 their trajectories and timings.
 
-At present, `custom_model_evaluation/` is an empty integration workspace. It
-does not yet contain templates, copied analysis entry points, or a one-command
-launcher. The description below defines the intended layout and compatibility
-contract; those files must be added before the custom workflow is runnable.
+Four production-MD entry points backed by two shared runners are provided. Each
+loads a model factory from a Python module, runs every system in the V2
+metadata, and writes trajectories and timings in the schema consumed by the
+analysis pipeline:
+
+- [`md_custom_model.py`](custom_model_evaluation/md/ase-scripts/md_custom_model.py)
+  for a baseline ASE `Calculator`;
+- [`md_custom_model.py`](custom_model_evaluation/md/torchsim-scripts/md_custom_model.py)
+  for a baseline TorchSim-compatible model;
+- [`md_custom_model.py`](custom_model_evaluation/md_accelerated/ase-scripts/md_custom_model.py)
+  for an accelerated ASE `Calculator`; and
+- [`md_custom_model.py`](custom_model_evaluation/md_accelerated/torchsim-scripts/md_custom_model.py)
+  for an accelerated TorchSim-compatible model.
+
+The scripts use `paper_v2_configs/data/ref-trajs/` by default, so copying the
+reference data is optional. Outputs are kept under `custom_model_evaluation/data/`.
+To make the V2 RDF launcher discover a run directly, set `--output-root` to
+`paper_v2_configs/data/mlip-trajs-ase` or
+`paper_v2_configs/data/mlip-trajs-torchsim`, respectively.
 
 ### Intended layout
 
@@ -224,9 +239,13 @@ custom_model_evaluation/
 │   ├── mlip-trajs-ase-accelerated/  accelerated ASE results, if available
 │   └── mlip-trajs-torchsim-accelerated/
 ├── md/
-│   ├── ase-scripts/md_<model>.py
-│   └── torchsim-scripts/md_<model>.py
-├── md_accelerated/                  optional optimized counterparts
+│   ├── _ase_runner.py               shared ASE implementation
+│   ├── _torchsim_runner.py          shared TorchSim implementation
+│   ├── ase-scripts/md_custom_model.py
+│   └── torchsim-scripts/md_custom_model.py
+├── md_accelerated/
+│   ├── ase-scripts/md_custom_model.py
+│   └── torchsim-scripts/md_custom_model.py
 ├── e_f_rmses/                       custom ASE/TorchSim RMSE adapters
 ├── pressures/                       stress-enabled custom calculator
 ├── rdfs/                            V2 RDF pipeline or a configured wrapper
@@ -234,25 +253,25 @@ custom_model_evaluation/
 └── pareto_plots/                    combined custom-model report
 ```
 
-The reference trajectories and metadata should be copied or linked from
-`paper_v2_configs/data/ref-trajs/`. Do not change their temperatures,
-timesteps, thermostat settings, trajectory lengths, or print strides: using the
-same metadata is what makes the custom result directly comparable with V2.
+By default, the runners use the reference trajectories and metadata directly
+from `paper_v2_configs/data/ref-trajs/`. They can instead be copied or linked
+under `custom_model_evaluation/data/ref-trajs/` and selected with `--metadata`
+and `--ref-root`. Do not change temperatures, timesteps, thermostat settings,
+trajectory lengths, or print strides: using the same metadata is what makes the
+custom result directly comparable with V2.
 
 ### Model identifier
 
-Choose one stable base identifier such as `my-model` and use it everywhere:
+Choose one stable base identifier such as `my-model`. The TorchSim runner uses
+that identifier unchanged; the ASE runner appends `-ase`, producing
+`my-model-ase`. The concrete run identifier is used consistently in the HDF5
+and timing filenames, file metadata, and the timing CSV's `calculator` field.
+Pass that concrete identifier to downstream `--model` filters.
 
-- the `model_name` passed to the MD and RMSE drivers;
-- the stem after `nvt_` and `md_timing_` in output filenames;
-- the calculator name in result CSVs; and
-- `--model my-model` when an analysis script supports model filtering.
-
-Preserve deliberate execution suffixes in that stem. For example, the shared
-ASE driver appends `-ase`, while eager and accelerated implementations may use
-`my-model-eager` and `my-model-compile`. These names prevent results from
-overwriting each other and ensure that downstream discovery treats them as
-separate executions.
+Preserve other deliberate execution suffixes in the base name. For example,
+eager and accelerated implementations may use `my-model-eager` and
+`my-model-compile`. These names prevent results from overwriting each other and
+ensure that downstream discovery treats them as separate executions.
 
 ### ASE adapter
 
@@ -264,11 +283,35 @@ compatible object. For production MD it must provide:
 - support for the elements and periodic cells in all selected systems; and
 - stress disabled so the timed MD workload remains energy/force only.
 
-Copying the structure of an existing runner, such as
-[`md_orb_v3.py`](paper_v2_configs/md/ase-scripts/md_orb_v3.py), is the simplest
-starting point. Replace its inline `uv` dependencies, model imports,
-`make_calculator()` implementation, model identifier, and checkpoint path. Keep
-the shared metadata-driven NVT loop and HDF5 writer unchanged.
+Put the model-specific setup in a small Python module with a zero-argument
+factory. The runner loads either a file path or an importable module:
+
+```python
+# my_ase_model.py
+def make_calculator():
+    from my_package import MyCalculator
+
+    return MyCalculator(checkpoint="checkpoint.pt", device="cuda")
+```
+
+Run a one-step adapter check, then remove `--max-steps` for the complete
+reference-matched workload:
+
+```bash
+python custom_model_evaluation/md/ase-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_ase_model.py:make_calculator \
+  --system bulkAg_600K_Kapil \
+  --max-steps 1 \
+  --output-root /tmp/my-model-ase-smoke
+
+python custom_model_evaluation/md/ase-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_ase_model.py:make_calculator
+```
+
+Install ASE, NumPy, and h5py alongside the dependencies required by the custom
+calculator. The calculator factory is called outside the timing boundary.
 
 A second, stress-enabled calculator is required by the pressure stage. Its ASE
 stress must use the ASE sign convention and eV/Angstrom^3 units. Pressure is
@@ -280,13 +323,89 @@ production MD timing.
 The TorchSim script must wrap the model in a TorchSim-compatible model object
 that accepts a TorchSim simulation state and returns total energy and forces.
 It must use the same checkpoint, dtype policy, cutoff, and physical model as the
-ASE adapter. Production stress must be disabled.
+ASE adapter. It must expose the `device` and `dtype` attributes required by
+`torch_sim.integrate`. Production stress must be disabled.
 
-Use an existing model family with a similar API as the template; for example,
-[`md_orb_v3.py`](paper_v2_configs/md/torchsim-scripts/md_orb_v3.py) shows the
-general metadata-driven loop and an existing TorchSim adapter. Only the inline
-dependencies, model loader/adapter, model identifier, checkpoint, and any
-model-specific validation should need to change.
+The TorchSim runner uses the same factory convention:
+
+```python
+# my_torchsim_model.py
+def make_model():
+    from my_package import load_torchsim_model
+
+    return load_torchsim_model("checkpoint.pt", compute_stress=False)
+```
+
+```bash
+python custom_model_evaluation/md/torchsim-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_torchsim_model.py:make_model \
+  --system bulkAg_600K_Kapil \
+  --max-steps 1 \
+  --output-root /tmp/my-model-torchsim-smoke
+
+python custom_model_evaluation/md/torchsim-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_torchsim_model.py:make_model
+```
+
+Install TorchSim, PyTorch, ASE, and h5py alongside the custom model's own
+dependencies. Use `--device` and `--dtype` to match the model factory. The
+factory is called once, and the first energy/force evaluation for every system
+is kept outside the reported MD timing.
+
+### Accelerated adapters
+
+The accelerated entry points use exactly the same metadata, thermostats,
+integration settings, seed, trajectory schema, and timing boundary as the
+baseline entry points. Their different defaults are:
+
+| Interface | Output root | Engine label |
+| --- | --- | --- |
+| ASE | `data/mlip-trajs-ase-accelerated/` | `ase+custom-accelerated` |
+| TorchSim | `data/mlip-trajs-torchsim-accelerated/` | `torch-sim+custom-accelerated` |
+
+The entry points do not guess how to optimize an arbitrary model. The supplied
+factory must return the accelerated implementation, with compilation or
+artifact loading performed while the factory runs. For example:
+
+```python
+# my_accelerated_torchsim_model.py
+import torch
+from my_package import load_my_torchsim_model
+
+
+def make_model():
+    model = load_my_torchsim_model()
+    model.forward = torch.compile(model.forward, mode="reduce-overhead")
+    return model
+```
+
+Run a smoke test and then the full accelerated workloads with:
+
+```bash
+python custom_model_evaluation/md_accelerated/ase-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_accelerated_ase_model.py:make_calculator \
+  --system bulkAg_600K_Kapil \
+  --max-steps 1 \
+  --output-root /tmp/my-model-ase-accelerated-smoke
+
+python custom_model_evaluation/md_accelerated/ase-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_accelerated_ase_model.py:make_calculator
+
+python custom_model_evaluation/md_accelerated/torchsim-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_accelerated_torchsim_model.py:make_model \
+  --system bulkAg_600K_Kapil \
+  --max-steps 1 \
+  --output-root /tmp/my-model-torchsim-accelerated-smoke
+
+python custom_model_evaluation/md_accelerated/torchsim-scripts/md_custom_model.py \
+  --model-name my-model \
+  --factory ./my_accelerated_torchsim_model.py:make_model
+```
 
 If no native TorchSim adapter exists, the custom wrapper is responsible for:
 
@@ -338,7 +457,7 @@ Each stage has a different custom-model integration point:
 
 | Stage | Custom-model requirement |
 | --- | --- |
-| MD and timing | Run both custom MD scripts over every entry in `md_metadata.json`. Optional accelerated scripts must retain the same physical settings. |
+| MD and timing | Run the baseline ASE and TorchSim entry points over every entry in `md_metadata.json`; optionally repeat with both accelerated entry points, retaining the same physical settings. |
 | Energy/force RMSE | Add matching ASE and TorchSim RMSE wrappers that load exactly the same model/checkpoint as MD and call the shared `run_rmse(...)` implementation on the AIMD reference frames. |
 | Pressure | Supply a stress-enabled ASE calculator or a stress-enabled HDF5 trajectory, then run `pressure_pipeline.py` with the custom trajectory root. |
 | RDF | Place HDF5 trajectories in one of the four standard trajectory-source directories. The RDF pipeline discovers `nvt_<model>.h5` automatically and accepts `--model <model>`. |
@@ -347,10 +466,11 @@ Each stage has a different custom-model integration point:
 
 A typical implementation sequence is:
 
-1. Copy the V2 reference metadata and make all referenced AIMD trajectories
-   available under `custom_model_evaluation/data/ref-trajs/`.
-2. Implement `md_<model>.py` for ASE and TorchSim by adapting the closest V2
-   examples. Run a short one-system validation and compare energy/force output.
+1. Use the default V2 reference metadata, or copy it and its referenced AIMD
+   trajectories under `custom_model_evaluation/data/ref-trajs/`.
+2. Implement the ASE and TorchSim factory modules, then run the generic scripts
+   with `--system` and `--max-steps` for a short validation. Compare their
+   initial energy/force output.
 3. Run the complete reference-matched NVT workload with both engines. Confirm
    that every requested system has a non-empty HDF5 trajectory and timing CSV.
 4. Add ASE and TorchSim RMSE wrappers using the same loader functions, then
@@ -373,9 +493,9 @@ paper_v2_configs/pareto_plots/plot-pareto-combined-vdos-rdf-pressure-average-sim
 
 Current repository limitations matter when setting this up:
 
-- the V2 analysis scripts still assume their own `paper_v2_configs/data/`
-  location in several places, so a custom wrapper, configurable data-root
-  option, or link into one of the standard source directories is required; and
+- the V2 RDF scripts still assume their own `paper_v2_configs/data/` location;
+  use the runner's `--output-root` option or link the custom results into one of
+  the standard source directories; and
 - `get_normalized_VDOS.py` imports VDOS batch/normalization helper modules and a
   `vdos_settings_mlip.csv` file that are not currently present in the V2 tree.
   Those components must be restored before the complete VDOS stage can run; and
@@ -384,9 +504,11 @@ Current repository limitations matter when setting this up:
   rule must be made configurable before it can consume a custom-only result set
   or a V2 result set with an additional custom model.
 
-Until templates and a top-level launcher are added under
-`custom_model_evaluation/`, this is a manual integration workflow rather than a
-single-command custom-model benchmark.
+The four entry points automate the full baseline and accelerated
+reference-matched production-MD workloads for a custom model. The
+model-independent analysis stages remain separate commands because pressure
+needs a stress-enabled model and the final plots combine outputs from several
+stages.
 
 ## Analysis pipeline
 
