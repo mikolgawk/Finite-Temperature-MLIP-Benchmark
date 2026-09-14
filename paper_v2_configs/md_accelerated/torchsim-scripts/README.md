@@ -28,6 +28,6 @@ end that script; the launcher continues with the next model. Handled per-system
 failures are reported in logs but do not change the script's exit status.
 
 Runs require uv, the CUDA environment and dependencies declared by each script,
-benchmark metadata at `updated_configs/data/ref-trajs/md_metadata.json`, and the
+benchmark metadata at `paper_v2_configs/data/ref-trajs/md_metadata.json`, and the
 required structures and model checkpoints. Outputs go under
-`updated_configs/data/mlip-trajs-torchsim-accelerated/`.
+`paper_v2_configs/data/mlip-trajs-torchsim-accelerated/`.

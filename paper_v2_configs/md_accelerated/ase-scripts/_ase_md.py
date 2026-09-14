@@ -20,8 +20,8 @@ from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-ase-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-ase-accelerated"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1

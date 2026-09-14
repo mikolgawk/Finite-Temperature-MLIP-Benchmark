@@ -136,8 +136,8 @@ from ase.io import read
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
@@ -288,8 +288,8 @@ class GraceModel(ModelInterface):
 MODEL_NAME = "grace-mp"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1

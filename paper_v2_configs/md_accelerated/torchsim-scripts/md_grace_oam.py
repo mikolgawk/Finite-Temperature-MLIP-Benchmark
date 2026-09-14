@@ -24,7 +24,7 @@
 
 GraceModel runs the stress-pruned XLA SavedModel through DLPack.
 
-Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json, which
+Per-system MD parameters come from paper_v2_configs/data/ref-trajs/md_metadata.json, which
 records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
@@ -145,8 +145,8 @@ from ase.io import read
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent.parent
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
@@ -446,9 +446,9 @@ def main():
     MODEL_NAME = "grace-oam-force-only-compiled"
     HERE = Path(__file__).resolve().parent
     REPO = HERE.parent.parent.parent
-    METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-    OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
-    MODEL_PATH = REPO / "updated_configs" / "data" / "models" / "GRACE-2L-OMAT-large-ft-AM-fp32"
+    METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+    OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+    MODEL_PATH = REPO / "paper_v2_configs" / "data" / "models" / "GRACE-2L-OMAT-large-ft-AM-fp32"
 
     CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
     CHAIN_STEPS = 1

@@ -9,7 +9,7 @@
 # ///
 """TorchSim NVT production MD — mace-mpa-0.
 
-Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json,
+Per-system MD parameters come from paper_v2_configs/data/ref-trajs/md_metadata.json,
 which records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
@@ -41,9 +41,9 @@ from torch_sim.neighbors import vesin_nl_ts
 MODEL_NAME = "mace-mpa-0-compile"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent.parent
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
-CHECKPOINT = REPO / "updated_configs" / "data" / "models" / "mace-mpa-0-medium.model"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+CHECKPOINT = REPO / "paper_v2_configs" / "data" / "models" / "mace-mpa-0-medium.model"
 
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1

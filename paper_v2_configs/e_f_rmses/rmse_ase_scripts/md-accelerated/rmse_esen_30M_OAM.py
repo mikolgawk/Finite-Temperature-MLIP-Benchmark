@@ -92,7 +92,7 @@ def disable_legacy_stress(calculator, family: str) -> None:
     calculator._compute_forces = True
 
 
-CHECKPOINT = REPO / "updated_configs/data/models/esen_30m_oam.pt"
+CHECKPOINT = REPO / "paper_v2_configs/data/models/esen_30m_oam.pt"
 
 
 def make_calculator():

@@ -26,7 +26,7 @@ def make_calculator():
 
     settings = dict(default_dtype="float32", device="cuda",
                     enable_cueq=True, compile_mode="reduce-overhead")
-    return disable_mace_stress(MACECalculator(model_paths=str(REPO / "updated_configs/data/models/mace-mpa-0-medium.model"), **settings))
+    return disable_mace_stress(MACECalculator(model_paths=str(REPO / "paper_v2_configs/data/models/mace-mpa-0-medium.model"), **settings))
 
 
 if __name__ == "__main__":

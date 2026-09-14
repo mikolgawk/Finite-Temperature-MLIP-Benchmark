@@ -40,8 +40,8 @@ from torch_sim.neighbors import vesin_nl_ts
 MODEL_NAME = "mace-mp-0-compile"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1

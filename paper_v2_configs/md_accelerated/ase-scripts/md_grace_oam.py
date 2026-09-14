@@ -109,7 +109,7 @@ def make_calculator():
     for gpu in tf.config.list_physical_devices("GPU"):
         tf.config.experimental.set_memory_growth(gpu, True)
     tf.config.experimental.enable_tensor_float_32_execution(False)
-    model_path = REPO / "updated_configs/data/models/GRACE-2L-OMAT-large-ft-AM-fp32"
+    model_path = REPO / "paper_v2_configs/data/models/GRACE-2L-OMAT-large-ft-AM-fp32"
     if not model_path.is_dir():
         raise FileNotFoundError(f"Converted GRACE metadata artifact missing: {model_path}")
     calculator = ForceOnlyTPCalculator(str(model_path), float_dtype="float32")

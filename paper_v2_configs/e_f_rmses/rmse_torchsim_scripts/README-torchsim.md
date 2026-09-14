@@ -1,7 +1,7 @@
 # TorchSim RMSE scripts
 
-`md/` matches `updated_configs/md/torchsim-scripts/` (16 models).
-`md-accelerated/` matches `updated_configs/md_accelerated/torchsim-scripts/`
+`md_eager/` matches `paper_v2_configs/md_eager/torchsim-scripts/` (16 models).
+`md-accelerated/` matches `paper_v2_configs/md_accelerated/torchsim-scripts/`
 (16 models, including separate UMA compile/turbo variants).
 
 Each entry point preserves its source MD script's inline uv dependencies,
@@ -12,9 +12,9 @@ update these scripts. No MD integration is performed.
 Run from this directory:
 
 ```bash
-uv run --script md/rmse_mace_mp_0.py
+uv run --script md_eager/rmse_mace_mp_0.py
 uv run --script md-accelerated/rmse_mace_mp_0.py
-bash md/run_all_rmses.sh
+bash md_eager/run_all_rmses.sh
 bash md-accelerated/run_all_rmses.sh
 ```
 
@@ -25,7 +25,7 @@ against the working directory. Default data paths resolve against the repository
 CUDA and the same model access/checkpoints/toolchains as the MD runs are required.
 
 The shared `torchsim_rmse.py` evaluates `traj*.extxyz` recursively under
-`updated_configs/data/ref-trajs`. Reference values come from `REF_energy` /
+`paper_v2_configs/data/ref-trajs`. Reference values come from `REF_energy` /
 `REF_forces` when present, otherwise the ASE reference calculator. Energy RMSE
 is in eV/atom, computed from each frame's energy error divided by its atom count;
 force RMSE is over all Cartesian components in eV/Angstrom. Aromatic systems and
@@ -34,8 +34,8 @@ required isolated-atom files produce explicit failures. `--raw-energies` disable
 these corrections. Predictions use the TorchSim model directly, including for
 isolated atoms.
 
-Summaries are written to `updated_configs/data/e-f-predictions/md/` and
-`updated_configs/data/e-f-predictions/md-accelerated/`, respectively, as
+Summaries are written to `paper_v2_configs/data/e-f-predictions/md_eager/` and
+`paper_v2_configs/data/e-f-predictions/md-accelerated/`, respectively, as
 `rmse-results-all_<MD model name>.csv`. Failed frames are excluded from both sides
 of the comparison and recorded in `.failures.json` sidecars. Any failure produces
 a nonzero exit status. Incomplete runs are retried; completed summaries are skipped

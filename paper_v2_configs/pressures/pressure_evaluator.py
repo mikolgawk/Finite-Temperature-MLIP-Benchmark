@@ -24,7 +24,7 @@ def early_cli(script, backend: str) -> None:
     root = _pressure_root(_SCRIPT)
     data = root.parent / "data"
     accelerated = "md_accelerated" in _SCRIPT.parts
-    family = "md_accelerated" if accelerated else "md"
+    family = "md_accelerated" if accelerated else "md_eager"
     default_trajectories = data / (
         "mlip-trajs-torchsim-accelerated" if accelerated else "mlip-trajs-torchsim"
     )

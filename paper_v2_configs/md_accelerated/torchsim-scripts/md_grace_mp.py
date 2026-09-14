@@ -32,7 +32,7 @@ GRACE-2L-MP-r6 ships as an fp64 SavedModel. Its public download does not include
 the original potential YAML required by TensorPotential's offline casting utility,
 so this script keeps the model and TorchSim state in native fp64 precision.
 
-Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json, which
+Per-system MD parameters come from paper_v2_configs/data/ref-trajs/md_metadata.json, which
 records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
@@ -148,8 +148,8 @@ from ase.io import read
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent.parent
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
@@ -442,8 +442,8 @@ class GraceModel(ModelInterface):
 MODEL_NAME = "grace-mp"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent.parent
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1

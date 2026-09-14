@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "md"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "md_eager"))
 
 from _ase_runner import main  # noqa: E402
 

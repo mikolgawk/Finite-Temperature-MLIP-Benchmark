@@ -66,15 +66,15 @@ MODEL_ID = os.environ.get(
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = (
-    REPO / "updated_configs" / "data" / "mlip-trajs-ase-accelerated"
+    REPO / "paper_v2_configs" / "data" / "mlip-trajs-ase-accelerated"
 )
 COMPILED_MODEL = Path(
     os.environ.get(
         "NEQUIP_ASE_OEQ_MODEL",
         REPO
-        / "updated_configs"
+        / "paper_v2_configs"
         / "data"
         / "models"
         / "nequip-oam-l-oeq-ase-force-only.nequip.pt2",

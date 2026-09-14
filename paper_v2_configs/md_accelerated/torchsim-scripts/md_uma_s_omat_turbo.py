@@ -8,7 +8,7 @@
 # ///
 """TorchSim NVT production MD — uma-s-omat.
 
-Per-system MD parameters come from updated_configs/data/ref-trajs/md_metadata.json,
+Per-system MD parameters come from paper_v2_configs/data/ref-trajs/md_metadata.json,
 which records how each reference AIMD was run. The trajectory is saved as HDF5
 with positions and velocities:
 
@@ -81,8 +81,8 @@ if INFERENCE_MODE not in {"compile", "turbo"}:
 MODEL_NAME = f"uma-s-omat-{INFERENCE_MODE}-force-only"
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent.parent
-METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated"
+METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated"
 
 CHAIN_LENGTH = 1              # Nose-Hoover chain settings, as in the ASE benchmark
 CHAIN_STEPS = 1

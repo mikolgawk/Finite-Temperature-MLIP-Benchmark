@@ -134,7 +134,7 @@ def run_torchsim_md(
             continue
 
         try:
-            init_file = next((p for p in (REPO / meta["initfile_path"], REPO / "paper_v2_configs" / meta["initfile_path"]) if p.is_file()), REPO / meta["initfile_path"])
+            init_file = REPO / meta["initfile_path"]
             if not init_file.is_file():
                 print(f"[{model_name}] {name}: init file missing, skipping ({init_file})")
                 continue
