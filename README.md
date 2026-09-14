@@ -406,7 +406,7 @@ pareto_plots/ Combine accuracy/similarity metrics with MD timings and scaling.
 The pressure stage excludes Pt(111) + 24 H2O, and CuAu cannot contribute a
 reference pressure because its AIMD trajectory has no stress values.
 
-## V1 historical MD
+<!-- ## V1 historical MD
 
 The original `paper_v1_configs/md_production/` ASE workflow ran 80,000 steps at
 0.25 fs (20 ps), saved every tenth frame, and used a thermostat damping time of
@@ -416,4 +416,4 @@ i-PI harness documented in
 
 `paper_v1_configs/md_timings/` contains the original short timing workload. It
 runs 0.2 ps over a reduced system set with a 25 fs damping time and includes
-startup costs in the measured interval.
+startup costs in the measured interval. -->
