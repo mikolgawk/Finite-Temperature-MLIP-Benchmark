@@ -36,11 +36,21 @@ Then generate all four metric sets with the `uv` script:
 uv run --script paper_v2_configs/generate_metrics.py
 ```
 
-Next, run the scripts in
-[`paper_v2_configs/pareto_plots/`](paper_v2_configs/pareto_plots/).
-See the [V2 MD instructions](INFO.md#running-v2-torchsim-md) and
-[analysis-pipeline guide](INFO.md#analysis-pipeline) for the entry points,
-expected inputs, and current caveats.
+Next, generate the timing and Pareto plots:
+
+```bash
+python paper_v2_configs/pareto_plots/plot-model-timings.py
+python paper_v2_configs/pareto_plots/plot-pareto-combined-vdos-rdf-pressure-average-similarity-same-simulation-length.py
+```
+
+These commands assume that the reference AIMD trajectories are available under
+[`paper_v2_configs/data/ref-trajs/`](paper_v2_configs/data/ref-trajs/), with a
+`traj.extxyz` file for each system and the shared `md_metadata.json` file. The MD
+runners generate the model trajectories and timing data, while the subsequent
+energy/force, pressure, RDF, and VDOS stages generate the CSV files consumed by
+the plotting scripts. See the [V2 MD instructions](INFO.md#running-v2-torchsim-md)
+and [analysis-pipeline guide](INFO.md#analysis-pipeline) for the expected file
+layout and the available command-line options.
 
 ## Evaluating a new potential
 
