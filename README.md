@@ -10,6 +10,26 @@ compares MLIP trajectories with ab initio MD (AIMD) references using:
 - vibrational density of states (VDOS); and
 - MD throughput and accuracy/speed Pareto plots.
 
+## Table of contents
+
+- [Repository layout](#repository-layout)
+- [V2 MD settings](#v2-md-settings)
+  - [Shared physical protocol](#shared-physical-protocol)
+  - [Per-system settings](#per-system-settings)
+  - [Baseline MD](#baseline-md)
+  - [Accelerated MD](#accelerated-md)
+- [Running V2 TorchSim MD](#running-v2-torchsim-md)
+  - [Requirements](#requirements)
+- [Evaluating a custom model](#evaluating-a-custom-model)
+  - [Intended layout](#intended-layout)
+  - [Model identifier](#model-identifier)
+  - [ASE adapter](#ase-adapter)
+  - [TorchSim adapter](#torchsim-adapter)
+  - [Accelerated adapters](#accelerated-adapters)
+  - [Output contract](#output-contract)
+  - [Running the V2-equivalent pipeline](#running-the-v2-equivalent-pipeline)
+- [Analysis pipeline](#analysis-pipeline)
+
 ## Repository layout
 
 The configurations are organized by paper version:
