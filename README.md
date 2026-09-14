@@ -50,5 +50,5 @@ python custom_model_evaluation/md_eager/torchsim-scripts/md_custom_model.py \
 Remove `--system` and `--max-steps` to evaluate every V2 system. Optional
 accelerated entry points are available under `custom_model_evaluation/md_accelerated/`.
 The runners produce V2-compatible trajectories and timings; follow the
-[custom-model guide](INFO.md#evaluating-a-custom-model) for factory contracts,
+[custom-model guide](INFO.md#evaluating-a-custom-model) for factory setup,
 accelerated adapters, output validation, and the remaining analysis stages.

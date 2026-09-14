@@ -205,7 +205,7 @@ def ensure_compiled_model() -> Path:
 
 
 class WithStressNequIPCalculator(NequIPCalculator):
-    """Use the standard stress-enabled ASE export contract."""
+    """Use the standard stress-enabled ASE export format."""
     pass
 
 

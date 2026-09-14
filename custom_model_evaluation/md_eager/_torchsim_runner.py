@@ -286,7 +286,7 @@ def prepare_outputs(
 def annotate_and_validate_hdf5(
     path: Path, model_name: str, timestep_fs: float, record_interval: int
 ) -> None:
-    """Check the analysis contract before publishing the temporary trajectory."""
+    """Check the analysis requirements before publishing the temporary trajectory."""
     import h5py
 
     with h5py.File(path, "r+") as handle:

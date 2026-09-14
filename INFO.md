@@ -28,7 +28,7 @@ compares MLIP trajectories with ab initio MD (AIMD) references using:
   - [ASE adapter](#ase-adapter)
   - [TorchSim adapter](#torchsim-adapter)
   - [Accelerated adapters](#accelerated-adapters)
-  - [Output contract](#output-contract)
+  - [Output format](#output-format)
   - [Running the V2-equivalent pipeline](#running-the-v2-equivalent-pipeline)
 - [Analysis pipeline](#analysis-pipeline)
 
@@ -471,7 +471,7 @@ The ASE and TorchSim runners should be tested first on one system and a few
 steps. Compare their initial energy and forces before launching the full set;
 matching trajectories alone is not a sufficient adapter validation.
 
-### Output contract
+### Output format
 
 Downstream V2 analysis discovers results by directory and filename, so custom
 runners must preserve the V2 schema:

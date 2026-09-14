@@ -217,7 +217,7 @@ def ensure_compiled_model() -> Path:
 
 
 class WithStressNequIPTorchSimCalc(NequIPTorchSimCalc):
-    """Use the standard stress-enabled batch export contract."""
+    """Use the standard stress-enabled batch export format."""
     pass
 
 

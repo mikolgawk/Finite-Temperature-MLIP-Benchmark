@@ -13,7 +13,7 @@
 
 Reference positions are read from ``../data/ref-trajs/*/traj.extxyz`` and
 their timesteps from ``../data/ref-trajs/md_metadata.json``. MLIP trajectories
-use the HDF5 contract produced by both the ASE and TorchSim MD runners. By
+use the HDF5 format produced by both the ASE and TorchSim MD runners. By
 default, their stored velocities are used; ``--numerical-mlip-velocities``
 instead differentiates their positions, as is necessarily done for references.
 
