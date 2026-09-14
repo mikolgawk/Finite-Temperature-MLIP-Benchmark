@@ -1,259 +1,446 @@
 # Finite-Temperature MLIP Benchmark
 
-Benchmarking suite for evaluating MLIPs under finite-temperature molecular dynamics. For a panel of
-foundation MLIPs, the pipeline runs NVT MD on a set of reference systems and
-compares the resulting trajectories to AIMD reference trajectories along four
-axes: energy/force accuracy, pressure, radial distribution functions (RDFs),
-and vibrational density of states (VDOS).
+Benchmarking suite for evaluating machine-learned interatomic potentials
+(MLIPs) under finite-temperature molecular dynamics (MD). The benchmark
+compares MLIP trajectories with ab initio MD (AIMD) references using:
 
-## Two configuration trees
+- energy and force errors;
+- radial distribution functions (RDFs);
+- pressure errors;
+- vibrational density of states (VDOS); and
+- MD throughput and accuracy/speed Pareto plots.
 
-In the repo, the same pipeline exists
-twice, under two top-level directories:
+## Repository layout
 
-| Tree | What it is |
+The configurations are organized by paper version:
+
+| Directory | Purpose |
 | --- | --- |
-| `paper_configs/` | The pipeline that produced the results on arxiv. |
-| `updated_configs/` | The revised pipeline — audited numerical precision, refreshed checkpoints. Where new work goes. |
+| `paper_v1_configs/` | Original benchmark configurations and scripts used for the first paper version. |
+| `paper_v2_configs/` | Revised benchmark with reference-matched MD, eager and accelerated runners, expanded analysis pipelines, refreshed checkpoints, and an audited precision policy. |
+| `custom_model_evaluation/` | Test your own model to the V2 ASE and TorchSim interfaces and evaluate it with the same physical and analysis pipeline. |
 
-The main differences between the two:
+The main V2 directories are:
 
-- **Precision.** `paper_configs` ran each model at whatever its constructor
-  defaulted to or at fp64 (`mace_mp(default_dtype='float64')`,
-  `pretrained.orb_v2(precision='float64')`). `updated_configs` normalizes to
-  fp32 wherever precision is settable, and each model config entry records
-  `weight_dtype`, `matmul_precision`, `precision_settable`, `verified`, and a
-  `dtype_note` explaining how that was established. The one exception is
-  `paper_configs/md_timings`, whose MACE and ORB entries run at fp32 /
-  `float32-high` like the updated tree — a speed comparison is only meaningful
-  if both sides are clocked at the same precision.
-- **Checkpoints.** `mattersim-v1-1M` → `mattersim-v1-5M`; `grace-oam` moves
-  from the shipped fp64 `GRACE-2L-OMAT-large-ft-AM` to an offline-recast fp32
-  artifact. `grace-mp` remains the one fp64 model in the updated model config and
-  is flagged as not precision-matched.
-- **MD settings.** `paper_configs` runs 80 000 steps × 0.25 fs (20 ps),
-  recording every 10th frame, with `tdamp = 100 × timestep`, and excludes the
-  molecular crystals (those run under i-PI, see below). `updated_configs`
-  runs 22 ps with a per-system timestep (1.0 fs default, 0.5 fs for
-  H-containing systems, 2.0 fs for CuAu), records every step, and uses a
-  fixed 20 fs `tdamp` for all systems.
+| Directory | Contents |
+| --- | --- |
+| `data/` | Reference metadata. |
+| `md/` | Baseline, non-accelerated NVT MD implementations for ASE and TorchSim. |
+| `md_accelerated/` | NVT MD with model-specific inference acceleration for ASE and TorchSim. |
+| `e_f_rmses/` | Energy/force evaluation on reference, baseline-MD, and accelerated-MD structures. |
+| `pressures/` | Per-frame stress/pressure evaluation and pressure-error aggregation. It also contains pressure-specific copies of the MD runners. |
+| `rdfs/` | RDF calculation and comparison with reference trajectories. |
+| `vdos/` | VDOS calculation from the velocity autocorrelation function. |
+| `pareto_plots/` | Timing, system-size scaling, and combined accuracy/speed plots. |
 
-### Model config files
+The V2 calculator catalog contains 17 models: CHGNet, EquiformerV2,
+eSEN-30M-OAM, GRACE MP, GRACE OAM, MACE-MH-OMAT, MACE-MP-0, MACE-MPA-0,
+MatterSim v1 5M, NequIP OAM L, ORB v2, ORB v3, ORB v3 direct, PET OAM XL,
+PET OMat XL, UMA S OMat, and UMA M OMat. Dedicated runner coverage differs
+slightly between workflows; the available `md_*.py` files are the source of
+truth for a particular runner directory.
 
-The four stages that build a calculator — `md_production`, `md_timings`,
-`e_f_rmses` and `pressures` — each carry a `model_calculators.json` declaring,
-per model, the imports needed and a self-contained Python expression that
-constructs the ASE calculator. `rdfs` and `vdos` read trajectories off disk and
-have no model config file.
+<!-- ## What changed in V2
 
+The principal changes from V1 are:
 
-The two trees also differ in panel size: `paper_configs` covers 15 models,
-`updated_configs` 17 — `orb-v3-direct` and `pet-omat-xl` were added after the
-paper and appear only in the updated tree.
+- V2 has separate baseline (`md/`) and inference-accelerated
+  (`md_accelerated/`) workflows, each with native ASE and TorchSim variants.
+- The physical MD workload is matched to each reference trajectory through
+  [`md_metadata.json`](paper_v2_configs/data/ref-trajs/md_metadata.json), rather
+  than using one fixed production length for every system.
+- The model panel grew from 15 to 17 entries. ORB v3 direct and PET OMat XL were
+  added, and MatterSim moved from the 1M to the 5M checkpoint.
+- PyTorch workloads use an audited strict-fp32 policy where supported:
+  `torch.set_float32_matmul_precision("highest")`, TF32 disabled, and cuDNN
+  autotuning disabled. GRACE MP remains fp64 because its distributed SavedModel
+  cannot be recast without unavailable source metadata. UMA turbo is an explicit
+  performance variant that enables TF32.
+- Production calculations request energy and forces only; stress/virial branches
+  are disabled. Stress is evaluated separately by the pressure pipeline.
+- V2 adds TorchSim/ASE RMSE runners, a complete pressure pipeline, VDOS analysis,
+  and timing/Pareto plotting.
 
+For reproducibility, model constructors, checkpoints, versions, and precision
+notes are recorded in:
 
-#### `md_production`
-
-The paths to the model config files are:
-
-```
-paper_configs/md_production/model_calculators.json
-updated_configs/md_production/model_calculators.json
-```
-
-Calculator expressions that differ between the trees:
-
-| Model | `paper_configs` | `updated_configs` |
-| --- | --- | --- |
-| `chgnet` | `stress_weight=0.01` | argument dropped |
-| `grace-oam` | `grace_fm('GRACE-2L-OMAT-large-ft-AM')` — the shipped fp64 checkpoint | `TPCalculator('../data/models/GRACE-2L-OMAT-large-ft-AM-fp32', float_dtype='float32')` — an offline recast, by explicit path |
-| `mace-mp-0`, `mace-mpa-0`, `mace-mh-omat` | `default_dtype='float64'` | `default_dtype='float32'` |
-| MatterSim | `mattersim-v1-1M`: `MatterSimCalculator(device='cuda')`, i.e. the 1M default | `mattersim-v1-5M`: `load_path='MatterSim-v1.0.0-5M.pth'` |
-| `orb-v2`, `orb-v3` | `precision='float64'` | `precision='float32-high'` — fp32 weights with TF32 matmuls, and a process-global setting |
-| `pet-oam-xl` | no `dtype` — defers to the checkpoint | `dtype=torch.float32`, pinned explicitly |
-| `orb-v3-direct`, `pet-omat-xl` | not in the panel | added, at `'float32-high'` and `dtype=torch.float32` respectively |
-
-`eq-v2-M-omat`, `eSEN-30M-OAM`, `grace-mp`, `nequip`, `uma-s-omat` and
-`uma-m-omat` carry identical calculator expressions in both trees: none of them
-expose a settable precision, so there was nothing to change. (The updated tree's
-entries still differ in carrying the precision metadata fields above.)
-
-#### `md_timings`
-
-The paths to the model config files are:
-
-```
-paper_configs/md_timings/model_calculators.json
-updated_configs/md_timings/model_calculators.json
+```text
+paper_v2_configs/md/model_calculators.json
+paper_v2_configs/md/md_calculator_versions.json
+paper_v2_configs/md_accelerated/model_calculators.json
+paper_v2_configs/e_f_rmses/model_calculators.json
+paper_v2_configs/pressures/model_calculators.json -->
 ```
 
-Differences between paper and updated model config files:
+## V2 MD settings
 
-- `chgnet` — `stress_weight=0.01` dropped.
-- `grace-oam` — fp64 `grace_fm(...)` → the recast fp32 `TPCalculator(...)`.
-- MatterSim — `mattersim-v1-1M` (`MatterSim-v1.0.0-1M.pth`) →
-  `mattersim-v1-5M` (`MatterSim-v1.0.0-5M.pth`). Both trees pin the checkpoint
-  by path here, unlike `md_production`, where the paper tree takes the 1M
-  default implicitly.
-- `pet-oam-xl` — `dtype=torch.float32` pinned explicitly.
-- `orb-v3-direct`, `pet-omat-xl` — present only in the updated tree.
+### Shared physical protocol
 
-MACE and ORB do **not** differ in this stage: the paper model config file runs them at
-`default_dtype='float32'` and `precision='float32-high'`, matching the updated
-tree, so the two timing sets are taken at the same precision.
+Both `paper_v2_configs/md/` and `paper_v2_configs/md_accelerated/` run the same
+physical workload. The word **accelerated** refers to faster model inference,
+not to a biased or enhanced-sampling MD method. No boost potential is added.
 
-##### How the timing is taken
+- Ensemble: NVT.
+- Initial structure: frame 0 of each reference `traj.extxyz`.
+- Temperature, timestep, thermostat, thermostat coupling time, trajectory
+  length, and output stride: read from `md_metadata.json`.
+- Number of integration steps:
+  `round(trajectory_length_ps * 1000 / timestep_fs)`.
+- Random seed: 42.
+- Nose-Hoover settings: chain length 1 and one chain substep. TorchSim uses
+  third-order Suzuki-Yoshida integration (`sy_steps = 3`).
+- Thermostat mapping: `Nose-Hoover` uses Nose-Hoover-chain NVT;
+  `velocity rescaling` uses Bussi stochastic velocity rescaling; `Langevin` is
+  supported with friction `1 / tau`, although no current metadata entry uses it.
+- Workload: energy and forces only, with stress and virials disabled.
+- Trajectory contents: positions, cells, and velocities in HDF5; forces are not
+  stored. The current position and energy print strides are 1 for every system.
+- Timing: the CUDA device is synchronized immediately before and after the MD
+  loop. A timing CSV records elapsed time and seconds per step. Baseline
+  TorchSim runners normally perform one untimed initial energy/force evaluation;
+  compilation/export setup is model-specific in the accelerated runners.
 
-Both trees run the same short benchmark — 0.2 ps per system, per-system
-timestep, `tdamp = 25 fs`, every step recorded, over a reduced system set
-(molecular crystals, `H_1050K_Rupp_QE` and `Pt111w24H2O_380K_Heenen_VASP` are
-skipped) — and wrap `dyn.run(n_steps)` in a CUDA-synchronized
-`time.perf_counter()`, writing `md_timing_<model>.csv` alongside the
-trajectory. The updated tree additionally skips
-`bulkLiMgAlZnSn_600K_J_Schmidt_VASP` and `bulkLiMgAlZnSn_900K_J_Schmidt_VASP`,
-so those two LiMgAlZnSn systems are timed only in `paper_configs`. They differ in what falls inside the clock:
+The ASE and TorchSim implementations use equivalent physical settings. ASE maps
+the metadata to `NoseHooverChainNVT`, `Bussi`, or `Langevin`, initializes
+Maxwell-Boltzmann velocities with seed 42, and also writes an MD energy log.
+TorchSim maps the same metadata to its corresponding NVT integrator.
 
-- `paper_configs` times the whole 0.2 ps from the first step, so one-time
-  costs (CUDA kernel autotune, first-call compilation, lazily built neighbour
-  lists) are included in `seconds_per_step`.
-- `updated_configs` first runs `NVT_WARMUP_FRACTION = 0.1` of the steps
-  untimed, synchronizes, and only then starts the clock — a steady-state
-  per-step cost, with the startup transient excluded rather than averaged in.
-  The CSV carries an extra `warmup_steps` column recording this.
+### Per-system settings
 
-Output goes to `../data/output-trajs-timings-paper/` and
-`../data/output-trajs-timings-updated/` respectively.
+These values are taken directly from the current V2 metadata:
 
-#### `e_f_rmses`
+| System | T (K) | dt (fs) | Thermostat | tau (fs) | Length (ps) |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Anthracene | 293 | 0.5 | Nose-Hoover | 20 | 8.0000 |
+| Ag | 600 | 1.0 | Nose-Hoover | 40 | 24.8810 |
+| Au | 1500 | 1.0 | Nose-Hoover | 40 | 20.1620 |
+| Cu | 1000 | 1.0 | Nose-Hoover | 40 | 36.0070 |
+| CuAu | 500 | 1.0 | Nose-Hoover | 40 | 1.1050 |
+| CuZrAl | 1500 | 1.0 | Nose-Hoover | 40 | 2.7180 |
+| LiMgAlZnSn | 600 | 1.0 | Nose-Hoover | 40 | 3.0150 |
+| LiMgAlZnSn | 900 | 1.0 | Nose-Hoover | 40 | 2.1810 |
+| MoS2 | 300 | 1.0 | velocity rescaling | 1 | 20.0000 |
+| Pt3Co | 300 | 1.0 | Nose-Hoover | 40 | 20.9270 |
+| CsSnI3 | 500 | 1.0 | Nose-Hoover | 40 | 14.7580 |
+| H | 1050 | 0.2 | velocity rescaling | 10 | 0.3568 |
+| MAPbBr3 | 300 | 0.5 | Nose-Hoover | 20 | 30.0000 |
+| Naphthalene | 295 | 0.5 | Nose-Hoover | 20 | 3.7785 |
+| Pentacene | 295 | 0.5 | Nose-Hoover | 20 | 7.7895 |
+| Picene | 295 | 0.5 | Nose-Hoover | 20 | 7.0755 |
+| Pt(111) + 24 H2O | 380 | 1.0 | Nose-Hoover | 40 | 3.8430 |
+| Tetracene | 295 | 0.5 | Nose-Hoover | 20 | 8.0000 |
+| TiSe2 | 400 | 1.0 | Nose-Hoover | 40 | 14.7160 |
 
-```
-paper_configs/e_f_rmses/model_calculators.json
-updated_configs/e_f_rmses/model_calculators.json
-```
+All systems currently use a position, energy, and force print stride of one.
+Stress also has stride one where it exists in the reference calculation; the
+CuAu reference contains no stress.
 
-Within each tree this model config file matches that tree's `md_production` model config file
-entry for entry — the RMSEs are evaluated with exactly the calculators that
-produced the trajectories. So the paper/updated differences are the ones in the
-`md_production` table above.
+### Baseline MD
 
-#### `pressures`
+`paper_v2_configs/md/` provides the comparison workload without optional
+inference acceleration:
 
-The paths to the model config files are:
+- PyTorch models run eagerly; ORB explicitly uses `compile=False`, PET bypasses
+  its default TorchScript export, and NequIP uses eager mode.
+- Strict fp32 and disabled TF32 are used wherever supported.
+- TorchSim output is written under
+  `paper_v2_configs/data/mlip-trajs-torchsim-matched/`.
+- ASE uses the same directory with `-ase` in run names, allowing engine-matched
+  trajectories and timings to coexist.
 
-```
-paper_configs/pressures/model_calculators.json
-updated_configs/pressures/model_calculators.json
-```
+The baseline TorchSim directory contains 15 model scripts. CHGNet is available
+through ASE only, and GRACE MP does not have a baseline dedicated runner.
 
+### Accelerated MD
 
-What is specific to this stage:
+`paper_v2_configs/md_accelerated/` keeps the physical settings fixed and changes
+only the model execution path:
 
-- `chgnet` — `compute_stress=True` in **both** trees. These are the only two
-  entries anywhere that turn stress on; every other model config file sets
-  `compute_stress=False`. The stage needs the stress tensor and CHGNet only
-  returns it when asked. The trees differ in the neighbouring flags: the paper
-  copy also sets `compute_hessian=True`, the updated one leaves it `False`, and
-  the paper copy drops `stress_weight` here (unlike its other stages).
-- Every checkpoint path in both model config files resolves under `../data/models/`,
-  including `nequip`'s `compile_path`.
+| Model family | Acceleration used |
+| --- | --- |
+| MACE | cuEquivariance fused CUDA kernels plus `torch.compile` in `reduce-overhead` mode. |
+| ORB | ORB's compiled inference path (`compile=True`). |
+| MatterSim | `torch.compile` applied to the model forward pass. |
+| PET | Force-only TorchScript model. |
+| NequIP | Force-only AOTInductor artifact with OpenEquivariance. |
+| GRACE | Stress-pruned, force-only TensorFlow XLA graph bridged to TorchSim through DLPack. |
+| UMA | Separate `compile` and `turbo` scripts. Compile keeps TF32 off; turbo enables TF32 and `merge_mole`, with a separate predictor for each fixed-composition system. |
 
-`Pt111w24H2O` is excluded from the pressure calculations.
+Accelerated TorchSim output is written under
+`paper_v2_configs/data/mlip-trajs-torchsim-accelerated/`; accelerated ASE output
+uses `paper_v2_configs/data/mlip-trajs-ase-accelerated/`.
 
+The accelerated directories contain runners for GRACE, MACE, MatterSim,
+NequIP, ORB, PET, and UMA. CHGNet, EquiformerV2, and eSEN currently have no
+dedicated accelerated runner.
 
+## Running V2 TorchSim MD
 
-## Benchmark systems
+### Requirements
 
-Reference trajectories span several system types:
+- Linux or WSL;
+- `uv` on `PATH`;
+- a CUDA-capable NVIDIA GPU compatible with the dependencies declared in each
+  script's inline `uv` metadata;
+- reference trajectories under
+  `paper_v2_configs/data/ref-trajs/<system>/traj.extxyz`; and
+- any required local checkpoints under `paper_v2_configs/data/models/`.
 
-- **Pure metals** — bulk Ag (600 K), Au (1500 K), Cu (1000 K)
-- **Metal alloys** — CuAu (500 K), CuZrAl (1500 K), LiMgAlZnSn (600/900 K),
-  Pt3Co (300 K)
-- **Metal dichalcogenides** — MoS2 (300 K), TiSe2 (400 K)
-- **Perovskites** — CsSnI3 (500 K), MAPbBr3 (300 K)
-- **Molecular crystals** — anthracene (293 K), naphthalene, pentacene,
-  picene, tetracene (295 K)
-- **Metal–water interfaces** — Pt(111) with 24 H2O (380 K) — `updated_configs`
-  only
-- **Hydrogen** — H at 1050 K — `updated_configs` only
-
-`paper_configs` covers the first five categories.
-
-Per-system settings (temperature, stride, timestep) are recorded in the
-`*_settings_ref.csv` carried by the analysis stages that need them —
-`updated_configs/{pressures,rdfs,vdos}/` and the i-PI harness's
-`ipi_settings_ref.csv`. The MD stages take temperature from the system
-directory name (the `\d+K` in it) and the timestep from the per-system rule
-above, so they carry no settings file.
-
-
-## Pipeline
-
-Both trees use the same stage names, but the paper tree is not complete:
-
-```
-md_production/   NVT MD production runs for every model/system pair.
-md_timings/      Standalone timing harness sharing the same MD driver: a
-                 short 0.2 ps run over a reduced system set.
-e_f_rmses/       Energy/force RMSE of each MLIP against reference AIMD
-                 trajectories, with per-system isolated-atom energy
-                 corrections and per-system-type aggregation.
-pressures/       Per-frame stress and trajectory-averaged pressure, matched
-                 to reference trajectories by simulated time, plus error
-                 aggregation.  Script in `updated_configs` only.
-rdfs/            Radial distribution functions from MLIP vs. reference
-                 trajectories (via MDTraj), matched by simulation length.
-vdos/            Vibrational density of states via the Fourier transform of
-                 the velocity autocorrelation function (Hann-windowed),
-                 matched by simulation length, with normalization/plotting.
-                 `updated_configs` only.
-```
-
-Additionally, `paper_configs/md_production/molecular_crystals_ipi/generic/`
-holds the unified i-PI harness used for the five molecular crystals, which
-run under i-PI rather than the ASE driver. It has its own
-[README](paper_configs/md_production/molecular_crystals_ipi/generic/README.md)
-covering the `SYSTEM` × `MODEL_NAME` submission grid. Note that the molecular
-crystals are excluded from `md_timings` in both trees.
-
-## Data layout
-
-No `data/` directory is committed — trajectories and checkpoints are too large
-to track. Each tree's scripts resolve paths relative to their own stage
-directory, so create `paper_configs/data/` and `updated_configs/data/` with
-this layout before running anything:
-
-```
-data/ref-trajs/<system>/traj.extxyz     Reference AIMD trajectories
-data/mlip-trajs-20fs-tau/<system>/      MD output, written by `updated` md_production
-data/mlip-trajs/<system>/               MD output, written by `paper` md_production
-data/output-trajs-timings-updated/      Timing output, written by `updated` md_timings
-data/output-trajs-timings-paper/        Timing output, written by `paper` md_timings
-data/models/                            Local model checkpoints
-```
-
-## Usage: updated TorchSim MD
-
-Requires Linux/WSL, `uv`, and a CUDA GPU. `uv` installs each script's dependencies.
-Both workflows use `updated_configs/data/ref-trajs/md_metadata.json`; its
-`initfile_path` values are relative to the repository root. Supply the referenced
-trajectories and the selected models' required checkpoints before running.
-
-From the repository root, **run all models with one command** for either workflow:
+Each model script declares its own Python dependencies and can be run directly
+with `uv`. From the repository root:
 
 ```bash
-# Baseline MD
-CUDA_VISIBLE_DEVICES=0 bash updated_configs/md/torchsim-scripts/run_all_md.sh
+# Run every baseline TorchSim model sequentially.
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md/torchsim-scripts/run_all_md.sh
 
-# Accelerated MD
-CUDA_VISIBLE_DEVICES=0 bash updated_configs/md_accelerated/torchsim-scripts/run_all_md.sh
+# Run every accelerated TorchSim variant sequentially.
+CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md_accelerated/torchsim-scripts/run_all_md.sh
 ```
 
-These launchers run models **sequentially**, saving logs under the script directory's
-`logs/md/`. Add `--dry-run` to preview commands.
+Use `--dry-run` to list the commands without launching MD:
 
-For a single model, run `uv run --script <path-to-md_model.py>`.
-Trajectories and timing CSVs are saved per system under
-`updated_configs/data/mlip-trajs-torchsim-matched/` (baseline) or
-`updated_configs/data/mlip-trajs-torchsim-accelerated/` (accelerated).
-Existing timing CSVs skip that model/system, including empty failure markers;
-remove the marker and any partial trajectory before retrying a failed run.
+```bash
+bash paper_v2_configs/md/torchsim-scripts/run_all_md.sh --dry-run
+bash paper_v2_configs/md_accelerated/torchsim-scripts/run_all_md.sh --dry-run
+```
+
+Run one model with:
+
+```bash
+uv run --script paper_v2_configs/md/torchsim-scripts/md_orb_v3.py
+uv run --script paper_v2_configs/md_accelerated/torchsim-scripts/md_orb_v3.py
+```
+
+Batch logs are saved below the selected script directory at
+`logs/md/<timestamp>_<pid>/`. The launchers continue after a model process
+fails and return a non-zero status if any model failed.
+
+TorchSim scripts skip a model/system pair when its timing CSV already exists.
+This includes a zero-byte CSV, which is used as a failure marker. Remove the
+empty timing CSV and any partial HDF5 trajectory before retrying a failed pair.
+Missing initial structures are reported and skipped.
+
+> **Migration note:** the configuration trees have been renamed, but some V2
+> runner constants and script docstrings still contain the former
+> `updated_configs` path (and some metadata paths still start at `data/`). These
+> references must be changed to the new `paper_v2_configs` layout before the
+> commands above can run solely against the renamed tree.
+
+## Evaluating a custom model
+
+`custom_model_evaluation/` is intended to let a model developer run the same
+benchmark protocol as `paper_v2_configs/` without adding their model to the
+paper's fixed 17-model catalog. The developer supplies one native ASE runner
+and one TorchSim runner; the model-independent analysis stages then consume
+their trajectories and timings.
+
+At present, `custom_model_evaluation/` is an empty integration workspace. It
+does not yet contain templates, copied analysis entry points, or a one-command
+launcher. The description below defines the intended layout and compatibility
+contract; those files must be added before the custom workflow is runnable.
+
+### Intended layout
+
+```text
+custom_model_evaluation/
+├── data/
+│   ├── ref-trajs/                   AIMD inputs and md_metadata.json
+│   ├── models/                      local custom checkpoints
+│   ├── mlip-trajs-ase/              baseline ASE results
+│   ├── mlip-trajs-torchsim/         baseline TorchSim results
+│   ├── mlip-trajs-ase-accelerated/  accelerated ASE results, if available
+│   └── mlip-trajs-torchsim-accelerated/
+├── md/
+│   ├── ase-scripts/md_<model>.py
+│   └── torchsim-scripts/md_<model>.py
+├── md_accelerated/                  optional optimized counterparts
+├── e_f_rmses/                       custom ASE/TorchSim RMSE adapters
+├── pressures/                       stress-enabled custom calculator
+├── rdfs/                            V2 RDF pipeline or a configured wrapper
+├── vdos/                            V2 VDOS pipeline or a configured wrapper
+└── pareto_plots/                    combined custom-model report
+```
+
+The reference trajectories and metadata should be copied or linked from
+`paper_v2_configs/data/ref-trajs/`. Do not change their temperatures,
+timesteps, thermostat settings, trajectory lengths, or print strides: using the
+same metadata is what makes the custom result directly comparable with V2.
+
+### Model identifier
+
+Choose one stable base identifier such as `my-model` and use it everywhere:
+
+- the `model_name` passed to the MD and RMSE drivers;
+- the stem after `nvt_` and `md_timing_` in output filenames;
+- the calculator name in result CSVs; and
+- `--model my-model` when an analysis script supports model filtering.
+
+Preserve deliberate execution suffixes in that stem. For example, the shared
+ASE driver appends `-ase`, while eager and accelerated implementations may use
+`my-model-eager` and `my-model-compile`. These names prevent results from
+overwriting each other and ensure that downstream discovery treats them as
+separate executions.
+
+### ASE adapter
+
+The ASE script must construct an `ase.calculators.calculator.Calculator`
+compatible object. For production MD it must provide:
+
+- total energy in eV through `atoms.get_potential_energy()`;
+- forces in eV/Angstrom through `atoms.get_forces()`;
+- support for the elements and periodic cells in all selected systems; and
+- stress disabled so the timed MD workload remains energy/force only.
+
+Copying the structure of an existing runner, such as
+[`md_orb_v3.py`](paper_v2_configs/md/ase-scripts/md_orb_v3.py), is the simplest
+starting point. Replace its inline `uv` dependencies, model imports,
+`make_calculator()` implementation, model identifier, and checkpoint path. Keep
+the shared metadata-driven NVT loop and HDF5 writer unchanged.
+
+A second, stress-enabled calculator is required by the pressure stage. Its ASE
+stress must use the ASE sign convention and eV/Angstrom^3 units. Pressure is
+deliberately evaluated separately so stress computation is not included in the
+production MD timing.
+
+### TorchSim adapter
+
+The TorchSim script must wrap the model in a TorchSim-compatible model object
+that accepts a TorchSim simulation state and returns total energy and forces.
+It must use the same checkpoint, dtype policy, cutoff, and physical model as the
+ASE adapter. Production stress must be disabled.
+
+Use an existing model family with a similar API as the template; for example,
+[`md_orb_v3.py`](paper_v2_configs/md/torchsim-scripts/md_orb_v3.py) shows the
+general metadata-driven loop and an existing TorchSim adapter. Only the inline
+dependencies, model loader/adapter, model identifier, checkpoint, and any
+model-specific validation should need to change.
+
+If no native TorchSim adapter exists, the custom wrapper is responsible for:
+
+- converting atomic numbers, positions, cells, periodicity, and batches from
+  the TorchSim state into the model's input representation;
+- preserving gradients when forces are obtained from energy derivatives;
+- returning outputs in TorchSim's expected units and shapes; and
+- rebuilding neighbour information when required by the model.
+
+The ASE and TorchSim runners should be tested first on one system and a few
+steps. Compare their initial energy and forces before launching the full set;
+matching trajectories alone is not a sufficient adapter validation.
+
+### Output contract
+
+Downstream V2 analysis discovers results by directory and filename, so custom
+runners must preserve the V2 schema:
+
+```text
+data/<trajectory-source>/<system>/
+├── nvt_<model>.h5
+└── md_timing_<model>.csv
+```
+
+The HDF5 trajectory must contain, under `data/`, atomic numbers, masses,
+positions, cell vectors, periodic-boundary flags, and velocities. Positions and
+cells use Angstrom; velocities use Angstrom/ps. A stress-enabled trajectory
+additionally stores `data/stress` in eV/Angstrom^3 and identifies the stress
+units in an attribute. Frame counts must agree across all time-dependent
+datasets.
+
+The timing CSV uses the V2 columns:
+
+```text
+calculator,system,temperature_K,n_steps,time_step_fs,thermostat,tau_fs,
+record_interval,elapsed_seconds,seconds_per_step,engine,seed
+```
+
+Follow the timing boundary of the V2 runner used as the template and synchronize
+the accelerator before and after it. Model loading and explicit artifact export
+belong outside the reported interval. Compilation may occur eagerly during
+setup or lazily on the first model call, so record whether compilation/warmup is
+inside or outside the timing boundary. Include enough detail in `engine` to
+distinguish ASE/TorchSim and eager/accelerated execution.
+
+### Running the V2-equivalent pipeline
+
+Each stage has a different custom-model integration point:
+
+| Stage | Custom-model requirement |
+| --- | --- |
+| MD and timing | Run both custom MD scripts over every entry in `md_metadata.json`. Optional accelerated scripts must retain the same physical settings. |
+| Energy/force RMSE | Add matching ASE and TorchSim RMSE wrappers that load exactly the same model/checkpoint as MD and call the shared `run_rmse(...)` implementation on the AIMD reference frames. |
+| Pressure | Supply a stress-enabled ASE calculator or a stress-enabled HDF5 trajectory, then run `pressure_pipeline.py` with the custom trajectory root. |
+| RDF | Place HDF5 trajectories in one of the four standard trajectory-source directories. The RDF pipeline discovers `nvt_<model>.h5` automatically and accepts `--model <model>`. |
+| VDOS | Supply trajectories with velocities and matching timestep/stride settings, then point the VDOS batch stage at the custom trajectory root. |
+| Pareto report | Combine the custom timing CSVs with its RMSE, RDF, VDOS, and pressure metric rows, then pass those files to the Pareto plotting script. Unknown models are displayed in the `Other` tier. |
+
+A typical implementation sequence is:
+
+1. Copy the V2 reference metadata and make all referenced AIMD trajectories
+   available under `custom_model_evaluation/data/ref-trajs/`.
+2. Implement `md_<model>.py` for ASE and TorchSim by adapting the closest V2
+   examples. Run a short one-system validation and compare energy/force output.
+3. Run the complete reference-matched NVT workload with both engines. Confirm
+   that every requested system has a non-empty HDF5 trajectory and timing CSV.
+4. Add ASE and TorchSim RMSE wrappers using the same loader functions, then
+   evaluate the AIMD frames and aggregate energy/force errors.
+5. Add a stress-enabled ASE calculator for pressure evaluation. Do not reuse a
+   production calculator whose stress branch was intentionally removed.
+6. Run RDF and VDOS comparison on the produced trajectories.
+7. Merge all metric rows with MD timings and generate the final Pareto report.
+
+Useful V2 entry points to reuse or wrap are:
+
+```text
+paper_v2_configs/e_f_rmses/rmse_ase_scripts/ase_rmse.py
+paper_v2_configs/e_f_rmses/rmse_torchsim_scripts/torchsim_rmse.py
+paper_v2_configs/pressures/pressure_pipeline.py
+paper_v2_configs/rdfs/run_rdf_pipeline.py
+paper_v2_configs/vdos/get_normalized_VDOS.py
+paper_v2_configs/pareto_plots/plot-pareto-combined-vdos-rdf-pressure-average-similarity-same-simulation-length.py
+```
+
+Current repository limitations matter when setting this up:
+
+- the V2 analysis scripts still assume their own `paper_v2_configs/data/`
+  location in several places, so a custom wrapper, configurable data-root
+  option, or link into one of the standard source directories is required; and
+- `get_normalized_VDOS.py` imports VDOS batch/normalization helper modules and a
+  `vdos_settings_mlip.csv` file that are not currently present in the V2 tree.
+  Those components must be restored before the complete VDOS stage can run; and
+- the combined Pareto script currently considers a timing-system directory
+  complete only when it contains exactly 15 timing CSV files. That completeness
+  rule must be made configurable before it can consume a custom-only result set
+  or a V2 result set with an additional custom model.
+
+Until templates and a top-level launcher are added under
+`custom_model_evaluation/`, this is a manual integration workflow rather than a
+single-command custom-model benchmark.
+
+## Analysis pipeline
+
+The V2 analysis stages consume reference, baseline, or accelerated trajectories:
+
+```text
+e_f_rmses/   Evaluate per-frame energy and force errors, including isolated-atom
+             energy corrections and aggregation by system type.
+pressures/   Evaluate stress and hydrostatic pressure separately from the
+             force-only production loop, then aggregate pressure errors.
+rdfs/        Compare MLIP and reference RDFs over matched simulated time.
+vdos/        Fourier-transform the Hann-windowed velocity autocorrelation
+             function and normalize the resulting VDOS.
+pareto_plots/ Combine accuracy/similarity metrics with MD timings and scaling.
+```
+
+The pressure stage excludes Pt(111) + 24 H2O, and CuAu cannot contribute a
+reference pressure because its AIMD trajectory has no stress values.
+
+## V1 historical MD
+
+The original `paper_v1_configs/md_production/` ASE workflow ran 80,000 steps at
+0.25 fs (20 ps), saved every tenth frame, and used a thermostat damping time of
+`100 * timestep`. The five molecular crystals were run separately through the
+i-PI harness documented in
+[`paper_v1_configs/md_production/molecular_crystals_ipi/generic/README.md`](paper_v1_configs/md_production/molecular_crystals_ipi/generic/README.md).
+
+`paper_v1_configs/md_timings/` contains the original short timing workload. It
+runs 0.2 ps over a reduced system set with a 25 fs damping time and includes
+startup costs in the measured interval.
