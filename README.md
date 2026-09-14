@@ -80,7 +80,7 @@ physical workload. **Accelerated** settings refer to faster model inference.
 
 ### Per-system settings
 
-These values are taken directly from the current V2 metadata:
+<!-- These values are taken directly from the current V2 metadata:
 
 | System | T (K) | dt (fs) | Thermostat | tau (fs) | Length (ps) |
 | --- | ---: | ---: | --- | ---: | ---: |
@@ -102,7 +102,9 @@ These values are taken directly from the current V2 metadata:
 | Picene | 295 | 0.5 | Nose-Hoover | 20 | 7.0755 |
 | Pt(111) + 24 H2O | 380 | 1.0 | Nose-Hoover | 40 | 3.8430 |
 | Tetracene | 295 | 0.5 | Nose-Hoover | 20 | 8.0000 |
-| TiSe2 | 400 | 1.0 | Nose-Hoover | 40 | 14.7160 |
+| TiSe2 | 400 | 1.0 | Nose-Hoover | 40 | 14.7160 | -->
+
+Per-system MD metadata is located in `paper_v2_configs/data/ref-trajs/md_metadata.json`
 
 All systems currently use a position, energy, and force print stride of one.
 Stress also has stride one where it exists in the reference calculation; the
@@ -159,6 +161,28 @@ dedicated accelerated runner.
   `paper_v2_configs/data/ref-trajs/<system>/traj.extxyz`; and
 - any required local checkpoints under `paper_v2_configs/data/models/`.
 
+Install `uv` on Linux or WSL with Astral's standalone installer:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+If `curl` is unavailable, use `wget`:
+
+```bash
+wget -qO- https://astral.sh/uv/install.sh | sh
+```
+
+Restart the shell after installation so the updated `PATH` is loaded, then
+verify the installation:
+
+```bash
+uv --version
+```
+
+Alternative installation methods and version-pinned installers are documented
+in the [official uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+
 Each model script declares its own Python dependencies and can be run directly
 with `uv`. From the repository root:
 
@@ -184,14 +208,14 @@ uv run --script paper_v2_configs/md/torchsim-scripts/md_orb_v3.py
 uv run --script paper_v2_configs/md_accelerated/torchsim-scripts/md_orb_v3.py
 ```
 
-Batch logs are saved below the selected script directory at
+<!-- Batch logs are saved below the selected script directory at
 `logs/md/<timestamp>_<pid>/`. The launchers continue after a model process
 fails and return a non-zero status if any model failed.
 
 TorchSim scripts skip a model/system pair when its timing CSV already exists.
 This includes a zero-byte CSV, which is used as a failure marker. Remove the
 empty timing CSV and any partial HDF5 trajectory before retrying a failed pair.
-Missing initial structures are reported and skipped.
+Missing initial structures are reported and skipped. -->
 
 > **Migration note:** the configuration trees have been renamed, but some V2
 > runner constants and script docstrings still contain the former
