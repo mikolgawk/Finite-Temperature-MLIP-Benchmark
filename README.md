@@ -7,9 +7,19 @@ model, protocol, and output-format documentation is available in
 
 ## Reproducing our plots
 
-The current benchmark workflow is under `paper_v2_configs/`. First complete the
-[requirements and data setup](INFO.md#requirements), then check and run the
-baseline and accelerated TorchSim workloads from the repository root:
+The current benchmark workflow is under `paper_v2_configs/`. Before running it,
+complete the [requirements and data setup](INFO.md#requirements). The workflow
+assumes that the reference AIMD trajectories are available under
+[`paper_v2_configs/data/ref-trajs/`](paper_v2_configs/data/ref-trajs/), with a
+`traj.extxyz` file for each system and the shared `md_metadata.json` file. The MD
+runners generate the model trajectories and timing data, while the subsequent
+energy/force, pressure, RDF, and VDOS stages generate the CSV files consumed by
+the plotting scripts. See the [V2 MD instructions](INFO.md#running-v2-torchsim-md)
+and [analysis-pipeline guide](INFO.md#analysis-pipeline) for the expected file
+layout and the available command-line options.
+
+Then check and run the baseline and accelerated TorchSim workloads from the
+repository root:
 
 ```bash
 # Inspect the commands without starting MD.
@@ -42,15 +52,6 @@ Next, generate the timing and Pareto plots:
 python paper_v2_configs/pareto_plots/plot-model-timings.py
 python paper_v2_configs/pareto_plots/plot-pareto-combined-vdos-rdf-pressure-average-similarity-same-simulation-length.py
 ```
-
-These commands assume that the reference AIMD trajectories are available under
-[`paper_v2_configs/data/ref-trajs/`](paper_v2_configs/data/ref-trajs/), with a
-`traj.extxyz` file for each system and the shared `md_metadata.json` file. The MD
-runners generate the model trajectories and timing data, while the subsequent
-energy/force, pressure, RDF, and VDOS stages generate the CSV files consumed by
-the plotting scripts. See the [V2 MD instructions](INFO.md#running-v2-torchsim-md)
-and [analysis-pipeline guide](INFO.md#analysis-pipeline) for the expected file
-layout and the available command-line options.
 
 ## Evaluating a new potential
 
