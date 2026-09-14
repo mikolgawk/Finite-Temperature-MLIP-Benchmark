@@ -217,12 +217,6 @@ This includes a zero-byte CSV, which is used as a failure marker. Remove the
 empty timing CSV and any partial HDF5 trajectory before retrying a failed pair.
 Missing initial structures are reported and skipped. -->
 
-> **Migration note:** the configuration trees have been renamed, but some V2
-> runner constants and script docstrings still contain the former
-> `updated_configs` path (and some metadata paths still start at `data/`). These
-> references must be changed to the new `paper_v2_configs` layout before the
-> commands above can run solely against the renamed tree.
-
 ## Evaluating a custom model
 
 `custom_model_evaluation/` is intended to let a model developer run the same
