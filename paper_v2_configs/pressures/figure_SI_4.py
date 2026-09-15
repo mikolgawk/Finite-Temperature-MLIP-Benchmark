@@ -22,6 +22,8 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import gaussian_kde
 
+from get_model_pressure_errors import resolve_reference_pressure_file
+
 
 FONT_SIZE = 8
 LEGEND_FONT_SIZE = 8
@@ -172,17 +174,12 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate: bool = False) -> pd
 
 
 def find_reference_file(pressures_dir: Path, explicit_path: str | None) -> Path:
-    if explicit_path:
-        p = Path(explicit_path)
-        if p.is_file():
-            return p
-        raise FileNotFoundError(f"Reference CSV not found: {p}")
     local = Path(
         "../data/results/same-simulation-length/reference_pressure_per_frame_same_simulation_length.csv"
     )
-    if local.is_file():
-        return local
-    raise FileNotFoundError(f"Reference CSV not found: {local}")
+    return resolve_reference_pressure_file(
+        pressures_dir, explicit_path, (local,)
+    )
 
 
 # ── Data collection ────────────────────────────────────────────────────────────

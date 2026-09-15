@@ -26,6 +26,7 @@ from get_model_pressure_errors import (
     normalize_model_name,
     parse_model_name,
     pressure_histogram_similarity,
+    resolve_reference_pressure_file,
 )
 
 
@@ -158,10 +159,9 @@ def get_tier_color(model: str):
 
 
 def find_reference_file(pressures_dir: Path, explicit_path: str | None) -> Path:
-    path = Path(explicit_path) if explicit_path else DEFAULT_REFERENCE_FILE
-    if not path.is_file():
-        raise FileNotFoundError(f"Reference per-frame CSV not found: {path}")
-    return path
+    return resolve_reference_pressure_file(
+        pressures_dir, explicit_path, (DEFAULT_REFERENCE_FILE,)
+    )
 
 
 def make_bin_edges(reference_values: np.ndarray, candidates: Iterable[np.ndarray], bins: int) -> np.ndarray:

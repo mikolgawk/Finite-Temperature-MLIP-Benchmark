@@ -15,6 +15,7 @@ import pressure_pipeline as pipeline
 from get_model_pressure_errors import (
     build_pair_rows,
     compute_pressure_metric,
+    resolve_reference_pressure_file,
     write_metric_outputs,
 )
 
@@ -155,6 +156,13 @@ class PressurePipelineTests(unittest.TestCase):
             results, None, pipeline.SUFFIX, 8, models={"test-force-only"}
         )
         self.assertEqual(len(alias_filtered_pairs), 2)
+        resolved_reference = resolve_reference_pressure_file(
+            results / "torchsim" / "md_eager", None
+        )
+        self.assertEqual(
+            resolved_reference,
+            results / "torchsim" / "md_eager" / "references" / "test.csv",
+        )
         with self.assertRaisesRegex(FileNotFoundError, "missing-model"):
             build_pair_rows(
                 results, None, pipeline.SUFFIX, 8, models={"missing-model"}

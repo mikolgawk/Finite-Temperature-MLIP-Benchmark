@@ -20,6 +20,7 @@ DEFAULT_SYSTEM_MODEL_MEAN_OUTPUT_FILE = (
 DEFAULT_MODEL_SYSTEM_TYPE_MEAN_OUTPUT_FILE = (
     DEFAULT_PRESSURES_DIR / "pressure_model_system_type_mean_similarity_same_simulation_length.csv"
 )
+DEFAULT_MODEL_FILE_SUFFIX = "_same-simulation-length_pressure_per_frame.csv"
 TRAJECTORY_SUMMARY_SUFFIX = (
     "_same-simulation-length_pressure_trajectory_summary.csv"
 )
@@ -86,6 +87,50 @@ def structure_from_trajectory_file(path_like: str) -> str:
 
 def parse_model_name(file_path: Path, suffix: str) -> str:
     return normalize_model_name(file_path.name.removesuffix(suffix))
+
+
+def resolve_reference_pressure_file(
+    pressures_dir: Path,
+    explicit_path: str | Path | None,
+    legacy_candidates: tuple[Path, ...] = (),
+) -> Path:
+    """Resolve an explicit, model-matched, or legacy reference pressure CSV."""
+    if explicit_path:
+        candidate = Path(explicit_path)
+        if candidate.is_file():
+            return candidate
+        raise FileNotFoundError(f"Reference per-frame CSV not found: {candidate}")
+
+    model_names = {
+        parse_model_name(path, DEFAULT_MODEL_FILE_SUFFIX)
+        for path in pressures_dir.glob(f"*{DEFAULT_MODEL_FILE_SUFFIX}")
+        if not path.name.startswith("reference_")
+    }
+    matched_references = sorted(
+        candidate
+        for model in model_names
+        if (candidate := pressures_dir / "references" / f"{model}.csv").is_file()
+    )
+    if len(matched_references) == 1:
+        print(f"[INFO] Using model-matched reference file: {matched_references[0]}")
+        return matched_references[0]
+
+    for candidate in legacy_candidates:
+        if candidate.is_file():
+            return candidate
+
+    if len(matched_references) > 1:
+        choices = ", ".join(str(path) for path in matched_references)
+        raise ValueError(
+            "Multiple model-matched reference pressure CSVs are available; "
+            f"select one with --reference-file. Choices: {choices}"
+        )
+
+    searched = [pressures_dir / "references" / "<model>.csv", *legacy_candidates]
+    raise FileNotFoundError(
+        "Could not find a reference per-frame pressure CSV. Looked for: "
+        + ", ".join(str(path) for path in searched)
+    )
 
 
 def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = False) -> pd.DataFrame:
@@ -578,7 +623,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-file-suffix",
-        default="_same-simulation-length_pressure_per_frame.csv",
+        default=DEFAULT_MODEL_FILE_SUFFIX,
         help="Suffix used to identify model per-frame pressure CSV files.",
     )
     parser.add_argument(

@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from get_model_pressure_errors import resolve_reference_pressure_file
+
 
 FONT_SIZE = 10
 LEGEND_FONT_SIZE = 6
@@ -125,26 +127,14 @@ def structure_from_trajectory_file(path_like: str) -> str:
 
 
 def find_reference_file(pressures_dir: Path, explicit_path: str | None) -> Path:
-    if explicit_path:
-        candidate = Path(explicit_path)
-        if not candidate.is_file():
-            raise FileNotFoundError(f"Reference per-frame CSV not found: {candidate}")
-        return candidate
-
     local_candidate = Path(
         "../data/results/same-simulation-length/reference_pressure_per_frame_same_simulation_length.csv"
     )
-    if local_candidate.is_file():
-        return local_candidate
-
     fallback_candidate = Path(__file__).resolve().parent / "results-new" / "reference_pressure_per_frame.csv"
-    if fallback_candidate.is_file():
-        print(f"[INFO] Reference per-frame CSV not found in {pressures_dir}; using fallback {fallback_candidate}")
-        return fallback_candidate
-
-    raise FileNotFoundError(
-        "Could not find reference per-frame pressure CSV. Looked for: "
-        f"{local_candidate} and {fallback_candidate}"
+    return resolve_reference_pressure_file(
+        pressures_dir,
+        explicit_path,
+        (local_candidate, fallback_candidate),
     )
 
 
