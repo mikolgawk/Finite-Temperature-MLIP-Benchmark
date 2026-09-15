@@ -46,12 +46,33 @@ Then generate all four metric sets with the `uv` script:
 uv run --script paper_v2_configs/generate_metrics.py
 ```
 
-Next, generate the timing and Pareto plots:
+Once the metric CSV files are available, each analysis directory provides a
+`plot_all.py` entry point that creates every plot supported by that directory:
 
 ```bash
-python paper_v2_configs/pareto_plots/plot-model-timings.py
-python paper_v2_configs/pareto_plots/figure_7.py
+uv run --script paper_v2_configs/e_f_rmses/plot_all.py
+uv run --script paper_v2_configs/rdfs/plot_all.py
+uv run --script paper_v2_configs/vdos/plot_all.py
+uv run --script paper_v2_configs/pressures/plot_all.py
+uv run --script paper_v2_configs/pareto_plots/plot_all.py
 ```
+
+To plot only the accelerated TorchSim results, use:
+
+```bash
+uv run --script paper_v2_configs/rdfs/plot_all.py \
+  --source mlip-trajs-torchsim-accelerated
+uv run --script paper_v2_configs/vdos/plot_all.py \
+  --source mlip-trajs-torchsim-accelerated
+uv run --script paper_v2_configs/pressures/plot_all.py \
+  --dataset torchsim:md_accelerated
+uv run --script paper_v2_configs/pareto_plots/plot_all.py \
+  --source mlip-trajs-torchsim-accelerated
+```
+
+The correlation figures require the F1 and k-SRME score CSVs described
+in the [analysis-pipeline guide](INFO.md#analysis-pipeline). A wrapper attempts
+all of its plot stages and reports any unavailable prerequisites at the end.
 
 ## Evaluating a new potential
 
