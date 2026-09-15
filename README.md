@@ -22,9 +22,6 @@ Then check and run the baseline and accelerated TorchSim workloads from the
 repository root:
 
 ```bash
-# Inspect the commands without starting MD.
-bash paper_v2_configs/md_eager/torchsim-scripts/run_all_md.sh --dry-run
-bash paper_v2_configs/md_accelerated/torchsim-scripts/run_all_md.sh --dry-run
 
 # Run the reference-matched workloads on GPU 0.
 CUDA_VISIBLE_DEVICES=0 bash paper_v2_configs/md_eager/torchsim-scripts/run_all_md.sh
