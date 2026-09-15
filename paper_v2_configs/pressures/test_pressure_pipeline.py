@@ -12,7 +12,11 @@ from ase import Atoms
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import write
 import pressure_pipeline as pipeline
-from get_model_pressure_errors import build_pair_rows, write_metric_outputs
+from get_model_pressure_errors import (
+    build_pair_rows,
+    compute_pressure_metric,
+    write_metric_outputs,
+)
 
 HERE = Path(__file__).resolve().parent
 
@@ -103,7 +107,7 @@ class PressurePipelineTests(unittest.TestCase):
 
     def test_nested_evaluator_outputs_use_sibling_references_and_keep_mode(self):
         results = self.root / "results"
-        for mode in ("md_eager", "md_accelerated"):
+        for mode, pressure_mae in (("md_eager", 1.0), ("md_accelerated", 3.0)):
             output = results / "torchsim" / mode
             references = output / "references"
             references.mkdir(parents=True)
@@ -125,6 +129,16 @@ class PressurePipelineTests(unittest.TestCase):
                     "pressure_GPa": [0.0, 1.0, 2.0],
                 }
             ).to_csv(references / "test.csv", index=False)
+            pd.DataFrame(
+                {
+                    "trajectory_file": [str(trajectory)],
+                    "absolute_mean_error_GPa": [pressure_mae],
+                }
+            ).to_csv(
+                output
+                / "test_same-simulation-length_pressure_trajectory_summary.csv",
+                index=False,
+            )
 
         pairs = build_pair_rows(results, None, pipeline.SUFFIX, 8)
         self.assertEqual(len(pairs), 2)
@@ -142,6 +156,25 @@ class PressurePipelineTests(unittest.TestCase):
         )
         self.assertEqual(len(model_means), 2)
         self.assertEqual(set(model_means["mode"]), {"md_eager", "md_accelerated"})
+
+        comparison_file = results / "model_mean_pressure_comparison.csv"
+        metric_file = results / "model_pressure_error_metric.csv"
+        generated = compute_pressure_metric(
+            pressures_dir=results,
+            reference_file=None,
+            model_file_suffix=pipeline.SUFFIX,
+            bins=8,
+            pair_output_file=results / "pairs-generated.csv",
+            system_model_mean_output_file=results / "system-model-generated.csv",
+            model_mean_output_file=metric_file,
+            model_system_type_mean_output_file=results / "model-type-generated.csv",
+            pressure_comparison_file=comparison_file,
+        )
+        self.assertTrue(comparison_file.is_file())
+        self.assertEqual(
+            list(pd.read_csv(comparison_file).columns), ["model", "error_GPa"]
+        )
+        self.assertTrue(np.allclose(generated["pressure_mae_GPa"], 2.0))
 
 
 if __name__ == "__main__":

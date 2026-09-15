@@ -20,7 +20,9 @@ DEFAULT_SYSTEM_MODEL_MEAN_OUTPUT_FILE = (
 DEFAULT_MODEL_SYSTEM_TYPE_MEAN_OUTPUT_FILE = (
     DEFAULT_PRESSURES_DIR / "pressure_model_system_type_mean_similarity_same_simulation_length.csv"
 )
-DEFAULT_PRESSURE_COMPARISON_FILE = DEFAULT_PRESSURES_DIR / "model_mean_pressure_comparison.csv"
+TRAJECTORY_SUMMARY_SUFFIX = (
+    "_same-simulation-length_pressure_trajectory_summary.csv"
+)
 
 
 def infer_system_type(system: str) -> str:
@@ -293,10 +295,77 @@ def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataF
             keep_cols.append(col)
             rename_cols[col] = f"{col.removesuffix('_error_GPa')}_pressure_mae_GPa"
 
+    if keep_cols == ["model"]:
+        return None
+
     out = df[keep_cols].copy()
     out["model"] = out["model"].map(normalize_model_name)
     out = out.rename(columns=rename_cols)
     return out
+
+
+def build_pressure_mae_from_trajectory_summaries(
+    pressures_dir: Path,
+) -> pd.DataFrame | None:
+    """Aggregate evaluator-produced trajectory mean errors into model MAE."""
+    rows: list[pd.DataFrame] = []
+    for summary_file in sorted(
+        pressures_dir.rglob(f"*{TRAJECTORY_SUMMARY_SUFFIX}")
+    ):
+        summary = pd.read_csv(summary_file)
+        if "absolute_mean_error_GPa" not in summary.columns:
+            continue
+
+        model = normalize_model_name(
+            summary_file.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX)
+        )
+        rows.append(
+            pd.DataFrame(
+                {
+                    "model": model,
+                    "error_GPa": pd.to_numeric(
+                        summary["absolute_mean_error_GPa"], errors="coerce"
+                    ),
+                }
+            )
+        )
+
+    if not rows:
+        return None
+
+    result = pd.concat(rows, ignore_index=True).dropna(subset=["error_GPa"])
+    if result.empty:
+        return None
+    return (
+        result.groupby("model", as_index=False)["error_GPa"]
+        .mean()
+        .sort_values("error_GPa")
+        .reset_index(drop=True)
+    )
+
+
+def ensure_pressure_comparison_file(
+    pressures_dir: Path,
+    pressure_comparison_file: Path | None,
+) -> Path | None:
+    """Create the model pressure-MAE CSV from evaluator summaries when needed."""
+    if (
+        pressure_comparison_file is not None
+        and load_pressure_mae_columns(pressure_comparison_file) is not None
+    ):
+        return pressure_comparison_file
+
+    comparison = build_pressure_mae_from_trajectory_summaries(pressures_dir)
+    if comparison is None:
+        return pressure_comparison_file
+
+    destination = pressure_comparison_file or (
+        pressures_dir / "model_mean_pressure_comparison.csv"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    comparison.to_csv(destination, index=False)
+    print(f"Generated pressure MAE comparison from trajectory summaries: {destination}")
+    return destination
 
 
 def write_metric_outputs(
@@ -406,6 +475,10 @@ def compute_pressure_metric(
         bins=bins,
     )
 
+    pressure_comparison_file = ensure_pressure_comparison_file(
+        pressures_dir, pressure_comparison_file
+    )
+
     _, model_mean_df, _ = write_metric_outputs(
         pair_df=pair_df,
         pair_output_file=pair_output_file,
@@ -501,10 +574,12 @@ def main() -> None:
     parser.add_argument(
         "--pressure-comparison-file",
         type=Path,
-        default=DEFAULT_PRESSURE_COMPARISON_FILE,
+        default=None,
         help=(
-            "Optional pressure MAE CSV to merge into the model-level output for compatibility. "
-            "The histogram score does not use these MAE values."
+            "Optional existing pressure MAE CSV to merge into the model-level output. "
+            "If omitted or unusable, it is generated as model_mean_pressure_comparison.csv "
+            "under --pressures-dir from the evaluator trajectory summaries. The histogram "
+            "score does not use these MAE values."
         ),
     )
 
