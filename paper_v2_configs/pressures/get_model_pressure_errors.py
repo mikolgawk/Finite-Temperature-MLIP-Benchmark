@@ -176,6 +176,7 @@ def build_pair_rows(
     reference_file: Path | None,
     model_file_suffix: str,
     bins: int,
+    models: set[str] | None = None,
 ) -> pd.DataFrame:
     fallback_ref_df = None
     if reference_file is not None and reference_file.is_file():
@@ -187,9 +188,22 @@ def build_pair_rows(
 
     model_files = sorted(pressures_dir.rglob(f"*{model_file_suffix}"))
     model_files = [p for p in model_files if not p.name.startswith("reference_")]
+    if models is not None:
+        normalized_models = {normalize_model_name(model) for model in models}
+        model_files = [
+            path
+            for path in model_files
+            if parse_model_name(path, model_file_suffix) in normalized_models
+        ]
     if not model_files:
+        requested = (
+            f" for requested model(s): {', '.join(sorted(models))}"
+            if models
+            else ""
+        )
         raise FileNotFoundError(
-            f"No model per-frame files found in {pressures_dir} matching *{model_file_suffix}"
+            f"No model per-frame files found in {pressures_dir} matching "
+            f"*{model_file_suffix}{requested}"
         )
 
     excluded_models_lower = {m.lower() for m in EXCLUDED_MODELS}
@@ -306,8 +320,14 @@ def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataF
 
 def build_pressure_mae_from_trajectory_summaries(
     pressures_dir: Path,
+    models: set[str] | None = None,
 ) -> pd.DataFrame | None:
     """Aggregate evaluator-produced trajectory mean errors into model MAE."""
+    normalized_models = (
+        {normalize_model_name(model) for model in models}
+        if models is not None
+        else None
+    )
     rows: list[pd.DataFrame] = []
     for summary_file in sorted(
         pressures_dir.rglob(f"*{TRAJECTORY_SUMMARY_SUFFIX}")
@@ -319,6 +339,8 @@ def build_pressure_mae_from_trajectory_summaries(
         model = normalize_model_name(
             summary_file.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX)
         )
+        if normalized_models is not None and model not in normalized_models:
+            continue
         rows.append(
             pd.DataFrame(
                 {
@@ -347,6 +369,7 @@ def build_pressure_mae_from_trajectory_summaries(
 def ensure_pressure_comparison_file(
     pressures_dir: Path,
     pressure_comparison_file: Path | None,
+    models: set[str] | None = None,
 ) -> Path | None:
     """Create the model pressure-MAE CSV from evaluator summaries when needed."""
     if (
@@ -355,7 +378,9 @@ def ensure_pressure_comparison_file(
     ):
         return pressure_comparison_file
 
-    comparison = build_pressure_mae_from_trajectory_summaries(pressures_dir)
+    comparison = build_pressure_mae_from_trajectory_summaries(
+        pressures_dir, models=models
+    )
     if comparison is None:
         return pressure_comparison_file
 
@@ -463,6 +488,7 @@ def compute_pressure_metric(
     model_mean_output_file: Path,
     model_system_type_mean_output_file: Path,
     pressure_comparison_file: Path | None,
+    models: set[str] | None = None,
 ) -> pd.DataFrame:
     if bins < 2:
         raise ValueError("--bins must be >= 2")
@@ -473,10 +499,11 @@ def compute_pressure_metric(
         reference_file=reference_file,
         model_file_suffix=model_file_suffix,
         bins=bins,
+        models=models,
     )
 
     pressure_comparison_file = ensure_pressure_comparison_file(
-        pressures_dir, pressure_comparison_file
+        pressures_dir, pressure_comparison_file, models=models
     )
 
     _, model_mean_df, _ = write_metric_outputs(
@@ -534,6 +561,12 @@ def main() -> None:
         "--model-file-suffix",
         default="_same-simulation-length_pressure_per_frame.csv",
         help="Suffix used to identify model per-frame pressure CSV files.",
+    )
+    parser.add_argument(
+        "--model",
+        action="append",
+        dest="models",
+        help="process only this model (repeatable; default: all discovered models)",
     )
     parser.add_argument(
         "--bins",
@@ -598,6 +631,7 @@ def main() -> None:
         pressure_comparison_file=Path(args.pressure_comparison_file).resolve()
         if args.pressure_comparison_file
         else None,
+        models=set(args.models) if args.models else None,
     )
 
 

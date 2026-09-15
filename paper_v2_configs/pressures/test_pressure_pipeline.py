@@ -146,6 +146,16 @@ class PressurePipelineTests(unittest.TestCase):
         self.assertEqual(set(pairs["mode"]), {"md_eager", "md_accelerated"})
         self.assertTrue(pairs.reference_file.str.contains("/references/test.csv").all())
 
+        filtered_pairs = build_pair_rows(
+            results, None, pipeline.SUFFIX, 8, models={"TEST"}
+        )
+        self.assertEqual(len(filtered_pairs), 2)
+        self.assertEqual(set(filtered_pairs.mlip_model), {"test"})
+        with self.assertRaisesRegex(FileNotFoundError, "missing-model"):
+            build_pair_rows(
+                results, None, pipeline.SUFFIX, 8, models={"missing-model"}
+            )
+
         _, model_means, _ = write_metric_outputs(
             pairs,
             self.root / "pairs.csv",

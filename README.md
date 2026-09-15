@@ -46,6 +46,26 @@ Then generate all four metric sets with the `uv` script:
 uv run --script paper_v2_configs/generate_metrics.py
 ```
 
+To generate all four metric sets for only one model, pass its exact model name
+(the part after `nvt_` in its trajectory filenames):
+
+```bash
+uv run --script paper_v2_configs/generate_metrics.py --model mace-mp-0
+```
+
+`--model` is repeatable and can be combined with the repeatable `--metric`
+option, for example:
+
+```bash
+uv run --script paper_v2_configs/generate_metrics.py \
+  --model mace-mp-0 \
+  --metric rdf \
+  --metric vdos
+```
+
+Filtered runs use the standard output paths, so their aggregate summary CSVs
+contain only the selected model(s).
+
 Once the metric CSV files are available, each analysis directory provides a
 `plot_all.py` entry point that creates every plot supported by that directory:
 

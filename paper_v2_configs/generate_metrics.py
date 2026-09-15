@@ -16,6 +16,10 @@ Run from anywhere in the repository with::
 
     uv run --script paper_v2_configs/generate_metrics.py
 
+To generate metrics for only selected models, repeat ``--model`` as needed::
+
+    uv run --script paper_v2_configs/generate_metrics.py --model MODEL_NAME
+
 The model-specific energy/force and pressure evaluations must already have
 produced their per-model CSV files. The RDF and VDOS stages consume the MD
 trajectories under ``paper_v2_configs/data``.
@@ -43,12 +47,14 @@ class MetricStage:
     working_directory: Path
 
 
-def metric_stages() -> tuple[MetricStage, ...]:
+def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
     """Return the metric stages in the order required by the Pareto plots."""
     energy_force_dir = SCRIPT_DIR / "e_f_rmses"
     pressure_dir = SCRIPT_DIR / "pressures"
     rdf_dir = SCRIPT_DIR / "rdfs"
     vdos_dir = SCRIPT_DIR / "vdos"
+
+    model_args = tuple(arg for model in models for arg in ("--model", model))
 
     return (
         MetricStage(
@@ -58,6 +64,7 @@ def metric_stages() -> tuple[MetricStage, ...]:
                 sys.executable,
                 "-u",
                 str(energy_force_dir / "compute_mean_rmses_by_system_type.py"),
+                *model_args,
             ),
             working_directory=energy_force_dir,
         ),
@@ -68,6 +75,7 @@ def metric_stages() -> tuple[MetricStage, ...]:
                 sys.executable,
                 "-u",
                 str(pressure_dir / "get_model_pressure_errors.py"),
+                *model_args,
             ),
             working_directory=pressure_dir,
         ),
@@ -79,6 +87,7 @@ def metric_stages() -> tuple[MetricStage, ...]:
                 "-u",
                 str(rdf_dir / "run_rdf_pipeline.py"),
                 "--compute-only",
+                *model_args,
             ),
             working_directory=rdf_dir,
         ),
@@ -90,6 +99,7 @@ def metric_stages() -> tuple[MetricStage, ...]:
                 "-u",
                 str(vdos_dir / "run_vdos_pipeline.py"),
                 "--compute-only",
+                *model_args,
             ),
             working_directory=vdos_dir,
         ),
@@ -105,6 +115,12 @@ def parse_args() -> argparse.Namespace:
         choices=stage_names,
         dest="metrics",
         help="metric to generate (repeatable; default: all four)",
+    )
+    parser.add_argument(
+        "--model",
+        action="append",
+        dest="models",
+        help="process only this model (repeatable; default: all discovered models)",
     )
     parser.add_argument(
         "--dry-run",
@@ -134,7 +150,7 @@ def main() -> None:
     selected = set(args.metrics) if args.metrics else None
     stages = [
         stage
-        for stage in metric_stages()
+        for stage in metric_stages(tuple(dict.fromkeys(args.models or ())))
         if selected is None or stage.name in selected
     ]
 

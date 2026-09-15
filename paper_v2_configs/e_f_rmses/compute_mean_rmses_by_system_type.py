@@ -1,5 +1,6 @@
-from pathlib import Path
+import argparse
 import re
+from pathlib import Path
 
 import pandas as pd
 
@@ -74,10 +75,23 @@ def canonical_system_key(system_id: str) -> str:
     return system_name
 
 
-def load_all_data(data_dir: Path) -> pd.DataFrame:
+def load_all_data(data_dir: Path, models: set[str] | None = None) -> pd.DataFrame:
     csv_files = list_rmse_csv_files(data_dir)
+    if models is not None:
+        csv_files = [
+            csv_file
+            for csv_file in csv_files
+            if extract_model_name(csv_file) in models
+        ]
     if not csv_files:
-        raise FileNotFoundError(f'No rmse-results-all_*.csv files found in {data_dir}')
+        requested = (
+            f" for requested model(s): {', '.join(sorted(models))}"
+            if models
+            else ''
+        )
+        raise FileNotFoundError(
+            f'No rmse-results-all_*.csv files found in {data_dir}{requested}'
+        )
 
     frames = []
     for csv_file in csv_files:
@@ -96,9 +110,24 @@ def load_all_data(data_dir: Path) -> pd.DataFrame:
     return all_data
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description='Aggregate energy and force RMSEs by system type.'
+    )
+    parser.add_argument(
+        '--model',
+        action='append',
+        dest='models',
+        help='process only this model (repeatable; default: all discovered models)',
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    all_data = load_all_data(DATA_DIR)
+    selected_models = set(args.models) if args.models else None
+    all_data = load_all_data(DATA_DIR, selected_models)
 
     metrics = ['energy_rmse', 'force_rmse']
 
