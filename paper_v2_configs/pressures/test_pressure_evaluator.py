@@ -29,6 +29,16 @@ class ConstantStress(Calculator):
 
 
 class PressureEvaluatorTests(unittest.TestCase):
+    def test_frame_count_respects_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trajectory = Path(temporary) / "trajectory.h5"
+            with h5py.File(trajectory, "w") as handle:
+                handle.create_dataset("data/positions", data=np.zeros((7, 1, 3)))
+
+            self.assertEqual(evaluator._frame_count(trajectory, None), 7)
+            self.assertEqual(evaluator._frame_count(trajectory, 3), 3)
+            self.assertEqual(evaluator._frame_count(trajectory, 20), 7)
+
     def test_trajectory_model_tags_are_canonicalized_for_lookup(self):
         self.assertEqual(evaluator._trajectory_model("orb-v3-force-only-eager"), "orb-v3")
         self.assertEqual(evaluator._trajectory_model("orb-v3-stress-eager"), "orb-v3")

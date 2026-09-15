@@ -132,6 +132,15 @@ def _frames(path: Path, meta: dict[str, object], limit: int | None):
             yield index, float(steps[index]), float(steps[index]) * timestep, atoms
 
 
+def _frame_count(path: Path, limit: int | None) -> int:
+    """Return the number of saved trajectory frames that will be evaluated."""
+    import h5py
+
+    with h5py.File(path, "r") as handle:
+        count = len(handle["data/positions"])
+    return min(count, limit) if limit is not None else count
+
+
 def _reference_pressures(path: Path, meta: dict[str, object]):
     from pressure_pipeline import read_stress_frames
 
@@ -161,8 +170,28 @@ def _run(model_name: str, predict, engine: str) -> None:
         print(f"{output} exists; use --force to recompute.")
         return
 
+    progress_enabled = not args.no_progress
+    if progress_enabled:
+        try:
+            from tqdm.auto import tqdm
+        except ImportError:
+            print("[WARN] tqdm is not installed; continuing without progress bars")
+            progress_enabled = False
+
+    if progress_enabled:
+        path_iterator = tqdm(
+            paths,
+            desc=f"{trajectory_model}: trajectories",
+            unit="trajectory",
+            dynamic_ncols=True,
+        )
+        progress_print = tqdm.write
+    else:
+        path_iterator = paths
+        progress_print = print
+
     full_rows, rows, reference_rows, summaries, failures = [], [], [], [], []
-    for path in paths:
+    for path in path_iterator:
         system = path.parent.name
         if system.startswith("Pt111w24H2O_"):
             continue
@@ -172,13 +201,21 @@ def _run(model_name: str, predict, engine: str) -> None:
                 "stress_print_stride" in meta
                 and meta["stress_print_stride"] is None
             ):
-                print(f"SKIPPED {system}: reference trajectory has no stress")
+                progress_print(f"SKIPPED {system}: reference trajectory has no stress")
                 continue
             reference_path = args.ref_dir / system / "traj.extxyz"
             reference = _reference_pressures(reference_path, meta)
             model_rows = []
             frame_iterator = _frames(path, meta, args.max_frames)
-            total = args.max_frames
+            if progress_enabled:
+                frame_iterator = tqdm(
+                    frame_iterator,
+                    total=_frame_count(path, args.max_frames),
+                    desc=system,
+                    unit="frame",
+                    leave=False,
+                    dynamic_ncols=True,
+                )
             calculator_state = None
             for index, step, time_fs, atoms in frame_iterator:
                 try:
@@ -234,10 +271,12 @@ def _run(model_name: str, predict, engine: str) -> None:
                 "signed_mean_error_GPa": float(np.mean(values) - np.mean(reference_values)),
                 "absolute_mean_error_GPa": float(abs(np.mean(values) - np.mean(reference_values))),
             })
-            print(f"{system}: evaluated {len(model)} frames; matched {len(matched)}")
+            progress_print(
+                f"{system}: evaluated {len(model)} frames; matched {len(matched)}"
+            )
         except Exception as exc:
             failures.append({"file": str(path), "error": str(exc)})
-            print(f"FAILED {path}: {exc}")
+            progress_print(f"FAILED {path}: {exc}")
             if args.debug:
                 import traceback
                 traceback.print_exc()
