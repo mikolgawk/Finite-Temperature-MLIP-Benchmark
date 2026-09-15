@@ -50,7 +50,7 @@ Next, generate the timing and Pareto plots:
 
 ```bash
 python paper_v2_configs/pareto_plots/plot-model-timings.py
-python paper_v2_configs/pareto_plots/plot-pareto-combined-vdos-rdf-pressure-average-similarity-same-simulation-length.py
+python paper_v2_configs/pareto_plots/figure_7.py
 ```
 
 ## Evaluating a new potential
