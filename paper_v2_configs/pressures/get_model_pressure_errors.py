@@ -382,6 +382,7 @@ def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataF
 def build_pressure_mae_from_trajectory_summaries(
     pressures_dir: Path,
     models: set[str] | None = None,
+    excluded_system_types: set[str] | None = None,
 ) -> pd.DataFrame | None:
     """Aggregate evaluator-produced trajectory mean errors into model MAE."""
     normalized_models = (
@@ -396,6 +397,14 @@ def build_pressure_mae_from_trajectory_summaries(
         summary = pd.read_csv(summary_file)
         if "absolute_mean_error_GPa" not in summary.columns:
             continue
+        if excluded_system_types and "system" in summary:
+            excluded = {value.strip().lower() for value in excluded_system_types}
+            summary_types = summary["system"].map(infer_system_type)
+            summary = summary[
+                ~summary_types.fillna("").str.lower().isin(excluded)
+            ]
+            if summary.empty:
+                continue
 
         model = normalize_model_name(
             summary_file.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX)
@@ -434,6 +443,7 @@ def ensure_pressure_comparison_file(
     pressures_dir: Path,
     pressure_comparison_file: Path | None,
     models: set[str] | None = None,
+    excluded_system_types: set[str] | None = None,
 ) -> Path | None:
     """Create the model pressure-MAE CSV from evaluator summaries when needed."""
     if (
@@ -443,7 +453,7 @@ def ensure_pressure_comparison_file(
         return pressure_comparison_file
 
     comparison = build_pressure_mae_from_trajectory_summaries(
-        pressures_dir, models=models
+        pressures_dir, models=models, excluded_system_types=excluded_system_types
     )
     if comparison is None:
         return pressure_comparison_file
@@ -553,6 +563,7 @@ def compute_pressure_metric(
     model_system_type_mean_output_file: Path,
     pressure_comparison_file: Path | None,
     models: set[str] | None = None,
+    excluded_system_types: set[str] | None = None,
 ) -> pd.DataFrame:
     if bins < 2:
         raise ValueError("--bins must be >= 2")
@@ -565,9 +576,17 @@ def compute_pressure_metric(
         bins=bins,
         models=models,
     )
+    if excluded_system_types:
+        excluded = {value.strip().lower() for value in excluded_system_types}
+        pair_df = pair_df[
+            ~pair_df["system_type"].fillna("").str.lower().isin(excluded)
+        ].copy()
+        if pair_df.empty:
+            raise RuntimeError("No pressure rows remain after system-type exclusions.")
 
     pressure_comparison_file = ensure_pressure_comparison_file(
-        pressures_dir, pressure_comparison_file, models=models
+        pressures_dir, pressure_comparison_file, models=models,
+        excluded_system_types=excluded_system_types,
     )
 
     _, model_mean_df, _ = write_metric_outputs(
@@ -633,6 +652,12 @@ def main() -> None:
         help="process only this model (repeatable; default: all discovered models)",
     )
     parser.add_argument(
+        "--exclude-system-type",
+        action="append",
+        dest="excluded_system_types",
+        help="exclude this system type from aggregation (repeatable)",
+    )
+    parser.add_argument(
         "--bins",
         type=int,
         default=80,
@@ -696,6 +721,7 @@ def main() -> None:
         if args.pressure_comparison_file
         else None,
         models=set(args.models) if args.models else None,
+        excluded_system_types=set(args.excluded_system_types or ()),
     )
 
 

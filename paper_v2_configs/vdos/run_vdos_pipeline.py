@@ -62,6 +62,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--system", action="append", dest="systems", help="system filter (repeatable)")
     parser.add_argument("--model", action="append", dest="models", help="model filter (repeatable)")
+    parser.add_argument("--exclude-system-type", action="append", dest="excluded_system_types", help="exclude this system type from computation (repeatable)")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="trajectory data root")
     parser.add_argument("--metadata", type=Path, help="reference md_metadata.json")
     parser.add_argument("--results-dir", type=Path, default=SCRIPT_DIR / "results")
@@ -124,6 +125,8 @@ def computation_command(args: argparse.Namespace, sources: list[str]) -> list[st
         command.extend(("--system", system))
     for model in args.models or ():
         command.extend(("--model", model))
+    for system_type in args.excluded_system_types or ():
+        command.extend(("--exclude-system-type", system_type))
     if args.metadata is not None:
         command.extend(("--metadata", str(args.metadata)))
     if args.e_min is not None:

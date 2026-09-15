@@ -310,7 +310,7 @@ def spectrum_for_samples(
     return spectrum
 
 
-def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path) -> None:
+def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system_types: set[str] | None = None) -> None:
     pair_df = pair_df.sort_values(["model", "system"]).reset_index(drop=True)
     pair_df.to_csv(results_dir / PAIR_OUTPUT, index=False)
 
@@ -351,7 +351,11 @@ def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path) -> None:
         columns="system_type",
         values="vdos_error_percent",
         aggfunc="mean",
-    ).reindex(columns=SYSTEM_TYPES)
+    )
+    included_types = [
+        value for value in SYSTEM_TYPES if value.lower() not in (excluded_system_types or set())
+    ]
+    by_type = by_type.reindex(columns=included_types)
     by_type.index.name = "model"
     by_type.to_csv(results_dir / BY_TYPE_OUTPUT)
 
@@ -369,6 +373,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--system", action="append", dest="systems", help="system filter (repeatable)")
     parser.add_argument("--model", action="append", dest="models", help="model filter (repeatable)")
+    parser.add_argument("--exclude-system-type", action="append", dest="excluded_system_types", help="exclude this system type from computation (repeatable)")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="trajectory data root")
     parser.add_argument("--metadata", type=Path, help="reference md_metadata.json")
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR, help="output root")
@@ -408,6 +413,19 @@ def process_source(
 
     selected_systems = set(args.systems) if args.systems else None
     selected_models = set(args.models) if args.models else None
+    excluded_system_types = {
+        value.strip().lower() for value in args.excluded_system_types or ()
+    }
+    excluded_systems = {
+        system
+        for system_type, systems in SYSTEM_TYPES.items()
+        if system_type.lower() in excluded_system_types
+        for system in systems
+    }
+    trajectories = {
+        system: models for system, models in trajectories.items()
+        if system not in excluded_systems
+    }
     if selected_systems is not None:
         trajectories = {
             system: models
@@ -549,7 +567,7 @@ def process_source(
     if not rows:
         print(f"[WARN] No valid VDOS scores for {source}")
         return
-    aggregate_and_save(pd.DataFrame(rows), results_dir)
+    aggregate_and_save(pd.DataFrame(rows), results_dir, excluded_system_types)
     print(f"\nSaved {len(rows)} pair scores to {results_dir / PAIR_OUTPUT}")
     print(f"Saved model means to {results_dir / MODEL_OUTPUT}")
 

@@ -90,6 +90,12 @@ def parse_args() -> argparse.Namespace:
         help="process only this model (repeatable)",
     )
     parser.add_argument(
+        "--exclude-system-type",
+        action="append",
+        dest="excluded_system_types",
+        help="exclude this system type from computation (repeatable)",
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=SCRIPT_DIR / "results",
@@ -171,6 +177,8 @@ def computation_command(args: argparse.Namespace, sources: list[str]) -> list[st
         command.extend(("--system", system))
     for model in args.models or ():
         command.extend(("--model", model))
+    for system_type in args.excluded_system_types or ():
+        command.extend(("--exclude-system-type", system_type))
     return command
 
 
