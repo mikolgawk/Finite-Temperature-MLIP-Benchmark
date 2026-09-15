@@ -1,6 +1,7 @@
 # /// script
 # requires-python = "==3.12.*"
 # dependencies = [
+#   "tqdm>=4.66",
 #   "pandas>=2.2",
 #   "h5py>=3.11",
 #   "torch-sim-atomistic[nequip]==0.6.1",
