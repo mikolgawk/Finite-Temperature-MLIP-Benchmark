@@ -69,7 +69,11 @@ CALCULATOR_DISPLAY_NAMES = {
 
 
 def normalize_model_name(name: str) -> str:
-    return str(name).strip().lower()
+    normalized = str(name).strip().lower()
+    normalized = normalized.replace("-force-only", "").replace("-stress", "")
+    if normalized.endswith("-eager"):
+        normalized = normalized.removesuffix("-eager")
+    return {"nequip-oam-l": "nequip"}.get(normalized, normalized)
 
 
 def display_name(model: str) -> str:
@@ -201,7 +205,22 @@ def _build_system_aliases(system: str) -> list[str]:
 
 @lru_cache(maxsize=None)
 def resolve_saved_rdf_path(system: str, model_name: str | None, rdf_dir: str) -> Path | None:
-    base_dir = Path(rdf_dir) / "reference" if model_name is None else Path(rdf_dir) / "mlip" / model_name
+    if model_name is None:
+        base_dir = Path(rdf_dir) / "reference"
+    else:
+        mlip_dir = Path(rdf_dir) / "mlip"
+        base_dir = mlip_dir / model_name
+        if not base_dir.is_dir() and mlip_dir.is_dir():
+            canonical_name = normalize_model_name(model_name)
+            base_dir = next(
+                (
+                    candidate
+                    for candidate in sorted(mlip_dir.iterdir())
+                    if candidate.is_dir()
+                    and normalize_model_name(candidate.name) == canonical_name
+                ),
+                base_dir,
+            )
     if not base_dir.is_dir():
         return None
 
@@ -285,7 +304,9 @@ def find_model_error_means(system_list, csv_dir: Path):
             continue
 
         subset = df[df["System"].isin(system_list)]
-        model_means[model] = np.nan if subset.empty else subset["RDF_Error"].mean()
+        model_means[normalize_model_name(model)] = (
+            np.nan if subset.empty else subset["RDF_Error"].mean()
+        )
     return model_means
 
 
@@ -303,7 +324,9 @@ def find_model_system_errors(system_name: str, csv_dir: Path):
             continue
 
         subset = df[df["System"] == system_name]
-        model_errors[model] = np.nan if subset.empty else subset["RDF_Error"].mean()
+        model_errors[normalize_model_name(model)] = (
+            np.nan if subset.empty else subset["RDF_Error"].mean()
+        )
     return model_errors
 
 
@@ -376,7 +399,7 @@ def format_model_label(model_name: str, system_errors: dict[str, float]) -> str:
 def tier_mean_rdf_error(tier_models, model_means: dict[str, float]) -> float:
     errors = []
     for model in tier_models:
-        rdf_error = model_means.get(model, np.nan)
+        rdf_error = model_means.get(normalize_model_name(model), np.nan)
         if np.isfinite(rdf_error):
             errors.append(float(rdf_error))
     if not errors:
@@ -433,7 +456,15 @@ def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
 
     models = df["Calculator"].to_list()
     model_norms = df["calculator_norm"].to_list()
-    x_pos = np.arange(len(models))
+    next_other_position = len(tier_order_norm)
+    x_positions = []
+    for model_norm in model_norms:
+        if model_norm in tier_order_norm:
+            x_positions.append(tier_order_norm.index(model_norm))
+        else:
+            x_positions.append(next_other_position)
+            next_other_position += 1
+    x_pos = np.asarray(x_positions, dtype=float)
     tier_colors = {
         "tier_1": palette[2],
         "tier_2": palette[1],
@@ -462,10 +493,16 @@ def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
     ax.set_xticklabels([display_name(model) for model in models], rotation=45, ha="right", fontsize=FONT_SIZE)
     ax.grid(axis="y")
 
-    t1_med = np.nanmedian(df[df["calculator_norm"].isin(TIER_1_NORM)]["RDF Error [%]"]) if df[df["calculator_norm"].isin(TIER_1_NORM)].shape[0] else np.nan
-    t2_med = np.nanmedian(df[df["calculator_norm"].isin(TIER_2_NORM)]["RDF Error [%]"]) if df[df["calculator_norm"].isin(TIER_2_NORM)].shape[0] else np.nan
-    t3_med = np.nanmedian(df[df["calculator_norm"].isin(TIER_3_NORM)]["RDF Error [%]"]) if df[df["calculator_norm"].isin(TIER_3_NORM)].shape[0] else np.nan
-    t4_med = np.nanmedian(df[df["calculator_norm"].isin(TIER_4_NORM)]["RDF Error [%]"]) if df[df["calculator_norm"].isin(TIER_4_NORM)].shape[0] else np.nan
+    def tier_median(tier_models: list[str]) -> float:
+        values = df.loc[
+            df["calculator_norm"].isin(tier_models), "RDF Error [%]"
+        ]
+        return float(np.nanmedian(values)) if not values.empty else np.nan
+
+    t1_med = tier_median(TIER_1_NORM)
+    t2_med = tier_median(TIER_2_NORM)
+    t3_med = tier_median(TIER_3_NORM)
+    t4_med = tier_median(TIER_4_NORM)
 
     print(f"Tier 1 median RDF error: {t1_med:.6f}%" if np.isfinite(t1_med) else "Tier 1 median RDF error: N/A")
     print(f"Tier 2 median RDF error: {t2_med:.2f}%" if np.isfinite(t2_med) else "Tier 2 median RDF error: N/A")
@@ -480,86 +517,68 @@ def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
         y_max = max(1.0, float(max_val))
         ax.set_ylim(0, y_max * 1.25)
 
-    tier1_end = len(TIER_1) - 0.5
-    tier2_end = len(TIER_1) + len(TIER_2) - 0.5
-    tier3_end = len(TIER_1) + len(TIER_2) + len(TIER_3) - 0.5
-    ax.axvline(x=tier1_end, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-    ax.axvline(x=tier2_end, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-    ax.axvline(x=tier3_end, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-
-    if np.isfinite(finite_vals).any():
-        ax.text(tier_center(0, len(TIER_1) - 1), tier_label_y(y_max), "Tier 1", ha="center", fontsize=FONT_SIZE, color=tier_colors["tier_1"])
-        ax.text(
-            tier_center(len(TIER_1), len(TIER_1) + len(TIER_2) - 1),
-            tier_label_y(y_max),
+    tier_ranges = [
+        ("Tier 1", tier_colors["tier_1"], t1_med, -0.5, len(TIER_1) - 0.5),
+        (
             "Tier 2",
-            ha="center",
-            fontsize=FONT_SIZE,
-            color=tier_colors["tier_2"],
-        )
-        ax.text(
-            tier_center(len(TIER_1) + len(TIER_2), len(TIER_1) + len(TIER_2) + len(TIER_3) - 1),
-            tier_label_y(y_max),
-            "Tier 3",
-            ha="center",
-            fontsize=FONT_SIZE,
-            color=tier_colors["tier_3"],
-        )
-        ax.text(
-            tier_center(
-                len(TIER_1) + len(TIER_2) + len(TIER_3),
-                len(TIER_1) + len(TIER_2) + len(TIER_3) + len(TIER_4) - 1,
-            ),
-            tier_label_y(y_max),
-            "Tier 4",
-            ha="center",
-            fontsize=FONT_SIZE,
-            color=tier_colors["tier_4"],
-        )
-
-    if np.isfinite(t1_med):
-        ax.hlines(t1_med, xmin=-0.5, xmax=tier1_end, colors=tier_colors["tier_1"], linestyles="--", linewidth=2, alpha=0.9)
-    if np.isfinite(t2_med):
-        ax.hlines(t2_med, xmin=tier1_end, xmax=tier2_end, colors=tier_colors["tier_2"], linestyles="--", linewidth=2, alpha=0.9)
-    if np.isfinite(t3_med):
-        ax.hlines(t3_med, xmin=tier2_end, xmax=tier3_end, colors=tier_colors["tier_3"], linestyles="--", linewidth=2, alpha=0.9)
-    if np.isfinite(t4_med):
-        ax.hlines(t4_med, xmin=tier3_end, xmax=len(models) - 0.5, colors=tier_colors["tier_4"], linestyles="--", linewidth=2, alpha=0.9)
-
-    if np.isfinite(t1_med):
-        annotate_median(
-            ax,
-            tier_center(0, len(TIER_1) - 1),
-            t1_med,
-            median_value_label_y(y_max),
-            color=tier_colors["tier_1"],
-        )
-    if np.isfinite(t2_med):
-        annotate_median(
-            ax,
-            tier_center(len(TIER_1), len(TIER_1) + len(TIER_2) - 1),
+            tier_colors["tier_2"],
             t2_med,
-            median_value_label_y(y_max),
-            color=tier_colors["tier_2"],
-        )
-    if np.isfinite(t3_med):
-        annotate_median(
-            ax,
-            tier_center(len(TIER_1) + len(TIER_2), len(TIER_1) + len(TIER_2) + len(TIER_3) - 1),
+            len(TIER_1) - 0.5,
+            len(TIER_1) + len(TIER_2) - 0.5,
+        ),
+        (
+            "Tier 3",
+            tier_colors["tier_3"],
             t3_med,
-            median_value_label_y(y_max),
-            color=tier_colors["tier_3"],
+            len(TIER_1) + len(TIER_2) - 0.5,
+            len(TIER_1) + len(TIER_2) + len(TIER_3) - 0.5,
+        ),
+        (
+            "Tier 4",
+            tier_colors["tier_4"],
+            t4_med,
+            len(TIER_1) + len(TIER_2) + len(TIER_3) - 0.5,
+            len(tier_order_norm) - 0.5,
+        ),
+    ]
+    ax.set_xlim(-0.5, max(len(tier_order_norm) - 0.5, next_other_position - 0.5))
+
+    for _, _, _, _, boundary in tier_ranges[:-1]:
+        ax.axvline(
+            x=boundary,
+            color="black",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.7,
         )
-    if np.isfinite(t4_med):
+
+    for label, color, median, start, end in tier_ranges:
+        center = (start + end) / 2
+        ax.text(
+            center,
+            tier_label_y(y_max),
+            label,
+            ha="center",
+            fontsize=FONT_SIZE,
+            color=color,
+        )
+        if not np.isfinite(median):
+            continue
+        ax.hlines(
+            median,
+            xmin=start,
+            xmax=end,
+            colors=color,
+            linestyles="--",
+            linewidth=2,
+            alpha=0.9,
+        )
         annotate_median(
             ax,
-            tier_center(
-                len(TIER_1) + len(TIER_2) + len(TIER_3),
-                len(TIER_1) + len(TIER_2) + len(TIER_3) + len(TIER_4) - 1,
-            ),
-            t4_med,
+            center,
+            median,
             median_value_label_y(y_max),
-            color=tier_colors["tier_4"],
+            color=color,
         )
 
 
@@ -574,23 +593,20 @@ def plot_combined(
     overall_df = load_overall_scores(overall_rdf_file)
     tier_count = len(TIER_DEFS)
 
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * 3.55))
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * 4.45))
     outer_gs = gridspec.GridSpec(
-        4,
+        5,
         6,
         figure=fig,
         wspace=0.30,
         hspace=0.48,
-        height_ratios=[0.78, 0.22, 1.15, 1.15],
+        height_ratios=[0.78, 0.22, 1.15, 1.15, 1.15],
     )
-    panel_labels = ["(b)", "(c)", "(d)", "(e)", "(f)", "(g)"]
+    panel_labels = ["(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)"]
 
     top_row_spans = [(0, 2), (2, 4), (4, 6)]
-    # When only two RDF panels exist in row 2, center them with equal margins.
-    if len(SYSTEMS) == 5:
-        second_row_spans = [(1, 3), (3, 5)]
-    else:
-        second_row_spans = [(0, 2), (2, 4), (4, 6)]
+    second_row_spans = [(0, 2), (2, 4), (4, 6)]
+    third_row_spans = [(2, 4)]
 
     for idx, (system_type, system_list) in enumerate(SYSTEMS.items()):
         if idx < 3:
@@ -598,14 +614,19 @@ def plot_combined(
             panel_col_idx = idx
             panels_in_row = len(top_row_spans)
             start_col, end_col = top_row_spans[idx]
-        else:
+        elif idx < 6:
             panel_row_idx = 3
             panel_col_idx = idx - 3
             panels_in_row = len(second_row_spans)
+            start_col, end_col = second_row_spans[panel_col_idx]
+        else:
+            panel_row_idx = 4
+            panel_col_idx = idx - 6
+            panels_in_row = len(third_row_spans)
             if panel_col_idx >= panels_in_row:
                 warnings.warn(f"No subplot slot configured for {system_type}; skipping")
                 continue
-            start_col, end_col = second_row_spans[panel_col_idx]
+            start_col, end_col = third_row_spans[panel_col_idx]
 
         system = select_system_with_worst_mean_rdf_error(system_list, rdf_csv_dir, rdf_dir)
         system_display_name = format_system_name(system)
@@ -620,6 +641,7 @@ def plot_combined(
         def pick_best_worst(models_in_tier):
             scored_models = []
             for model in models_in_tier:
+                model = normalize_model_name(model)
                 rdf_error = system_errors.get(model, np.nan)
                 if np.isnan(rdf_error):
                     continue
@@ -722,7 +744,7 @@ def plot_combined(
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, bbox_inches="tight", pad_inches=0.02)
-    plt.show()
+    plt.close(fig)
     print(f"Saved combined RDF panel plot to {output_path}")
 
 
