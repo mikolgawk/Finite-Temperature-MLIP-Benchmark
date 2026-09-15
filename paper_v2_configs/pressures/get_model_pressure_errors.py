@@ -60,6 +60,17 @@ def normalize_model_name(name: str) -> str:
     return str(name).strip().lower()
 
 
+def canonical_pressure_model_name(name: str) -> str:
+    """Map an MD model name to the pressure evaluator's output model name."""
+    name = normalize_model_name(name)
+    name = name.replace("-force-only", "").replace("-stress", "")
+    if name.endswith("-eager"):
+        name = name.removesuffix("-eager")
+    if name == "nequip-oam-l":
+        return "nequip"
+    return name
+
+
 def pressure_column_name(columns: list[str]) -> str:
     cols = set(columns)
     if "pressure_GPa" in cols:
@@ -189,11 +200,16 @@ def build_pair_rows(
     model_files = sorted(pressures_dir.rglob(f"*{model_file_suffix}"))
     model_files = [p for p in model_files if not p.name.startswith("reference_")]
     if models is not None:
-        normalized_models = {normalize_model_name(model) for model in models}
+        normalized_models = {
+            canonical_pressure_model_name(model) for model in models
+        }
         model_files = [
             path
             for path in model_files
-            if parse_model_name(path, model_file_suffix) in normalized_models
+            if canonical_pressure_model_name(
+                parse_model_name(path, model_file_suffix)
+            )
+            in normalized_models
         ]
     if not model_files:
         requested = (
@@ -324,7 +340,7 @@ def build_pressure_mae_from_trajectory_summaries(
 ) -> pd.DataFrame | None:
     """Aggregate evaluator-produced trajectory mean errors into model MAE."""
     normalized_models = (
-        {normalize_model_name(model) for model in models}
+        {canonical_pressure_model_name(model) for model in models}
         if models is not None
         else None
     )
@@ -339,7 +355,10 @@ def build_pressure_mae_from_trajectory_summaries(
         model = normalize_model_name(
             summary_file.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX)
         )
-        if normalized_models is not None and model not in normalized_models:
+        if (
+            normalized_models is not None
+            and canonical_pressure_model_name(model) not in normalized_models
+        ):
             continue
         rows.append(
             pd.DataFrame(

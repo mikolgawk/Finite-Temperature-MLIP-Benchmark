@@ -151,6 +151,10 @@ class PressurePipelineTests(unittest.TestCase):
         )
         self.assertEqual(len(filtered_pairs), 2)
         self.assertEqual(set(filtered_pairs.mlip_model), {"test"})
+        alias_filtered_pairs = build_pair_rows(
+            results, None, pipeline.SUFFIX, 8, models={"test-force-only"}
+        )
+        self.assertEqual(len(alias_filtered_pairs), 2)
         with self.assertRaisesRegex(FileNotFoundError, "missing-model"):
             build_pair_rows(
                 results, None, pipeline.SUFFIX, 8, models={"missing-model"}
