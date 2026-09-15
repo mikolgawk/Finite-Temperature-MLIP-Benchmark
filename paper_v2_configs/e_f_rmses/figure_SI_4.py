@@ -50,7 +50,11 @@ CALCULATOR_RAW_NAMES = {display_name: raw_name for raw_name, display_name in CAL
 
 def normalize_calculator_name(name):
     text = str(name).strip()
-    return CALCULATOR_DISPLAY_NAMES.get(text.lower(), text)
+    key = text.lower().replace("-force-only", "").replace("-stress", "")
+    if key.endswith("-eager"):
+        key = key.removesuffix("-eager")
+    key = {"nequip-oam-l": "nequip"}.get(key, key)
+    return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 
 def is_molecular_crystal(system):
@@ -151,6 +155,19 @@ def get_tier_counts(models):
     t4_count = sum(model in tier_4 for model in models)
     return t1_count, t2_count, t3_count, t4_count
 
+
+def catalog_positions(models, catalog):
+    """Place available models at their positions in the complete tier catalog."""
+    next_other_position = len(catalog)
+    positions = []
+    for model in models:
+        if model in catalog:
+            positions.append(catalog.index(model))
+        else:
+            positions.append(next_other_position)
+            next_other_position += 1
+    return np.asarray(positions, dtype=float), next_other_position
+
 def annotate_median(ax, x_center, y_value, y_text, color, fmt="{:.3f}"):
     ax.annotate(
         fmt.format(y_value),
@@ -193,14 +210,22 @@ force_df = df.copy()
 energy_models = energy_df['calculator'].values
 force_models = force_df['calculator'].values
 
-energy_x_pos = np.arange(len(energy_models))
-force_x_pos = np.arange(len(force_models))
+energy_catalog = [model for model in tier_order if model != 'EquiformerV2']
+force_catalog = tier_order
+energy_x_pos, energy_axis_size = catalog_positions(energy_models, energy_catalog)
+force_x_pos, force_axis_size = catalog_positions(force_models, force_catalog)
 
 energy_colors = get_tier_colors(energy_models)
 force_colors = get_tier_colors(force_models)
 
-energy_t1_count, energy_t2_count, energy_t3_count, energy_t4_count = get_tier_counts(energy_models)
-force_t1_count, force_t2_count, force_t3_count, force_t4_count = get_tier_counts(force_models)
+energy_t1_count = len(tier_1)
+energy_t2_count = len(tier_2)
+energy_t3_count = len([model for model in tier_3 if model != 'EquiformerV2'])
+energy_t4_count = len(tier_4)
+force_t1_count = len(tier_1)
+force_t2_count = len(tier_2)
+force_t3_count = len(tier_3)
+force_t4_count = len(tier_4)
 
 # Plot 1: Energy RMSE
 axes[0].bar(energy_x_pos, energy_df['energy_rmse'], color=energy_colors, alpha=0.8, edgecolor='black', linewidth=0.5)
@@ -209,6 +234,7 @@ axes[0].set_ylabel('Energy RMSE [eV/atom]')
 # axes[0].set_title('Energy RMSE by Model (Grouped by Tier)', fontsize=13, fontweight='bold')
 axes[0].set_xticks(energy_x_pos)
 axes[0].set_xticklabels(energy_models, rotation=45, ha='right', fontsize=FONT_SIZE)
+axes[0].set_xlim(-0.5, energy_axis_size - 0.5)
 axes[0].grid(axis='y')
 energy_ymax = float(energy_df['energy_rmse'].max())
 axes[0].set_ylim(0, energy_ymax * 1.25)
@@ -234,7 +260,7 @@ t4_med_energy = t4_energy_values.median()
 axes[0].hlines(t1_med_energy, xmin=-0.5, xmax=energy_tier1_end, colors=tier_colors['tier_1'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
 axes[0].hlines(t2_med_energy, xmin=energy_tier1_end, xmax=energy_tier2_end, colors=tier_colors['tier_2'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
 axes[0].hlines(t3_med_energy, xmin=energy_tier2_end, xmax=energy_tier3_end, colors=tier_colors['tier_3'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
-axes[0].hlines(t4_med_energy, xmin=energy_tier3_end, xmax=len(energy_models)-0.5, colors=tier_colors['tier_4'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
+axes[0].hlines(t4_med_energy, xmin=energy_tier3_end, xmax=len(energy_catalog)-0.5, colors=tier_colors['tier_4'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
 
 annotate_median(
     axes[0],
@@ -264,7 +290,7 @@ annotate_median(
     axes[0],
     tier_center(
         energy_t1_count + energy_t2_count + energy_t3_count,
-        len(energy_models) - 1,
+        len(energy_catalog) - 1,
     ),
     t4_med_energy,
     median_value_label_y(energy_ymax),
@@ -278,7 +304,7 @@ axes[0].text(tier_center(energy_t1_count, energy_t1_count + energy_t2_count - 1)
              ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_2'])
 axes[0].text(tier_center(energy_t1_count + energy_t2_count, energy_t1_count + energy_t2_count + energy_t3_count - 1), tier_label_y(energy_ymax), 'Tier 3',
              ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_3'])
-axes[0].text(tier_center(energy_t1_count + energy_t2_count + energy_t3_count, len(energy_models) - 1), tier_label_y(energy_ymax), 'Tier 4',
+axes[0].text(tier_center(energy_t1_count + energy_t2_count + energy_t3_count, len(energy_catalog) - 1), tier_label_y(energy_ymax), 'Tier 4',
              ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_4'])
 
 # Plot 2: Force RMSE
@@ -288,6 +314,7 @@ axes[1].set_ylabel('Force RMSE [eV/Å]')
 # axes[1].set_title('Force RMSE by Model (Grouped by Tier)', fontsize=13, fontweight='bold')
 axes[1].set_xticks(force_x_pos)
 axes[1].set_xticklabels(force_models, rotation=45, ha='right', fontsize=FONT_SIZE)
+axes[1].set_xlim(-0.5, force_axis_size - 0.5)
 axes[1].grid(axis='y')
 force_ymax = float(force_df['force_rmse'].max())
 axes[1].set_ylim(0, force_ymax * 1.25)
@@ -313,7 +340,7 @@ t4_med_force = t4_force_values.median()
 axes[1].hlines(t1_med_force, xmin=-0.5, xmax=force_tier1_end, colors=tier_colors['tier_1'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
 axes[1].hlines(t2_med_force, xmin=force_tier1_end, xmax=force_tier2_end, colors=tier_colors['tier_2'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
 axes[1].hlines(t3_med_force, xmin=force_tier2_end, xmax=force_tier3_end, colors=tier_colors['tier_3'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
-axes[1].hlines(t4_med_force, xmin=force_tier3_end, xmax=len(force_models)-0.5, colors=tier_colors['tier_4'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
+axes[1].hlines(t4_med_force, xmin=force_tier3_end, xmax=len(force_catalog)-0.5, colors=tier_colors['tier_4'], linestyles='--', linewidth=2, alpha=0.9, zorder=5)
 
 annotate_median(
     axes[1],
@@ -343,7 +370,7 @@ annotate_median(
     axes[1],
     tier_center(
         force_t1_count + force_t2_count + force_t3_count,
-        len(force_models) - 1,
+        len(force_catalog) - 1,
     ),
     t4_med_force,
     median_value_label_y(force_ymax),
@@ -357,7 +384,7 @@ axes[1].text(tier_center(force_t1_count, force_t1_count + force_t2_count - 1), t
              ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_2'])
 axes[1].text(tier_center(force_t1_count + force_t2_count, force_t1_count + force_t2_count + force_t3_count - 1), tier_label_y(force_ymax), 'Tier 3',
              ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_3'])
-axes[1].text(tier_center(force_t1_count + force_t2_count + force_t3_count, len(force_models) - 1), tier_label_y(force_ymax), 'Tier 4',
+axes[1].text(tier_center(force_t1_count + force_t2_count + force_t3_count, len(force_catalog) - 1), tier_label_y(force_ymax), 'Tier 4',
              ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_4'])
 
 # Subplot labels
@@ -374,11 +401,21 @@ print(
 )
 print(f"Excluded {excluded_count} molecular-crystal rows before averaging")
 print(
-    f"Energy RMSE medians -> Tier 1: {t1_med_energy:.8f}, "
-    f"Tier 2: {t2_med_energy:.8f}, Tier 3: {t3_med_energy:.8f}, Tier 4: {t4_med_energy:.8f}"
+    "Energy RMSE medians -> "
+    + ", ".join(
+        f"Tier {index}: {value:.8f}" if np.isfinite(value) else f"Tier {index}: N/A"
+        for index, value in enumerate(
+            (t1_med_energy, t2_med_energy, t3_med_energy, t4_med_energy), start=1
+        )
+    )
 )
 print(
-    f"Force RMSE medians -> Tier 1: {t1_med_force:.8f}, "
-    f"Tier 2: {t2_med_force:.8f}, Tier 3: {t3_med_force:.8f}, Tier 4: {t4_med_force:.8f}"
+    "Force RMSE medians -> "
+    + ", ".join(
+        f"Tier {index}: {value:.8f}" if np.isfinite(value) else f"Tier {index}: N/A"
+        for index, value in enumerate(
+            (t1_med_force, t2_med_force, t3_med_force, t4_med_force), start=1
+        )
+    )
 )
-plt.show()
+plt.close(fig)

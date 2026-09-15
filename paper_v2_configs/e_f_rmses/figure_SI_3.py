@@ -45,7 +45,11 @@ CALCULATOR_DISPLAY_NAMES = {
 
 def normalize_calculator_name(name):
     text = str(name).strip()
-    return CALCULATOR_DISPLAY_NAMES.get(text.lower(), text)
+    key = text.lower().replace("-force-only", "").replace("-stress", "")
+    if key.endswith("-eager"):
+        key = key.removesuffix("-eager")
+    key = {"nequip-oam-l": "nequip"}.get(key, key)
+    return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_CSV = BASE_DIR / 'results' / 'mean_metrics_by_system_type_and_model.csv'
@@ -259,7 +263,7 @@ def main() -> None:
     plt.tight_layout()
     OUTPUT_PDF.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(OUTPUT_PDF)
-    plt.show()
+    plt.close(fig)
     plt.close(fig)
     print(f'Saved {OUTPUT_PDF}')
 
