@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot TorchSim MD time per step as a function of graph or system size.
+"""Plot eager and accelerated MD scaling in separate figures.
 
 Standard and accelerated timings are validated using ``plot-model-timings.py``.
 Time-averaged graph sizes are computed from uniformly sampled HDF5 trajectory
@@ -18,7 +18,6 @@ from types import ModuleType
 
 import h5py
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -31,13 +30,22 @@ DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
 DEFAULT_ACCELERATED_TIMINGS_DIR = (
 	SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-accelerated"
 )
-DEFAULT_OUTPUT_PNG = SCRIPT_DIR / "plots" / "model_timings_vs_system_size.png"
-DEFAULT_OUTPUT_PDF = SCRIPT_DIR / "plots" / "model_timings_vs_system_size.pdf"
+DEFAULT_EAGER_OUTPUT_PNG = (
+	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_eager.png"
+)
+DEFAULT_EAGER_OUTPUT_PDF = (
+	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_eager.pdf"
+)
+DEFAULT_ACCELERATED_OUTPUT_PNG = (
+	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_accelerated.png"
+)
+DEFAULT_ACCELERATED_OUTPUT_PDF = (
+	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_accelerated.pdf"
+)
 DEFAULT_RESULTS_CSV = (
 	SCRIPT_DIR / "results" / "model_timings_vs_system_size_observations.csv"
 )
 
-MODE_ORDER = ("Standard", "Accelerated")
 DEFAULT_GRAPH_MODELS = ("orb-v2", "mace-mp-0")
 DEFAULT_GRAPH_SAMPLES = 200
 MODEL_GRAPH_CONFIG = {
@@ -275,12 +283,10 @@ def fit_power_law(
 	return x_fit, y_fit
 
 
-def model_order_by_standard_median(observations: pd.DataFrame) -> list[str]:
-	"""Order model display names by standard median, falling back to all runs."""
-	standard = observations[observations["timing_mode"] == "Standard"]
-	order_source = standard if not standard.empty else observations
+def model_order_by_median(observations: pd.DataFrame) -> list[str]:
+	"""Order model display names by median runtime."""
 	return (
-		order_source.groupby("model_display")["milliseconds_per_step"]
+		observations.groupby("model_display")["milliseconds_per_step"]
 		.median()
 		.sort_values()
 		.index.tolist()
@@ -293,8 +299,11 @@ def plot_timings_vs_size(
 	output_pdf: Path,
 	skipped_count: int,
 	x_axis: str,
+	mode_label: str,
+	color: str,
+	marker: str,
 ) -> None:
-	"""Draw one graph/system-size scaling panel for each model."""
+	"""Draw one scaling panel per model for a single MD execution mode."""
 	sns.set_theme(style="ticks", context="paper")
 	plt.rcParams.update(
 		{
@@ -309,7 +318,7 @@ def plot_timings_vs_size(
 	)
 
 	x_column, x_label, title_metric = X_AXIS_CONFIG[x_axis]
-	model_order = model_order_by_standard_median(observations)
+	model_order = model_order_by_median(observations)
 	n_cols = min(4, len(model_order))
 	n_rows = math.ceil(len(model_order) / n_cols)
 	fig, axes = plt.subplots(
@@ -331,40 +340,33 @@ def plot_timings_vs_size(
 			if graph_config["max_neighbors"] is not None:
 				graph_description += f", max {graph_config['max_neighbors']} neighbors"
 			panel_heading += f" — {graph_description}"
-		mode_counts: list[str] = []
-		for mode in MODE_ORDER:
-			values = model_values[model_values["timing_mode"] == mode]
-			if values.empty:
-				continue
-			style = MODE_STYLES[mode]
-			ax.scatter(
-				values[x_column],
-				values["milliseconds_per_step"],
-				s=24,
-				color=style["color"],
-				marker=style["marker"],
-				alpha=0.72,
-				edgecolors="white",
-				linewidths=0.35,
-				zorder=3,
+		ax.scatter(
+			model_values[x_column],
+			model_values["milliseconds_per_step"],
+			s=24,
+			color=color,
+			marker=marker,
+			alpha=0.72,
+			edgecolors="white",
+			linewidths=0.35,
+			zorder=3,
+		)
+		fit = fit_power_law(model_values, x_column)
+		if fit is not None:
+			ax.plot(
+				fit[0],
+				fit[1],
+				color=color,
+				linestyle="--",
+				linewidth=1.2,
+				alpha=0.85,
+				zorder=2,
 			)
-			fit = fit_power_law(values, x_column)
-			if fit is not None:
-				ax.plot(
-					fit[0],
-					fit[1],
-					color=style["color"],
-					linestyle="--",
-					linewidth=1.2,
-					alpha=0.85,
-					zorder=2,
-				)
-			mode_counts.append(f"{mode.lower()}={len(values)}")
 
 		ax.set_xscale("log")
 		ax.set_yscale("log")
 		ax.set_title(
-			f"{panel_heading}\n$n$: {', '.join(mode_counts)}",
+			f"{panel_heading}\n$n$={len(model_values)}",
 			loc="left",
 			fontweight="bold",
 			pad=5,
@@ -379,7 +381,7 @@ def plot_timings_vs_size(
 	fig.supxlabel(x_label, y=0.035)
 	fig.supylabel("MD time per step [ms] (log scale)", x=0.025)
 	fig.suptitle(
-		f"TorchSim model timing scaling with {title_metric}",
+		f"{mode_label} TorchSim timing scaling with {title_metric}",
 		x=0.055,
 		y=0.985,
 		ha="left",
@@ -398,31 +400,6 @@ def plot_timings_vs_size(
 		subtitle += f"; {skipped_count} invalid skipped"
 	subtitle += ")"
 	fig.text(0.055, 0.955, subtitle, ha="left", va="top", fontsize=8)
-
-	present_modes = [
-		mode for mode in MODE_ORDER if mode in observations["timing_mode"].unique()
-	]
-	legend_handles = [
-		Line2D(
-			[0],
-			[0],
-			color=MODE_STYLES[mode]["color"],
-			marker=MODE_STYLES[mode]["marker"],
-			linestyle="--",
-			markersize=5,
-			linewidth=1.2,
-			label=mode,
-		)
-		for mode in present_modes
-	]
-	fig.legend(
-		handles=legend_handles,
-		loc="upper right",
-		bbox_to_anchor=(0.96, 0.982),
-		frameon=True,
-		title="Timing mode",
-		ncol=len(legend_handles),
-	)
 
 	panel_top = 0.78 if n_rows == 1 else 0.90
 	fig.subplots_adjust(
@@ -477,8 +454,22 @@ def parse_args() -> argparse.Namespace:
 			"use 0 for every recorded frame (default: 200)."
 		),
 	)
-	parser.add_argument("--output-png", type=Path, default=DEFAULT_OUTPUT_PNG)
-	parser.add_argument("--output-pdf", type=Path, default=DEFAULT_OUTPUT_PDF)
+	parser.add_argument(
+		"--eager-output-png", type=Path, default=DEFAULT_EAGER_OUTPUT_PNG
+	)
+	parser.add_argument(
+		"--eager-output-pdf", type=Path, default=DEFAULT_EAGER_OUTPUT_PDF
+	)
+	parser.add_argument(
+		"--accelerated-output-png",
+		type=Path,
+		default=DEFAULT_ACCELERATED_OUTPUT_PNG,
+	)
+	parser.add_argument(
+		"--accelerated-output-pdf",
+		type=Path,
+		default=DEFAULT_ACCELERATED_OUTPUT_PDF,
+	)
 	parser.add_argument("--results-csv", type=Path, default=DEFAULT_RESULTS_CSV)
 	return parser.parse_args()
 
@@ -531,6 +522,12 @@ def main() -> None:
 			if any(f"md_timing_{model}.csv" in message for model in selected_models)
 		]
 	skipped = selected_timing_skipped + metric_skipped
+	eager_skipped_count = sum(
+		str(args.timings_dir) in message for message in skipped
+	)
+	accelerated_skipped_count = sum(
+		str(args.accelerated_timings_dir) in message for message in skipped
+	)
 
 	for message in skipped:
 		warnings.warn(message, stacklevel=1)
@@ -540,13 +537,37 @@ def main() -> None:
 	observations.sort_values(["model", "timing_mode", x_column, "system"]).to_csv(
 		args.results_csv, index=False
 	)
-	plot_timings_vs_size(
-		observations,
-		output_png=args.output_png,
-		output_pdf=args.output_pdf,
-		skipped_count=len(skipped),
-		x_axis=args.x_axis,
-	)
+	for mode_observations, output_png, output_pdf, mode_label, style, mode_skipped in (
+		(
+			observations[observations["timing_mode"] == "Standard"],
+			args.eager_output_png,
+			args.eager_output_pdf,
+			"Eager MD",
+			MODE_STYLES["Standard"],
+			eager_skipped_count,
+		),
+		(
+			observations[observations["timing_mode"] == "Accelerated"],
+			args.accelerated_output_png,
+			args.accelerated_output_pdf,
+			"Accelerated MD",
+			MODE_STYLES["Accelerated"],
+			accelerated_skipped_count,
+		),
+	):
+		if mode_observations.empty:
+			warnings.warn(f"No {mode_label.lower()} observations to plot", stacklevel=1)
+			continue
+		plot_timings_vs_size(
+			mode_observations,
+			output_png=output_png,
+			output_pdf=output_pdf,
+			skipped_count=mode_skipped,
+			x_axis=args.x_axis,
+			mode_label=mode_label,
+			color=style["color"],
+			marker=style["marker"],
+		)
 
 	aggregations = {
 		"n_observations": ("milliseconds_per_step", "size"),
@@ -565,8 +586,10 @@ def main() -> None:
 		.agg(**aggregations)
 		.to_string()
 	)
-	print(f"\nSaved plot: {args.output_png}")
-	print(f"Saved plot: {args.output_pdf}")
+	print(f"\nSaved eager plot: {args.eager_output_png}")
+	print(f"Saved eager plot: {args.eager_output_pdf}")
+	print(f"Saved accelerated plot: {args.accelerated_output_png}")
+	print(f"Saved accelerated plot: {args.accelerated_output_pdf}")
 	print(f"Saved observations: {args.results_csv}")
 
 

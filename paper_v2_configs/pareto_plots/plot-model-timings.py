@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot standard and accelerated TorchSim MD timings for each MLIP model.
+"""Plot eager and accelerated TorchSim MD timings in separate figures.
 
 Each ``md_timing_<model>.csv`` in either timing directory contributes one
 observation: its recorded ``seconds_per_step`` converted to milliseconds.
@@ -25,13 +25,20 @@ DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
 DEFAULT_ACCELERATED_TIMINGS_DIR = (
 	SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-accelerated"
 )
-DEFAULT_OUTPUT_PNG = SCRIPT_DIR / "plots" / "model_timings.png"
-DEFAULT_OUTPUT_PDF = SCRIPT_DIR / "plots" / "model_timings.pdf"
+DEFAULT_EAGER_OUTPUT_PNG = SCRIPT_DIR / "plots" / "model_timings_eager.png"
+DEFAULT_EAGER_OUTPUT_PDF = SCRIPT_DIR / "plots" / "model_timings_eager.pdf"
+DEFAULT_ACCELERATED_OUTPUT_PNG = (
+	SCRIPT_DIR / "plots" / "model_timings_accelerated.png"
+)
+DEFAULT_ACCELERATED_OUTPUT_PDF = (
+	SCRIPT_DIR / "plots" / "model_timings_accelerated.pdf"
+)
 DEFAULT_SUMMARY_CSV = SCRIPT_DIR / "results" / "model_timings_summary.csv"
 DEFAULT_OBSERVATIONS_CSV = SCRIPT_DIR / "results" / "model_timings_observations.csv"
 
 
 DISPLAY_NAMES = {
+	"eq-v2-m-omat": "EquiformerV2",
 	"esen-30m-oam": "eSEN-30M-OAM",
 	"grace-mp": "GRACE-2L-MPtrj",
 	"grace-oam": "GRACE-2L-OAM",
@@ -39,7 +46,7 @@ DISPLAY_NAMES = {
 	"mace-mp-0": "MACE-MP-0",
 	"mace-mpa-0": "MACE-MPA-0",
 	"mattersim-v1-5m": "MatterSim-v1.0.0-5M",
-	"nequip": "NequIP-OAM-XL",
+	"nequip": "NequIP-OAM-L",
 	"orb-v2": "ORB-v2",
 	"orb-v3": "ORB-v3 conservative",
 	"orb-v3-direct": "ORB-v3 direct",
@@ -64,16 +71,19 @@ def normalize_name(value: object) -> str:
 
 
 def display_name(model: str) -> str:
-	return DISPLAY_NAMES.get(model, model)
-
-
-def accelerated_display_name(model: str) -> str:
-	"""Return a distinct plot label for an accelerated model variant."""
-	for variant in ("compile", "turbo"):
-		suffix = f"-{variant}"
-		if model.endswith(suffix):
-			return f"{display_name(model.removesuffix(suffix))} {variant}"
-	return f"{display_name(model)} accelerated"
+	"""Return one short label for all execution variants of a model."""
+	model_key = normalize_name(model)
+	for execution_tag in (
+		"-force-only",
+		"-torchscript",
+		"-compiled",
+		"-compile-force-only",
+		"-turbo-force-only",
+		"-eager",
+	):
+		model_key = model_key.replace(execution_tag, "")
+	model_key = {"nequip-oam-l": "nequip"}.get(model_key, model_key)
+	return DISPLAY_NAMES.get(model_key, model_key)
 
 
 def read_timing_files(
@@ -181,14 +191,14 @@ def select_accelerated_timings(observations: pd.DataFrame) -> pd.DataFrame:
 		compiled_mace_rows, "model"
 	].str.removesuffix("-compile")
 	selected.loc[compiled_mace_rows, "model_display"] = (
-		selected.loc[compiled_mace_rows, "model"].map(display_name) + " compile"
+		selected.loc[compiled_mace_rows, "model"].map(display_name)
 	)
 	selected.loc[compiled_mace_rows, "timing_mode"] = "Compile"
 
 	accelerated_rows = ~compiled_mace_rows
 	selected.loc[accelerated_rows, "model_display"] = selected.loc[
 		accelerated_rows, "model"
-	].map(accelerated_display_name)
+	].map(display_name)
 	return selected
 
 
@@ -239,8 +249,10 @@ def plot_timings(
 	output_png: Path,
 	output_pdf: Path,
 	skipped_count: int,
+	mode_label: str,
+	color: str,
 ) -> None:
-	"""Draw standard/accelerated box plots with system timings overlaid."""
+	"""Draw a box plot for one MD execution mode with system timings overlaid."""
 	sns.set_theme(style="ticks", context="paper")
 	plt.rcParams.update(
 		{
@@ -255,17 +267,6 @@ def plot_timings(
 	)
 
 	model_order = summary["model_display"].drop_duplicates().tolist()
-	plot_observations = observations.copy()
-	plot_observations["plot_mode"] = np.where(
-		plot_observations["timing_mode"].eq("Standard"),
-		"Standard",
-		"Accelerated",
-	)
-	mode_order = ["Standard", "Accelerated"]
-	palette = {
-		"Standard": "#345995",
-		"Accelerated": "#e07a3f",
-	}
 	counts = observations.groupby("model_display").size()
 	y_labels = [f"{name}  ($n$={int(counts[name])})" for name in model_order]
 
@@ -273,17 +274,14 @@ def plot_timings(
 	fig, ax = plt.subplots(figsize=(7.2, fig_height))
 
 	sns.boxplot(
-		data=plot_observations,
+		data=observations,
 		x="milliseconds_per_step",
 		y="model_display",
-		hue="plot_mode",
-		hue_order=mode_order,
 		order=model_order,
 		orient="h",
-		dodge=False,
 		width=0.55,
 		showfliers=False,
-		palette=palette,
+		color=color,
 		boxprops={"alpha": 0.35},
 		whiskerprops={"linewidth": 1.0},
 		capprops={"linewidth": 1.0},
@@ -292,19 +290,15 @@ def plot_timings(
 	)
 	np.random.seed(42)
 	sns.stripplot(
-		data=plot_observations,
+		data=observations,
 		x="milliseconds_per_step",
 		y="model_display",
-		hue="plot_mode",
-		hue_order=mode_order,
 		order=model_order,
 		orient="h",
-		palette=palette,
+		color=color,
 		alpha=0.68,
 		size=3.5,
 		jitter=0.16,
-		dodge=False,
-		legend=False,
 		ax=ax,
 	)
 
@@ -313,7 +307,7 @@ def plot_timings(
 	ax.set_xlabel("MD time per step [ms] (log scale)")
 	ax.set_ylabel("")
 	ax.set_title(
-		"Standard and accelerated TorchSim model timings",
+		f"{mode_label} TorchSim model timings",
 		loc="left",
 		weight="bold",
 		pad=24,
@@ -328,7 +322,6 @@ def plot_timings(
 	ax.grid(axis="x", which="minor", linestyle=":", linewidth=0.4, alpha=0.3)
 	ax.grid(axis="y", visible=False)
 	ax.tick_params(axis="y", length=0)
-	ax.legend(title="Timing mode", loc="upper right", frameon=True)
 	sns.despine(ax=ax, left=True)
 
 	fig.tight_layout()
@@ -352,8 +345,22 @@ def parse_args() -> argparse.Namespace:
 		default=DEFAULT_ACCELERATED_TIMINGS_DIR,
 		help="Directory containing accelerated per-system timing CSV files.",
 	)
-	parser.add_argument("--output-png", type=Path, default=DEFAULT_OUTPUT_PNG)
-	parser.add_argument("--output-pdf", type=Path, default=DEFAULT_OUTPUT_PDF)
+	parser.add_argument(
+		"--eager-output-png", type=Path, default=DEFAULT_EAGER_OUTPUT_PNG
+	)
+	parser.add_argument(
+		"--eager-output-pdf", type=Path, default=DEFAULT_EAGER_OUTPUT_PDF
+	)
+	parser.add_argument(
+		"--accelerated-output-png",
+		type=Path,
+		default=DEFAULT_ACCELERATED_OUTPUT_PNG,
+	)
+	parser.add_argument(
+		"--accelerated-output-pdf",
+		type=Path,
+		default=DEFAULT_ACCELERATED_OUTPUT_PDF,
+	)
 	parser.add_argument("--summary-csv", type=Path, default=DEFAULT_SUMMARY_CSV)
 	parser.add_argument("--observations-csv", type=Path, default=DEFAULT_OBSERVATIONS_CSV)
 	return parser.parse_args()
@@ -385,16 +392,29 @@ def main() -> None:
 	)
 
 	plot_timings(
-		observations=observations,
-		summary=summary,
-		output_png=args.output_png,
-		output_pdf=args.output_pdf,
-		skipped_count=len(skipped),
+		observations=standard_observations,
+		summary=summarize_timings(standard_observations),
+		output_png=args.eager_output_png,
+		output_pdf=args.eager_output_pdf,
+		skipped_count=len(standard_skipped),
+		mode_label="Eager MD",
+		color="#345995",
+	)
+	plot_timings(
+		observations=accelerated_observations,
+		summary=summarize_timings(accelerated_observations),
+		output_png=args.accelerated_output_png,
+		output_pdf=args.accelerated_output_pdf,
+		skipped_count=len(accelerated_skipped),
+		mode_label="Accelerated MD",
+		color="#e07a3f",
 	)
 
 	print(summary.to_string(index=False, float_format=lambda value: f"{value:.3f}"))
-	print(f"\nSaved plot: {args.output_png}")
-	print(f"Saved plot: {args.output_pdf}")
+	print(f"\nSaved eager plot: {args.eager_output_png}")
+	print(f"Saved eager plot: {args.eager_output_pdf}")
+	print(f"Saved accelerated plot: {args.accelerated_output_png}")
+	print(f"Saved accelerated plot: {args.accelerated_output_pdf}")
 	print(f"Saved summary: {args.summary_csv}")
 	print(f"Saved observations: {args.observations_csv}")
 
