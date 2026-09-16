@@ -75,7 +75,11 @@ def canonical_system_key(system_id: str) -> str:
     return system_name
 
 
-def load_all_data(data_dir: Path, models: set[str] | None = None) -> pd.DataFrame:
+def load_all_data(
+    data_dir: Path,
+    models: set[str] | None = None,
+    excluded_system_types: set[str] | None = None,
+) -> pd.DataFrame:
     csv_files = list_rmse_csv_files(data_dir)
     if models is not None:
         csv_files = [
@@ -107,6 +111,11 @@ def load_all_data(data_dir: Path, models: set[str] | None = None) -> pd.DataFram
         raise ValueError(f'Missing required columns: {missing_cols}')
 
     all_data['system_type'] = all_data['system'].astype(str).map(infer_system_type)
+    if excluded_system_types:
+        excluded = {system_type.strip().lower() for system_type in excluded_system_types}
+        all_data = all_data[
+            ~all_data['system_type'].fillna('').str.lower().isin(excluded)
+        ].copy()
     return all_data
 
 
@@ -120,6 +129,12 @@ def parse_args() -> argparse.Namespace:
         dest='models',
         help='process only this model (repeatable; default: all discovered models)',
     )
+    parser.add_argument(
+        '--exclude-system-type',
+        action='append',
+        dest='excluded_system_types',
+        help='exclude this system type from aggregation (repeatable)',
+    )
     return parser.parse_args()
 
 
@@ -127,7 +142,8 @@ def main() -> None:
     args = parse_args()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     selected_models = set(args.models) if args.models else None
-    all_data = load_all_data(DATA_DIR, selected_models)
+    excluded_system_types = set(args.excluded_system_types or ())
+    all_data = load_all_data(DATA_DIR, selected_models, excluded_system_types)
 
     metrics = ['energy_rmse', 'force_rmse']
 
@@ -137,7 +153,14 @@ def main() -> None:
         mapped_data.groupby('system_type', as_index=False)[metrics]
         .mean(numeric_only=True)
     )
-    means_by_system_type = means_by_system_type.set_index('system_type').reindex(SYSTEM_TYPES).reset_index()
+    excluded_normalized = {
+        value.strip().lower() for value in excluded_system_types
+    }
+    included_system_types = [
+        system_type for system_type in SYSTEM_TYPES
+        if system_type.lower() not in excluded_normalized
+    ]
+    means_by_system_type = means_by_system_type.set_index('system_type').reindex(included_system_types).reset_index()
 
     means_by_system_type_and_model = (
         mapped_data.groupby(['system_type', 'calculator'], as_index=False)[metrics]

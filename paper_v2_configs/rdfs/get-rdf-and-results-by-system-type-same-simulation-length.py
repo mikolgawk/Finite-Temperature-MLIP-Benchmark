@@ -208,7 +208,7 @@ SYSTEMS = {
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
-def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.DataFrame:
+def aggregate_by_system_type(detailed_results: dict[str, list[dict]], excluded_system_types: set[str] | None = None) -> pd.DataFrame:
     """Aggregate per-system RDF errors into per-system-type means, per model."""
     results: dict[str, dict[str, float]] = {}
 
@@ -223,6 +223,8 @@ def aggregate_by_system_type(detailed_results: dict[str, list[dict]]) -> pd.Data
         print(f"  Available systems: {df['System'].nunique()}")
 
         for system_type, system_list in SYSTEMS.items():
+            if system_type.lower() in (excluded_system_types or set()):
+                continue
             print(f"  Processing system type: {system_type}")
 
             type_df = df[df["System"].isin(system_list)]
@@ -285,6 +287,12 @@ def parse_args() -> argparse.Namespace:
         help="process only this model (repeatable; default: all discovered models)",
     )
     parser.add_argument(
+        "--exclude-system-type",
+        action="append",
+        dest="excluded_system_types",
+        help="exclude this system type from computation (repeatable)",
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=RESULTS_DIR,
@@ -311,6 +319,23 @@ def process_source(args: argparse.Namespace, source: str) -> None:
 
     selected_systems = set(args.systems) if args.systems else None
     selected_models = set(args.models) if args.models else None
+    excluded_system_types = {
+        value.strip().lower() for value in args.excluded_system_types or ()
+    }
+    excluded_systems = {
+        system
+        for system_type, systems in SYSTEMS.items()
+        if system_type.lower() in excluded_system_types
+        for system in systems
+    }
+    reference_trajectories = {
+        system: path for system, path in reference_trajectories.items()
+        if system not in excluded_systems
+    }
+    mlip_trajectories = {
+        system: models for system, models in mlip_trajectories.items()
+        if system not in excluded_systems
+    }
     if selected_systems is not None:
         reference_trajectories = {
             system: path
@@ -465,7 +490,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     if not any(detailed_results.values()):
         print(f"[WARN] No valid RDF scores for {source}; skipping system-type aggregation")
         return
-    results_by_type_df = aggregate_by_system_type(detailed_results)
+    results_by_type_df = aggregate_by_system_type(detailed_results, excluded_system_types)
     by_type_output_file = results_dir / "rdf_similarity_scores_by_system_type_same_simulation_length.csv"
     results_by_type_df.to_csv(by_type_output_file)
 

@@ -37,6 +37,7 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_EXCLUDED_SYSTEM_TYPES = ("molecular crystals",)
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,11 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
     vdos_dir = SCRIPT_DIR / "vdos"
 
     model_args = tuple(arg for model in models for arg in ("--model", model))
+    exclusion_args = tuple(
+        arg
+        for system_type in DEFAULT_EXCLUDED_SYSTEM_TYPES
+        for arg in ("--exclude-system-type", system_type)
+    )
 
     return (
         MetricStage(
@@ -64,6 +70,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 sys.executable,
                 "-u",
                 str(energy_force_dir / "compute_mean_rmses_by_system_type.py"),
+                *exclusion_args,
                 *model_args,
             ),
             working_directory=energy_force_dir,
@@ -75,6 +82,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 sys.executable,
                 "-u",
                 str(pressure_dir / "get_model_pressure_errors.py"),
+                *exclusion_args,
                 *model_args,
             ),
             working_directory=pressure_dir,
@@ -87,6 +95,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 "-u",
                 str(rdf_dir / "run_rdf_pipeline.py"),
                 "--compute-only",
+                *exclusion_args,
                 *model_args,
             ),
             working_directory=rdf_dir,
@@ -99,6 +108,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 "-u",
                 str(vdos_dir / "run_vdos_pipeline.py"),
                 "--compute-only",
+                *exclusion_args,
                 *model_args,
             ),
             working_directory=vdos_dir,
