@@ -40,9 +40,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--results-dir", type=Path, default=HERE / "results")
     parser.add_argument("--plots-dir", type=Path, default=HERE / "plots")
     parser.add_argument(
-        "--rmse-metrics-file",
+        "--timings-dir",
         type=Path,
-        help="Timing/RMSE CSV required by figure SI 14.",
+        help="Override timing directory for figure SI 14 (requires one source).",
     )
     parser.add_argument("--skip-figure-si-14", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
@@ -72,8 +72,8 @@ def main() -> None:
     ]
     for source in dict.fromkeys(sources):
         command.extend(("--source", source))
-    if args.rmse_metrics_file:
-        command.extend(("--rmse-metrics-file", str(args.rmse_metrics_file.resolve())))
+    if args.timings_dir:
+        command.extend(("--timings-dir", str(args.timings_dir.resolve())))
     if args.skip_figure_si_14:
         command.append("--skip-figure-si-14")
     if args.dry_run:

@@ -27,6 +27,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+import sys
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+
 try:
 	from adjustText import adjust_text
 except Exception:
@@ -56,25 +63,7 @@ plt.rcParams.update(
 palette = sns.color_palette("deep")
 
 
-CALCULATOR_DISPLAY_NAMES = {
-    'chgnet': 'CHGNet',
-    'mace-mp-0': 'MACE-MP-0',
-    'grace-mp': 'GRACE-2L-MPtrj',
-    'mace-mpa-0': 'MACE-MPA-0',
-    'orb-v2': 'orb-v2',
-    'eq-v2-m-omat': 'EquiformerV2',
-    'mattersim-v1-5m': 'MatterSim-v1.0.0-5M',
-    'grace-oam': 'GRACE-2L-OAM',
-    'orb-v3': 'orb-v3-conservative-inf-mpa',
-    'orb-v3-direct': 'orb-v3-direct-20-mpa',
-    'nequip': 'NequIP-OAM-XL',
-    'esen-30m-oam': 'eSEN-30M-OAM',
-    'pet-oam-xl': 'PET-OAM-XL',
-    'pet-omat-xl': 'PET-OMAT-XL',
-    'mace-mh-omat': 'MACE-MH-1-OMAT',
-    'uma-s-omat': 'UMA-S-P1',
-    'uma-m-omat': 'UMA-M-P1',
-}
+CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 
 def normalize_model_name(name: str) -> str:
@@ -91,14 +80,13 @@ def metric_model_key(name: str) -> str:
 
 
 def display_name(model: str) -> str:
-	normalized = normalize_model_name(model)
-	return CALCULATOR_DISPLAY_NAMES.get(normalized, model)
+    return display_model_name(model)
 
 
-TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
-TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]
-TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
+TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
+TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
+TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5M-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
+TIER_4 = ["mace-mh-omat", "mace-mh-omat-compile", "uma-s-omat", "uma-s-omat-compile", "uma-s-omat-turbo", "uma-m-omat", "uma-m-omat-compile", "uma-m-omat-turbo"]
 
 
 TIER_COLORS = {

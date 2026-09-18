@@ -26,6 +26,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+import sys
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+
 try:
     from adjustText import adjust_text
 except Exception:
@@ -52,25 +59,7 @@ plt.rcParams.update(
 
 palette = sns.color_palette("deep")
 
-CALCULATOR_DISPLAY_NAMES = {
-    "chgnet": "CHGNet",
-    "mace-mp-0": "MACE-MP-0",
-    "grace-mp": "GRACE-2L-MPtrj",
-    "mace-mpa-0": "MACE-MPA-0",
-    "orb-v2": "orb-v2",
-    "eq-v2-m-omat": "EquiformerV2",
-    "mattersim-v1-5m": "MatterSim-v1.0.0-5M",
-    "orb-v3": "orb-v3-conservative-inf-mpa",
-    "orb-v3-direct": "orb-v3-direct-20-mpa",
-    "grace-oam": "GRACE-2L-OAM",
-    "nequip": "NequIP-OAM-XL",
-    "pet-oam-xl": "PET-OAM-XL",
-    "pet-omat-xl": "PET-OMAT-XL",
-    "esen-30m-oam": "eSEN-30M-OAM",
-    "mace-mh-omat": "MACE-MH-1-OMAT",
-    "uma-s-omat": "UMA-S-P1",
-    "uma-m-omat": "UMA-M-P1",
-}
+CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 
 def normalize_model_name(name: str) -> str:
@@ -82,12 +71,52 @@ def normalize_model_name(name: str) -> str:
 
 
 def display_name(model: str) -> str:
-    normalized = normalize_model_name(model)
-    return CALCULATOR_DISPLAY_NAMES.get(normalized, model)
+    return display_model_name(model)
 
 
-TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
-TIER_2 = ["mace-mpa-0", "orb-v2"]
+def add_spread_labels(ax, x_vals, y_vals, labels) -> None:
+    """Place labels with deterministic vertical separation without adjustText."""
+    ax.figure.canvas.draw()
+    points = ax.transData.transform(np.column_stack([x_vals, y_vals]))
+    axes_box = ax.get_window_extent()
+    gap = FONT_SIZE * ax.figure.dpi / 72.0 * 1.55
+    lower = axes_box.y0 + gap / 2
+    upper = axes_box.y1 - gap / 2
+
+    order = np.argsort(points[:, 1])
+    placed_y = points[:, 1].copy()
+    for previous, current in zip(order[:-1], order[1:]):
+        placed_y[current] = max(placed_y[current], placed_y[previous] + gap)
+    if placed_y[order[-1]] > upper:
+        placed_y[order] -= placed_y[order[-1]] - upper
+    for current, following in zip(order[-2::-1], order[:0:-1]):
+        placed_y[current] = min(placed_y[current], placed_y[following] - gap)
+    if placed_y[order[0]] < lower:
+        placed_y[order] += lower - placed_y[order[0]]
+
+    inverse = ax.transData.inverted()
+    midpoint = (axes_box.x0 + axes_box.x1) / 2
+    for (point_x, point_y), label_y, label in zip(points, placed_y, labels):
+        align_left = point_x < midpoint
+        label_x = point_x + 4 if align_left else point_x - 4
+        text_x, text_y = inverse.transform((label_x, label_y))
+        ax.annotate(
+            label,
+            xy=inverse.transform((point_x, point_y)),
+            xytext=(text_x, text_y),
+            textcoords="data",
+            fontsize=FONT_SIZE,
+            alpha=0.9,
+            ha="left" if align_left else "right",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.08", facecolor="white", edgecolor="none", alpha=0.75),
+            arrowprops=dict(arrowstyle="-", color="0.55", lw=0.4, alpha=0.6),
+            zorder=5,
+        )
+
+
+TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
+TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
 TIER_3 = [
     "mattersim-v1-5m",
     "grace-oam",
@@ -98,8 +127,21 @@ TIER_3 = [
     "eq-v2-m-omat",
     "pet-oam-xl",
     "pet-omat-xl",
+    "grace-oam-compiled",
+    "mattersim-v1-5m-compile",
+    "pet-oam-xl-torchscript",
+    "pet-omat-xl-torchscript",
 ]
-TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
+TIER_4 = [
+    "mace-mh-omat",
+    "mace-mh-omat-compile",
+    "uma-s-omat",
+    "uma-s-omat-compile",
+    "uma-s-omat-turbo",
+    "uma-m-omat",
+    "uma-m-omat-compile",
+    "uma-m-omat-turbo",
+]
 
 TIER_COLORS = {
     "Tier 1": palette[2],
@@ -343,45 +385,68 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
         zorder=3,
     )
 
-    # Annotate model names with a light/faded style and optional overlap adjustment
+    ax.set_xlim(right=590)
+
+    # Keep labels and their leader-line targets in data coordinates so adjustText
+    # cannot send labels outside the axes or make arrows converge spuriously.
     label_texts = []
     x_vals = all_df["mean_time_per_step_ms"].to_numpy()
     y_vals = all_df["VDOS Error [%]"].to_numpy()
     for xi, yi, m in zip(x_vals, y_vals, all_df["model"].values):
-        txt = ax.annotate(
+        txt = ax.text(
+            xi,
+            yi,
             display_name(str(m)),
-            xy=(xi, yi),
-            xytext=(3, 3),
-            textcoords="offset points",
             fontsize=FONT_SIZE,
-            alpha=0.8,
-            ha="left",
-            va="bottom",
-            rotation=0,
+            alpha=0.9,
+            ha="center",
+            va="center",
             bbox=dict(
                 boxstyle="round,pad=0.08",
                 facecolor="white",
                 edgecolor="none",
-                alpha=0.55,
+                alpha=0.7,
             ),
+            zorder=5,
         )
         label_texts.append(txt)
 
-    if adjust_text is not None and label_texts:
+    ax.margins(x=0.08, y=0.08)
+    if adjust_text is None:
+        for txt in label_texts:
+            txt.remove()
+        add_spread_labels(
+            ax, x_vals, y_vals, [display_name(str(m)) for m in all_df["model"]]
+        )
+    elif label_texts:
         try:
             adjust_text(
                 label_texts,
                 ax=ax,
                 x=x_vals,
                 y=y_vals,
+                target_x=x_vals,
+                target_y=y_vals,
                 avoid_self=True,
-                only_move={"points": "xy", "text": "xy"},
-                force_text=(1.2, 1.4),
-                force_points=(0.8, 1.0),
-                expand_points=(1.3, 1.4),
-                expand_text=(1.2, 1.3),
-                lim=400,
-                arrowprops=dict(arrowstyle="-", color="0.5", lw=0.4, alpha=0.45),
+                prevent_crossings=True,
+                ensure_inside_axes=True,
+                expand_axes=True,
+                force_text=(0.8, 1.2),
+                force_static=(0.4, 0.7),
+                force_pull=(0.015, 0.025),
+                force_explode=(0.7, 1.0),
+                expand=(1.35, 1.55),
+                max_move=(60, 60),
+                min_arrow_len=10,
+                iter_lim=3000,
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color="0.55",
+                    lw=0.45,
+                    alpha=0.65,
+                    shrinkA=4,
+                    shrinkB=3,
+                ),
             )
         except Exception:
             pass
@@ -390,9 +455,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
     ax.set_ylabel("VDOS error [%]")
     # ax.set_title("Pareto Front: VDOS Error vs Force Eval Time")
     ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend(loc="best", frameon=True)
-
-    ax.set_xlim(right=590)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=True)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()

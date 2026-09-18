@@ -10,6 +10,13 @@
 # ]
 # ///
 
+"""Compute matched-length RDF errors for the supported trajectory sources.
+
+Every expected model/system pair contributes to the aggregates. Missing or
+unreadable trajectories and failed RDF calculations receive 100% error instead
+of being omitted.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -312,6 +319,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     print(f"\n=== Trajectory source: {trajectory_dir} ===")
     print(f"Results directory: {results_dir}")
     mlip_trajectories = discover_mlip_trajectories(trajectory_dir)
+    all_discovered_model_names = {
+        model
+        for system_models in mlip_trajectories.values()
+        for model in system_models
+    }
     reference_trajectories = {
         path.parent.name: path
         for path in sorted(REF_TRAJ_BASE_DIR.glob("*/traj.extxyz"))
@@ -357,11 +369,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             for system, models in mlip_trajectories.items()
         }
 
-    model_names = sorted({
-        model
-        for system_models in mlip_trajectories.values()
-        for model in system_models
-    })
+    # Explicitly requested models remain part of the expected result matrix even
+    # when every one of their trajectories is missing.  Otherwise, use the union
+    # of models discovered across the unfiltered source so that a failed or
+    # filtered-to system is penalized rather than silently omitted from the mean.
+    model_names = sorted(selected_models or all_discovered_model_names)
 
     print(
         f"Found {len(reference_trajectories)} reference trajectories and "
@@ -387,6 +399,13 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     results: dict[str, list[float] | float] = {model: [] for model in model_names}
     detailed_results: dict[str, list[dict]] = {model: [] for model in model_names}
 
+    def record_error(model: str, system: str, error: float = 100.0) -> None:
+        """Record a score, including the standard penalty for a failed run."""
+        model_results = results[model]
+        assert isinstance(model_results, list)
+        model_results.append(error)
+        detailed_results[model].append({"System": system, "RDF_Error": error})
+
     mlip_only_systems = sorted(set(mlip_trajectories) - set(reference_trajectories))
     for system in mlip_only_systems:
         print(f"[WARN] MLIP trajectories have no reference trajectory: {system}")
@@ -398,7 +417,12 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             md_ref_all = load_reference_trajectory(ref_path)
             ref_rdf_full = compute_rdf(md_ref_all)
         except Exception as exc:
-            print(f"  [SKIP] Could not load/compute reference RDF: {exc}")
+            print(
+                "  [PENALTY] Could not load/compute reference RDF; assigning "
+                f"100% error to all expected models: {exc}"
+            )
+            for model in model_names:
+                record_error(model, system)
             continue
 
         n_ref_total = md_ref_all.n_frames
@@ -417,8 +441,14 @@ def process_source(args: argparse.Namespace, source: str) -> None:
         }
 
         system_models = mlip_trajectories.get(system, {})
-        for model, mlip_path in sorted(system_models.items()):
+        for model in model_names:
             print(f"  Model: {model}")
+
+            mlip_path = system_models.get(model)
+            if mlip_path is None:
+                print("    [PENALTY] Trajectory missing; assigning 100% RDF error")
+                record_error(model, system)
+                continue
 
             try:
                 n_mlip_total = h5_frame_count(mlip_path)
@@ -453,13 +483,15 @@ def process_source(args: argparse.Namespace, source: str) -> None:
                 )
                 error = rdf_error(ref_rdf, mlip_rdf)
             except Exception as exc:
-                print(f"    [SKIP] Could not load/compute MLIP RDF: {exc}")
+                print(
+                    "    [PENALTY] Could not load/compute MLIP RDF; assigning "
+                    f"100% error: {exc}"
+                )
+                record_error(model, system)
                 continue
 
             print(f"    RDF error: {error:.6f} %")
-            assert isinstance(results[model], list)
-            results[model].append(error)
-            detailed_results[model].append({"System": system, "RDF_Error": error})
+            record_error(model, system, error)
 
     print("\n================ FINAL SCORES ================")
     for model in model_names:

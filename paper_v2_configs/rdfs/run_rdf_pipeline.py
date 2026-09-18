@@ -57,15 +57,6 @@ def available_sources() -> list[str]:
     ]
 
 
-def find_default_timing_metrics() -> Path | None:
-    """Find the external timing data required by figure SI 14, if present."""
-    candidates = (
-        DATA_DIR / "mean_metrics_by_model.csv",
-        SCRIPT_DIR.parent / "e_f_rmses" / "results" / "mean_metrics_by_model.csv",
-    )
-    return next((path for path in candidates if path.is_file()), None)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compute reference/MLIP RDFs, score them, and create the RDF figures."
@@ -108,11 +99,11 @@ def parse_args() -> argparse.Namespace:
         help="root output directory for figures (default: %(default)s)",
     )
     parser.add_argument(
-        "--rmse-metrics-file",
+        "--timings-dir",
         type=Path,
         help=(
-            "CSV with calculator and mean_force_eval_time_per_atom_s columns, "
-            "required for figure SI 14"
+            "directory containing per-system md_timing_<model>.csv files; only "
+            "valid when processing one source (default: data/<source>)"
         ),
     )
     parser.add_argument(
@@ -146,8 +137,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--plots-only and --compute-only cannot be used together")
     if args.compute_only and (args.skip_figure_3 or args.skip_figure_si_14):
         parser.error("figure skip options are redundant with --compute-only")
-    if args.rmse_metrics_file is not None and not args.rmse_metrics_file.is_file():
-        parser.error(f"timing metrics file does not exist: {args.rmse_metrics_file}")
+    if args.timings_dir is not None and not args.timings_dir.is_dir():
+        parser.error(f"timings directory does not exist: {args.timings_dir}")
 
     return args
 
@@ -200,15 +191,15 @@ def figure_3_command(source_results: Path, output_file: Path) -> list[str]:
 
 def figure_si_14_command(
     source_results: Path,
-    timing_metrics: Path,
+    timings_dir: Path,
     output_file: Path,
 ) -> list[str]:
     return [
         sys.executable,
         "-u",
         str(FIGURE_SI_14_SCRIPT),
-        "--rmse-metrics-file",
-        str(timing_metrics),
+        "--timings-dir",
+        str(timings_dir),
         "--rdf-scores-file",
         str(source_results / "rdf_similarity_scores_same_simulation_length.csv"),
         "--output-file",
@@ -224,6 +215,8 @@ def main() -> None:
             f"No nvt_*.h5 trajectories found under {DATA_DIR}; "
             "select a future source explicitly with --source."
         )
+    if args.timings_dir is not None and len(sources) != 1:
+        raise SystemExit("--timings-dir can only be used when exactly one --source is selected")
 
     args.results_dir = args.results_dir.resolve()
     args.plots_dir = args.plots_dir.resolve()
@@ -238,18 +231,6 @@ def main() -> None:
 
     if args.compute_only:
         return
-
-    timing_metrics = (
-        args.rmse_metrics_file.resolve()
-        if args.rmse_metrics_file is not None
-        else find_default_timing_metrics()
-    )
-    if not args.skip_figure_si_14 and timing_metrics is None:
-        print(
-            "\n[WARN] Skipping figure SI 14: no timing metrics CSV was found. "
-            "Pass --rmse-metrics-file to create it.",
-            flush=True,
-        )
 
     for source in sources:
         source_results = args.results_dir / source
@@ -270,12 +251,23 @@ def main() -> None:
                 dry_run=args.dry_run,
             )
 
-        if not args.skip_figure_si_14 and timing_metrics is not None:
+        timings_dir = (
+            args.timings_dir.resolve()
+            if args.timings_dir is not None
+            else DATA_DIR / source
+        )
+        if not args.skip_figure_si_14 and not args.dry_run and not timings_dir.is_dir():
+            print(
+                f"\n[WARN] Skipping figure SI 14 ({source}): timing directory "
+                f"does not exist: {timings_dir}",
+                flush=True,
+            )
+        elif not args.skip_figure_si_14:
             run_stage(
                 f"Create figure SI 14 ({source})",
                 figure_si_14_command(
                     source_results,
-                    timing_metrics,
+                    timings_dir,
                     source_plots / "plot_SI_pareto_rdf_time_same_length.pdf",
                 ),
                 dry_run=args.dry_run,

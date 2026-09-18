@@ -6,11 +6,18 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import numpy as np
 import pandas as pd
 import h5py
 from ase.io import iread
 from get_model_pressure_errors import pressure_histogram_similarity, infer_system_type, write_metric_outputs
+
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import display_model_name
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent / "data"
@@ -141,6 +148,7 @@ def plot_outputs(pairs, matched, output):
     plots = output / "plots"
     plots.mkdir(exist_ok=True)
     summary = pairs.groupby("mlip_model")[["absolute_mean_error_GPa", "pressure_similarity_percent"]].mean()
+    summary.index = summary.index.map(display_model_name)
     fig, axes = plt.subplots(1, 2, figsize=(13, max(4, len(summary) * .3)))
     summary.absolute_mean_error_GPa.sort_values().plot.barh(ax=axes[0])
     axes[0].set_xlabel("Mean absolute error of trajectory means (GPa)")
@@ -152,12 +160,13 @@ def plot_outputs(pairs, matched, output):
     fig.savefig(plots / "pressure_model_comparison.pdf")
     plt.close(fig)
     for model, structure, ref, mlip in matched:
+        model_label = display_model_name(model)
         fig, axes = plt.subplots(1, 2, figsize=(11, 3.6))
-        for frame, label in [(ref, "Reference"), (mlip, model)]:
+        for frame, label in [(ref, "Reference"), (mlip, model_label)]:
             axes[0].plot(frame.time_fs / 1000, frame.pressure_GPa, label=label, alpha=.7, lw=.7)
         edges = np.histogram_bin_edges(np.r_[ref.pressure_GPa, mlip.pressure_GPa], bins=60)
         axes[1].hist(ref.pressure_GPa, bins=edges, density=True, histtype="step", label="Reference")
-        axes[1].hist(mlip.pressure_GPa, bins=edges, density=True, histtype="step", label=model)
+        axes[1].hist(mlip.pressure_GPa, bins=edges, density=True, histtype="step", label=model_label)
         axes[0].set(xlabel="Time (ps)", ylabel="Pressure (GPa)")
         axes[1].set(xlabel="Pressure (GPa)", ylabel="Probability density")
         axes[1].legend(fontsize=7)

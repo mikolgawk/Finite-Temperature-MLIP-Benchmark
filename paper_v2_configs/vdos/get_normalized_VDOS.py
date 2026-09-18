@@ -19,7 +19,9 @@ instead differentiates their positions, as is necessarily done for references.
 
 Every trajectory source is written to a separate subdirectory of ``results``.
 Existing spectra are reused unless ``--overwrite`` is supplied, so interrupted
-or expanded runs can be resumed cheaply.
+or expanded runs can be resumed cheaply. Every expected model/system pair is
+included in the aggregates; missing or unreadable data and failed calculations
+receive 100% error and 0% similarity.
 """
 
 from __future__ import annotations
@@ -410,6 +412,9 @@ def process_source(
     results_dir = args.results_dir.resolve() / source
     spectra_dir = results_dir / SPECTRA_DIR
     trajectories = discover_mlip_trajectories(trajectory_dir)
+    all_discovered_model_names = {
+        model for models in trajectories.values() for model in models
+    }
 
     selected_systems = set(args.systems) if args.systems else None
     selected_models = set(args.models) if args.models else None
@@ -439,41 +444,89 @@ def process_source(
         }
     trajectories = {system: models for system, models in trajectories.items() if models}
 
-    model_names = sorted({model for models in trajectories.values() for model in models})
+    # Preserve explicitly requested models even if no trajectory was produced.
+    # Otherwise, the union across the unfiltered source defines the models
+    # expected for every reference system, ensuring failed MD runs contribute a
+    # 100% penalty even when the calculation is filtered to that failed system.
+    model_names = sorted(selected_models or all_discovered_model_names)
+    expected_systems = (
+        selected_systems - excluded_systems
+        if selected_systems is not None
+        else {
+            path.parent.name
+            for path in reference_dir.glob("*/traj.extxyz")
+            if path.parent.name not in excluded_systems
+        }
+    )
     print(f"\n=== Trajectory source: {trajectory_dir} ===")
     print(f"Results directory: {results_dir}")
     print(
         f"Found {sum(len(models) for models in trajectories.values())} trajectories "
-        f"for {len(trajectories)} systems and {len(model_names)} models"
+        f"for {len(expected_systems)} expected systems and {len(model_names)} models"
     )
     print(f"Models ({len(model_names)}): {', '.join(model_names)}")
 
     if args.dry_run:
-        for system, models in sorted(trajectories.items()):
+        for system in sorted(expected_systems):
+            models = trajectories.get(system, {})
             ref_path = reference_dir / system / "traj.extxyz"
             status = "reference found" if ref_path.is_file() else "reference MISSING"
             print(f"{system}: {len(models)} MLIP trajectories ({status})")
         return
-    if not trajectories:
+    if not model_names:
         print(f"[SKIP] No matching trajectories found in {trajectory_dir}")
         return
 
     results_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
-    for system, models in sorted(trajectories.items()):
+
+    def penalty_row(
+        model: str,
+        system: str,
+        reason: str,
+        *,
+        timestep_fs: float = float("nan"),
+        reference_frames: int = 0,
+        mlip_frames: int = 0,
+    ) -> dict:
+        """Build an auditable 100% error row for unavailable VDOS data."""
+        return {
+            "source": source,
+            "model": model,
+            "system": system,
+            "system_type": SYSTEM_TO_TYPE.get(system, "Other"),
+            "reference_frames": reference_frames,
+            "mlip_frames": mlip_frames,
+            "matched_frames": 0,
+            "timestep_fs": timestep_fs,
+            "vdos_error_percent": 100.0,
+            "vdos_similarity_percent": 0.0,
+            "reference_spectrum": "",
+            "mlip_spectrum": "",
+            "failure_reason": reason,
+        }
+
+    for system in sorted(expected_systems):
+        models = trajectories.get(system, {})
         print(f"\n=== System: {system} ===")
         ref_path = reference_dir / system / "traj.extxyz"
         if not ref_path.is_file():
-            print(f"  [SKIP] Reference trajectory not found: {ref_path}")
+            reason = f"reference trajectory not found: {ref_path}"
+            print(f"  [PENALTY] {reason}; assigning 100% error")
+            rows.extend(penalty_row(model, system, reason) for model in model_names)
             continue
         if system not in metadata:
-            print(f"  [SKIP] No metadata entry for {system}")
+            reason = "reference metadata entry missing"
+            print(f"  [PENALTY] {reason}; assigning 100% error")
+            rows.extend(penalty_row(model, system, reason) for model in model_names)
             continue
         try:
             timestep_fs = float(metadata[system]["timestep"])
             reference_positions = load_reference_positions(ref_path)
         except Exception as exc:
-            print(f"  [SKIP] Could not load reference trajectory: {exc}")
+            reason = f"could not load reference trajectory: {exc}"
+            print(f"  [PENALTY] {reason}; assigning 100% error")
+            rows.extend(penalty_row(model, system, reason) for model in model_names)
             continue
 
         n_ref = len(reference_positions)
@@ -502,8 +555,23 @@ def process_source(
             ref_cache[n_frames] = spectrum
             return spectrum
 
-        for model, mlip_path in sorted(models.items()):
+        for model in model_names:
             print(f"  Model: {model}")
+            mlip_path = models.get(model)
+            if mlip_path is None:
+                reason = "MLIP trajectory missing"
+                print(f"    [PENALTY] {reason}; assigning 100% VDOS error")
+                rows.append(
+                    penalty_row(
+                        model,
+                        system,
+                        reason,
+                        timestep_fs=timestep_fs,
+                        reference_frames=n_ref,
+                    )
+                )
+                continue
+            n_mlip = 0
             try:
                 n_mlip = h5_frame_count(
                     mlip_path,
@@ -539,7 +607,18 @@ def process_source(
                     e_max=args.e_max,
                 )
             except Exception as exc:
-                print(f"    [SKIP] Could not compute/score VDOS: {exc}")
+                reason = f"could not compute/score VDOS: {exc}"
+                print(f"    [PENALTY] {reason}; assigning 100% VDOS error")
+                rows.append(
+                    penalty_row(
+                        model,
+                        system,
+                        reason,
+                        timestep_fs=timestep_fs,
+                        reference_frames=n_ref,
+                        mlip_frames=n_mlip,
+                    )
+                )
                 continue
 
             print(f"    VDOS error={error:.6f} %, similarity={similarity:.6f} %")
@@ -561,6 +640,7 @@ def process_source(
                         / f"{system}.csv"
                     ),
                     "mlip_spectrum": str(mlip_output),
+                    "failure_reason": "",
                 }
             )
 

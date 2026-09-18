@@ -30,6 +30,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+import sys
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE = "mlip-trajs-torchsim-eager"
@@ -63,25 +70,7 @@ plt.rcParams.update(
 
 palette = sns.color_palette("deep")
 
-CALCULATOR_DISPLAY_NAMES = {
-    "chgnet": "CHGNet",
-    "mace-mp-0": "MACE-MP-0",
-    "grace-mp": "GRACE-2L-MPtrj",
-    "mace-mpa-0": "MACE-MPA-0",
-    "orb-v2": "orb-v2",
-    "eq-v2-m-omat": "EquiformerV2",
-    "mattersim-v1-5m": "MatterSim-v1.0.0-5M",
-    "orb-v3": "orb-v3-conservative-inf-mpa",
-    "orb-v3-direct": "orb-v3-direct-20-mpa",
-    "grace-oam": "GRACE-2L-OAM",
-    "nequip": "NequIP-OAM-XL",
-    "pet-oam-xl": "PET-OAM-XL",
-    "pet-omat-xl": "PET-OMAT-XL",
-    "esen-30m-oam": "eSEN-30M-OAM",
-    "mace-mh-omat": "MACE-MH-1-OMAT",
-    "uma-s-omat": "UMA-S-P1",
-    "uma-m-omat": "UMA-M-P1",
-}
+CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 
 def normalize_model_name(name: str) -> str:
@@ -93,15 +82,14 @@ def normalize_model_name(name: str) -> str:
 
 
 def display_name(model: str) -> str:
-    normalized = normalize_model_name(model)
-    return CALCULATOR_DISPLAY_NAMES.get(normalized, model)
+    return display_model_name(model)
 
 
 REF_COLOR = "black"
 EXCLUDED_MODELS = {"pet-mad"}
 
-TIER_1_MODELS = ["chgnet", "mace-mp-0", "grace-mp"]
-TIER_2_MODELS = ["mace-mpa-0", "orb-v2"]
+TIER_1_MODELS = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
+TIER_2_MODELS = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
 TIER_3_MODELS = [
     "mattersim-v1-5m",
     "grace-oam",
@@ -112,8 +100,21 @@ TIER_3_MODELS = [
     "eq-v2-m-omat",
     "pet-oam-xl",
     "pet-omat-xl",
+    "grace-oam-compiled",
+    "mattersim-v1-5m-compile",
+    "pet-oam-xl-torchscript",
+    "pet-omat-xl-torchscript",
 ]
-TIER_4_MODELS = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
+TIER_4_MODELS = [
+    "mace-mh-omat",
+    "mace-mh-omat-compile",
+    "uma-s-omat",
+    "uma-s-omat-compile",
+    "uma-s-omat-turbo",
+    "uma-m-omat",
+    "uma-m-omat-compile",
+    "uma-m-omat-turbo",
+]
 
 TIER_PANELS = [
     ("Tier 1", TIER_1_MODELS, palette[2]),
@@ -355,7 +356,29 @@ def pick_reference_row(subset: pd.DataFrame, system: str) -> pd.Series | None:
     rows = subset[subset["system"].astype(str) == system]
     if rows.empty:
         return None
+    rows = rows[
+        rows["ref_file"].map(
+            lambda value: bool(str(value).strip()) and Path(str(value)).is_file()
+        )
+    ]
+    if rows.empty:
+        return None
     return rows.sort_values("vdos_error_percent").iloc[0]
+
+
+def full_penalty_models(
+    subset: pd.DataFrame, tier_models: list[str]
+) -> list[str]:
+    """Return tier models assigned the explicit 100% no-data penalty."""
+    tier_subset = subset[subset["mlip_model"].isin(tier_models)].copy()
+    if tier_subset.empty:
+        return []
+    errors = tier_subset.groupby("mlip_model")["vdos_error_percent"].mean()
+    return sorted(
+        str(model)
+        for model, error in errors.items()
+        if np.isfinite(error) and np.isclose(float(error), 100.0)
+    )
 
 
 def error_to_percent(series: pd.Series) -> pd.Series:
@@ -726,7 +749,11 @@ def load_normalized_pairs(path: Path) -> pd.DataFrame:
     out["mlip_model"] = out["mlip_model"].map(canonicalize_model_name)
     out = out.dropna(subset=["mlip_model"])
     out = out[out["mlip_model"].isin(ALLOWED_MODELS)].copy()
-    out = out.dropna(subset=["vdos_error_percent", "mlip_file", "ref_file"])
+    # Keep explicit 100% penalty rows even though they intentionally have no
+    # spectrum paths. The panel legend reports them without drawing a curve.
+    out = out.dropna(subset=["vdos_error_percent"])
+    out["mlip_file"] = out["mlip_file"].fillna("").astype(str)
+    out["ref_file"] = out["ref_file"].fillna("").astype(str)
     if out.empty:
         raise ValueError(
             "No valid normalized pairs found for models defined in the tier lists."
@@ -878,6 +905,7 @@ def plot_combined(
             best_model, worst_model = pick_best_worst_models_for_tier(
                 representative_subset, tier_models
             )
+            plotted_models: set[str] = set()
 
             ax.plot(
                 x_ref,
@@ -909,6 +937,7 @@ def plot_combined(
                             alpha=0.9,
                             linestyle="-",
                         )
+                        plotted_models.add(best_model)
                     except Exception:
                         pass
 
@@ -933,6 +962,7 @@ def plot_combined(
                             linestyle="--",
                             alpha=0.9,
                         )
+                        plotted_models.add(worst_model)
                     except Exception:
                         pass
 
@@ -956,6 +986,13 @@ def plot_combined(
                 ax.tick_params(labelbottom=False)
 
             handles, labels = ax.get_legend_handles_labels()
+            for model in full_penalty_models(representative_subset, tier_models):
+                if model in plotted_models:
+                    continue
+                handles.append(
+                    Line2D([], [], color=tier_color, linestyle=":", linewidth=1.4)
+                )
+                labels.append(f"{display_name(model)} (100.0%; no VDOS data)")
             if np.isfinite(tier_mean_error):
                 handles = handles + [
                     Line2D([], [], color="none", linestyle="none", linewidth=0)

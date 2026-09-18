@@ -9,9 +9,16 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import display_model_name
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -38,10 +45,11 @@ def main() -> None:
     frame = frame.dropna(subset=["vdos_error_percent"]).sort_values("vdos_error_percent")
     if frame.empty:
         raise ValueError(f"No finite VDOS errors in {args.model_means_file}")
+    frame["model_display"] = frame["model"].map(display_model_name)
 
     height = max(3.5, 0.28 * len(frame) + 1.2)
     fig, ax = plt.subplots(figsize=(7.0, height))
-    ax.barh(frame["model"], frame["vdos_error_percent"], color="#4c78a8")
+    ax.barh(frame["model_display"], frame["vdos_error_percent"], color="#4c78a8")
     ax.invert_yaxis()
     ax.set_xlabel("Mean VDOS error [%]")
     ax.set_ylabel("Model")

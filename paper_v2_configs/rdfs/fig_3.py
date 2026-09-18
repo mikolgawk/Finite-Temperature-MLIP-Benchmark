@@ -24,6 +24,13 @@ import seaborn as sns
 from matplotlib import gridspec
 from matplotlib.lines import Line2D
 
+import sys
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR.parent / "data"
@@ -47,25 +54,7 @@ plt.rcParams.update({
 })
 
 palette = sns.color_palette("deep")
-CALCULATOR_DISPLAY_NAMES = {
-    'chgnet': 'CHGNet',
-    'mace-mp-0': 'MACE-MP-0',
-    'grace-mp': 'GRACE-2L-MPtrj',
-    'mace-mpa-0': 'MACE-MPA-0',
-    'orb-v2': 'orb-v2',
-    'eq-v2-m-omat': 'EquiformerV2',
-    'mattersim-v1-5m': 'MatterSim-v1.0.0-5M',
-    'grace-oam': 'GRACE-2L-OAM',
-    'orb-v3': 'orb-v3-conservative-inf-mpa',
-    'orb-v3-direct': 'orb-v3-direct-20-mpa',
-    'nequip': 'NequIP-OAM-XL',
-    'esen-30m-oam': 'eSEN-30M-OAM',
-    'pet-oam-xl': 'PET-OAM-XL',
-    'pet-omat-xl': 'PET-OMAT-XL',
-    'mace-mh-omat': 'MACE-MH-1-OMAT',
-    'uma-s-omat': 'UMA-S-P1',
-    'uma-m-omat': 'UMA-M-P1',
-}
+CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 
 def normalize_model_name(name: str) -> str:
@@ -77,8 +66,7 @@ def normalize_model_name(name: str) -> str:
 
 
 def display_name(model: str) -> str:
-    normalized = normalize_model_name(model)
-    return CALCULATOR_DISPLAY_NAMES.get(normalized, model)
+    return display_model_name(model)
 EXCLUDED_MODELS = {"pet-mad"}
 
 SYSTEMS = {
@@ -100,10 +88,10 @@ SYSTEMS = {
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
-TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
-TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]
-TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
+TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
+TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
+TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5M-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
+TIER_4 = ["mace-mh-omat", "mace-mh-omat-compile", "uma-s-omat", "uma-s-omat-compile", "uma-s-omat-turbo", "uma-m-omat", "uma-m-omat-compile", "uma-m-omat-turbo"]
 
 TIER_1_NORM = [normalize_model_name(model) for model in TIER_1]
 TIER_2_NORM = [normalize_model_name(model) for model in TIER_2]
@@ -396,6 +384,19 @@ def format_model_label(model_name: str, system_errors: dict[str, float]) -> str:
     return f"{name}{suffix}"
 
 
+def full_penalty_models(
+    tier_models: list[str], system_errors: dict[str, float]
+) -> list[str]:
+    """Return tier models assigned the explicit 100% no-data penalty."""
+    penalized = []
+    for model in tier_models:
+        model = normalize_model_name(model)
+        error = system_errors.get(model, np.nan)
+        if np.isfinite(error) and np.isclose(float(error), 100.0):
+            penalized.append(model)
+    return penalized
+
+
 def tier_mean_rdf_error(tier_models, model_means: dict[str, float]) -> float:
     errors = []
     for model in tier_models:
@@ -675,6 +676,7 @@ def plot_combined(
 
             mean_rdf_error = tier_mean_rdf_error(tier_models, model_means)
             best_model, worst_model = pick_best_worst(tier_models)
+            plotted_models: set[str] = set()
             rdf_ax.plot(r_ref, g_ref, color="black", linewidth=2.0, label="Reference")
 
             if best_model:
@@ -689,6 +691,7 @@ def plot_combined(
                         linestyle="-",
                         label=format_model_label(best_model, system_errors),
                     )
+                    plotted_models.add(best_model)
 
             if worst_model and worst_model != best_model:
                 worst_data = load_saved_rdf(system, worst_model, rdf_dir)
@@ -702,6 +705,7 @@ def plot_combined(
                         linestyle="--",
                         label=format_model_label(worst_model, system_errors),
                     )
+                    plotted_models.add(worst_model)
 
             rdf_ax.set_xlim(0, None)
             if is_right_col:
@@ -720,6 +724,13 @@ def plot_combined(
             rdf_ax.grid()
 
             handles, labels = rdf_ax.get_legend_handles_labels()
+            for model in full_penalty_models(tier_models, system_errors):
+                if model in plotted_models:
+                    continue
+                handles.append(
+                    Line2D([], [], color=tier_color, linestyle=":", linewidth=1.4)
+                )
+                labels.append(f"{display_name(model)} (100.0%; no RDF data)")
             if np.isfinite(mean_rdf_error):
                 mean_handle = Line2D([], [], color="none", linestyle="none")
                 handles.append(mean_handle)
@@ -755,7 +766,7 @@ def main() -> None:
     parser.add_argument(
         "--overall-rdf-file",
         default=str(DEFAULT_RDF_MEANS_FILE),
-        help="CSV containing Calculator and Mean RDF Error [%].",
+        help="CSV containing Calculator and Mean RDF Error [%%].",
     )
     parser.add_argument(
         "--rdf-csv-dir",

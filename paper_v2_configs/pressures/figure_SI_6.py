@@ -29,6 +29,13 @@ from get_model_pressure_errors import (
     resolve_reference_pressure_file,
 )
 
+import sys
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+
 
 FONT_SIZE = 10
 LEGEND_FONT_SIZE = 6
@@ -56,25 +63,7 @@ DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_pressure_panel_combined_press
 PER_FRAME_SUFFIX = "_same-simulation-length_pressure_per_frame.csv"
 
 palette = sns.color_palette("deep")
-CALCULATOR_DISPLAY_NAMES = {
-    'chgnet': 'CHGNet',
-    'mace-mp-0': 'MACE-MP-0',
-    'grace-mp': 'GRACE-2L-MPtrj',
-    'mace-mpa-0': 'MACE-MPA-0',
-    'orb-v2': 'orb-v2',
-    'eq-v2-m-omat': 'EquiformerV2',
-    'mattersim-v1-5m': 'MatterSim-v1.0.0-5M',
-    'grace-oam': 'GRACE-2L-OAM',
-    'orb-v3': 'orb-v3-conservative-inf-mpa',
-    'orb-v3-direct': 'orb-v3-direct-20-mpa',
-    'nequip': 'NequIP-OAM-XL',
-    'esen-30m-oam': 'eSEN-30M-OAM',
-    'pet-oam-xl': 'PET-OAM-XL',
-    'pet-omat-xl': 'PET-OMAT-XL',
-    'mace-mh-omat': 'MACE-MH-1-OMAT',
-    'uma-s-omat': 'UMA-S-P1',
-    'uma-m-omat': 'UMA-M-P1',
-}
+CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 SYSTEMS = {
     "Pure metals": ["bulkAu_1500K_Kapil", "bulkAg_600K_Kapil", "bulkCu_1000K_Kapil"],
@@ -95,10 +84,10 @@ SYSTEMS = {
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
-TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
-TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl"]
-TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
+TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
+TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
+TIER_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3", "orb-v3-direct", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5m-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
+TIER_4 = ["mace-mh-omat", "mace-mh-omat-compile", "uma-s-omat", "uma-s-omat-compile", "uma-s-omat-turbo", "uma-m-omat", "uma-m-omat-compile", "uma-m-omat-turbo"]
 TIER_DEFS = [
     ("Tier 1", TIER_1, palette[2]),
     ("Tier 2", TIER_2, palette[1]),
@@ -109,7 +98,7 @@ TIER_ORDER = TIER_1 + TIER_2 + TIER_3 + TIER_4
 
 
 def display_name(model: str) -> str:
-    return CALCULATOR_DISPLAY_NAMES.get(normalize_model_name(model), model)
+    return display_model_name(model)
 
 
 def format_error_value(error_percent: float | None) -> str:
@@ -239,6 +228,7 @@ def collect_histogram_panels(
     pressures_dir: Path,
     reference_file: Path,
     bins: int,
+    expected_models: Iterable[str],
 ) -> list[tuple[str, str, np.ndarray, dict[str, np.ndarray], dict[str, float], np.ndarray]]:
     reference_df = load_pressure_per_frame_csv(reference_file, deduplicate_reference=True)
     if reference_df.empty:
@@ -259,10 +249,14 @@ def collect_histogram_panels(
         system_scores: dict[str, dict[str, float]] = {}
         for system, reference_values in reference_by_system.items():
             scores: dict[str, float] = {}
-            for model, values_by_system in model_values.items():
-                error = pressure_error_percent(reference_values, values_by_system.get(system), bins=bins)
-                if np.isfinite(error):
-                    scores[model] = error
+            for model in expected_models:
+                values_by_system = model_values.get(model, {})
+                error = pressure_error_percent(
+                    reference_values, values_by_system.get(system), bins=bins
+                )
+                # Models expected for this dataset but lacking usable pressure
+                # samples receive the same explicit no-data penalty as RDF/VDOS.
+                scores[model] = float(error) if np.isfinite(error) else 100.0
             if scores:
                 system_scores[system] = scores
 
@@ -283,7 +277,6 @@ def collect_histogram_panels(
         scores = {
             model: score
             for model, score in system_scores[representative_system].items()
-            if model in values_by_model
         }
         edges = make_bin_edges(reference_values, values_by_model.values(), bins=bins)
 
@@ -408,7 +401,11 @@ def plot_combined(
     bins: int,
     output: Path,
 ) -> None:
-    panels = collect_histogram_panels(pressures_dir, reference_file, bins)
+    overall_errors = extract_overall_errors(ranking_df)
+    expected_models = overall_errors["model"].drop_duplicates().tolist()
+    panels = collect_histogram_panels(
+        pressures_dir, reference_file, bins, expected_models
+    )
     if len(panels) > 4:
         panels = panels[:4]
 
@@ -459,6 +456,7 @@ def plot_combined(
                 )
 
             best, worst, scores = choose_best_worst(tier_models, model_scores)
+            plotted_models: set[str] = set()
             ax.hist(
                 reference_values,
                 bins=edges,
@@ -468,7 +466,7 @@ def plot_combined(
                 linewidth=1.5,
                 label="Reference",
             )
-            if best is not None:
+            if best is not None and best in values_by_model:
                 prefix = "Best/worst" if best == worst else "Best"
                 ax.hist(
                     values_by_model[best],
@@ -479,7 +477,8 @@ def plot_combined(
                     linewidth=1.5,
                     label=format_model_label(best, scores.get(best), prefix),
                 )
-            if worst is not None and worst != best:
+                plotted_models.add(best)
+            if worst is not None and worst != best and worst in values_by_model:
                 ax.hist(
                     values_by_model[worst],
                     bins=edges,
@@ -490,6 +489,7 @@ def plot_combined(
                     linestyle="--",
                     label=format_model_label(worst, scores.get(worst), "Worst"),
                 )
+                plotted_models.add(worst)
 
             if col == n_hist_cols - 1:
                 ax.set_ylabel(tier_label, labelpad=2)
@@ -501,6 +501,21 @@ def plot_combined(
                 ax.tick_params(labelbottom=False)
 
             handles, labels = ax.get_legend_handles_labels()
+            for model in tier_models:
+                error = scores.get(model, np.nan)
+                if (
+                    model in plotted_models
+                    or model in values_by_model
+                    or not np.isfinite(error)
+                    or not np.isclose(float(error), 100.0)
+                ):
+                    continue
+                handles.append(
+                    Line2D([], [], color=tier_color, linestyle=":", linewidth=1.4)
+                )
+                labels.append(
+                    f"{display_name(model)} (100.0%; no pressure data)"
+                )
             if handles:
                 handles.append(Line2D([], [], color="none", linestyle="none", linewidth=0))
                 labels.append(f"{tier_label} mean error: {format_error_value(mean_finite(scores.values()))}")
