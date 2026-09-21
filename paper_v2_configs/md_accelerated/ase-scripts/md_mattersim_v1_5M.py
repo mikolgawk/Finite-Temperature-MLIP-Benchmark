@@ -6,6 +6,7 @@
 #   "ase>=3.26",
 #   "torch==2.11.0+cu128",
 #   "torchvision==0.26.0+cu128",
+#   "tqdm>=4.66",
 # ]
 #
 # [[tool.uv.index]]

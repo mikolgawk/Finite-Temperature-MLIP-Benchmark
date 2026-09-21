@@ -4,6 +4,7 @@
 #   "ase>=3.26", "h5py>=3.11", "numpy>=1.26,<2",
 #   "tensorpotential==0.5.7.2", "nvidia-cuda-nvcc-cu12==12.8.*",
 #   "tf-keras==2.19.*", "torch",
+#   "tqdm>=4.66",
 # ]
 # [tool.uv]
 # override-dependencies = ["tensorflow>=2.17,<2.20"]

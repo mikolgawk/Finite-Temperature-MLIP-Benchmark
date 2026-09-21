@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["ase>=3.26", "h5py>=3.11", "numpy>=1.26", "torch", "upet==0.2.6"]
+# dependencies = ["ase>=3.26", "h5py>=3.11", "numpy>=1.26", "torch", "upet==0.2.6", "tqdm>=4.66"]
 # [[tool.uv.index]]
 # name = "pytorch-cu128"
 # url = "https://download.pytorch.org/whl/cu128"
@@ -31,6 +31,7 @@ from ase.md.bussi import Bussi
 from ase.md.langevin import Langevin
 from ase.md.nose_hoover_chain import NoseHooverChainNVT
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
+from tqdm.auto import tqdm
 
 
 HERE = Path(__file__).resolve().parent
@@ -141,91 +142,121 @@ def run_ase_md(
     run_name = f"{model_name}-ase"
 
     for name, meta in metadata.items():
-        init_file = REPO / meta["initfile_path"]
-        if not init_file.is_file():
-            print(f"[{run_name}] {name}: init file missing, skipping ({init_file})")
-            continue
+        try:
+            init_file = REPO / meta["initfile_path"]
+            if not init_file.is_file():
+                print(f"[{run_name}] {name}: init file missing, skipping ({init_file})")
+                continue
 
-        out_dir = OUT_ROOT / name
-        out_h5 = out_dir / f"nvt_{run_name}.h5"
-        temporary_h5 = out_h5.with_suffix(".h5.inprogress")
-        out_log = out_dir / f"md_{run_name}.log"
-        out_csv = out_dir / f"md_timing_{run_name}.csv"
-        if out_h5.exists():
-            print(f"[{run_name}] {name}: output exists, skipping")
-            continue
+            out_dir = OUT_ROOT / name
+            out_h5 = out_dir / f"nvt_{run_name}.h5"
+            temporary_h5 = out_h5.with_suffix(".h5.inprogress")
+            out_log = out_dir / f"md_{run_name}.log"
+            out_csv = out_dir / f"md_timing_{run_name}.csv"
+            if out_csv.exists():
+                print(f"[{run_name}] {name}: output exists, skipping")
+                continue
 
-        temperature_k = float(meta["temperature"])
-        timestep_fs = float(meta["timestep"])
-        tau_fs = float(meta["thermostat_coupling_constant"])
-        thermostat = str(meta["thermostat_type"])
-        stride = int(meta["position_print_stride"] or 1)
-        energy_stride = int(meta["energy_print_stride"] or 1)
-        n_steps = round(float(meta["trajectory_length_ps"]) * 1000.0 / timestep_fs)
+            temperature_k = float(meta["temperature"])
+            timestep_fs = float(meta["timestep"])
+            tau_fs = float(meta["thermostat_coupling_constant"])
+            thermostat = str(meta["thermostat_type"])
+            stride = int(meta["position_print_stride"] or 1)
+            energy_stride = int(meta["energy_print_stride"] or 1)
+            n_steps = round(float(meta["trajectory_length_ps"]) * 1000.0 / timestep_fs)
 
-        atoms = read(init_file, index=0)
-        atoms.calc = calculator
-        rng = np.random.default_rng(SEED)
-        MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_k, rng=rng)
-        dynamics = make_integrator(
-            atoms, thermostat, temperature_k, timestep_fs, tau_fs, rng
-        )
+            atoms = read(init_file, index=0)
+            atoms.calc = calculator
+            rng = np.random.default_rng(SEED)
+            MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_k, rng=rng)
+            dynamics = make_integrator(
+                atoms, thermostat, temperature_k, timestep_fs, tau_fs, rng
+            )
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-        initial_energy = atoms.get_potential_energy()
-        atoms.get_forces()
-        print(
-            f"[{run_name}] {name}: {len(atoms)} atoms, E0={initial_energy:.6f} eV, "
-            f"T={temperature_k:g} K, dt={timestep_fs:g} fs, {thermostat} "
-            f"tau={tau_fs:g} fs, {n_steps} steps, stride {stride}"
-        )
+            out_dir.mkdir(parents=True, exist_ok=True)
+            initial_energy = atoms.get_potential_energy()
+            atoms.get_forces()
+            print(
+                f"[{run_name}] {name}: {len(atoms)} atoms, E0={initial_energy:.6f} eV, "
+                f"T={temperature_k:g} K, dt={timestep_fs:g} fs, {thermostat} "
+                f"tau={tau_fs:g} fs, {n_steps} steps, stride {stride}"
+            )
 
-        trajectory = HDF5TrajectoryWriter(temporary_h5, atoms, model_name)
-        dynamics.attach(trajectory.write, interval=stride)
-        dynamics.attach(
-            MDLogger(
+            trajectory = HDF5TrajectoryWriter(temporary_h5, atoms, model_name)
+            dynamics.attach(trajectory.write, interval=stride)
+            logger = MDLogger(
                 dynamics, atoms, str(out_log), header=True, stress=False,
                 peratom=False, mode="w",
-            ),
-            interval=energy_stride,
-        )
-
-        try:
-            synchronize()
-            start = time.perf_counter()
-            dynamics.run(n_steps)
-            synchronize()
-            elapsed = time.perf_counter() - start
-        finally:
-            trajectory.close()
-
-        with out_csv.open("w", newline="") as file:
-            writer = csv.DictWriter(
-                file,
-                fieldnames=[
-                    "calculator", "system", "temperature_K", "n_steps",
-                    "time_step_fs", "thermostat", "tau_fs", "record_interval",
-                    "elapsed_seconds", "seconds_per_step", "engine", "seed",
-                ],
             )
-            writer.writeheader()
-            writer.writerow(
-                {
-                    "calculator": model_name, "system": name,
-                    "temperature_K": temperature_k, "n_steps": n_steps,
-                    "time_step_fs": timestep_fs, "thermostat": thermostat,
-                    "tau_fs": tau_fs, "record_interval": stride,
-                    "elapsed_seconds": f"{elapsed:.2f}",
-                    "seconds_per_step": f"{elapsed / n_steps:.6f}",
-                    "engine": engine, "seed": SEED,
-                }
+            dynamics.attach(logger, interval=energy_stride)
+            progress = tqdm(
+                total=n_steps,
+                desc=f"[{run_name}] {name}",
+                unit="step",
+                dynamic_ncols=True,
             )
 
-        temporary_h5.replace(out_h5)
-        print(
-            f"[{run_name}] {name}: saved {out_h5} "
-            f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)"
-        )
+            def update_progress() -> None:
+                completed = min(dynamics.nsteps, n_steps)
+                progress.update(max(0, completed - progress.n))
+
+            progress_interval = max(1, n_steps // 1000)
+            dynamics.attach(update_progress, interval=progress_interval)
+
+            try:
+                synchronize()
+                start = time.perf_counter()
+                dynamics.run(n_steps)
+                synchronize()
+                elapsed = time.perf_counter() - start
+            finally:
+                update_progress()
+                progress.close()
+                trajectory.close()
+                logger.close()
+
+            with out_csv.open("w", newline="") as file:
+                writer = csv.DictWriter(
+                    file,
+                    fieldnames=[
+                        "calculator", "system", "temperature_K", "n_steps",
+                        "time_step_fs", "thermostat", "tau_fs", "record_interval",
+                        "elapsed_seconds", "seconds_per_step", "engine", "seed",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "calculator": model_name, "system": name,
+                        "temperature_K": temperature_k, "n_steps": n_steps,
+                        "time_step_fs": timestep_fs, "thermostat": thermostat,
+                        "tau_fs": tau_fs, "record_interval": stride,
+                        "elapsed_seconds": f"{elapsed:.2f}",
+                        "seconds_per_step": f"{elapsed / n_steps:.6f}",
+                        "engine": engine, "seed": SEED,
+                    }
+                )
+
+            temporary_h5.replace(out_h5)
+            print(
+                f"[{run_name}] {name}: saved {out_h5} "
+                f"({elapsed:.1f} s, {elapsed / n_steps * 1e3:.2f} ms/step)"
+            )
+
+        except Exception as exc:
+            print(f"[{run_name}] {name}: FAILED ({type(exc).__name__}: {exc})")
+            # Match TorchSim: a zero-byte timing CSV marks this pair as failed.
+            failure_out_dir = OUT_ROOT / name
+            failure_out_csv = failure_out_dir / f"md_timing_{run_name}.csv"
+            try:
+                failure_out_dir.mkdir(parents=True, exist_ok=True)
+                failure_out_csv.write_bytes(b"")
+            except OSError as marker_error:
+                print(
+                    f"[{run_name}] {name}: could not write failure CSV: "
+                    f"{marker_error}"
+                )
+            continue
 
     print(f"[{run_name}] done.")
 

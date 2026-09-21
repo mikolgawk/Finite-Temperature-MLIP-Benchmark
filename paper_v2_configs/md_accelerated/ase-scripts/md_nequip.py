@@ -6,6 +6,7 @@
 #   "torch==2.11.0+cu128",
 #   "nequip==0.19.0",
 #   "openequivariance==0.6.8",
+#   "tqdm>=4.66",
 # ]
 #
 # [[tool.uv.index]]
