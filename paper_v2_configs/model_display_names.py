@@ -27,7 +27,7 @@ MODEL_DISPLAY_NAMES: dict[str, str] = {
     "orb-v3": "orb-v3-conservative-inf-mpa",
     "orb-v3-direct": "orb-v3-direct-20-mpa",
     "esen-30m-oam": "eSEN-30M-OAM",
-    "nequip": "NequIP-OAM-XL",
+    "nequip": "NequIP-OAM-L",
     "eq-v2-m-omat": "EquiformerV2",
     "pet-oam-xl": "PET-OAM-XL",
     "pet-oam-xl-torchscript": "PET-OAM-XL",
@@ -63,4 +63,3 @@ def display_model_name(name: object) -> str:
     """Return the configured plot label, falling back to the input text."""
     text = str(name).strip()
     return MODEL_DISPLAY_NAMES.get(normalize_display_key(text), text)
-
