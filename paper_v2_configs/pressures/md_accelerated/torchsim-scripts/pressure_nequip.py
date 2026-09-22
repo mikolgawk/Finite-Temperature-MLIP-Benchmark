@@ -28,7 +28,12 @@ from pathlib import Path
 _PRESSURE_ROOT = next(parent for parent in Path(__file__).resolve().parents if parent.name == "pressures")
 sys.path.insert(0, str(_PRESSURE_ROOT))
 from pressure_evaluator import early_cli, run_torchsim_pressure
-early_cli(__file__, "torchsim")
+
+# The model compiler is run in a clean subprocess by invoking this script with
+# an internal flag.  Do not let the pressure evaluator consume compiler args.
+_COMPILE_STRESS_MODE = sys.argv[1:2] == ["--compile-stress"]
+if not _COMPILE_STRESS_MODE:
+    early_cli(__file__, "torchsim")
 
 """Stress-enabled md_nequip.py: record potential stress for every saved trajectory frame."""
 
@@ -75,15 +80,15 @@ MODEL_ID = os.environ.get(
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
-METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
+METADATA_FILE = REPO / "updated_configs" / "data" / "ref-trajs" / "md_metadata.json"
 OUT_ROOT = (
-    REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-accelerated-stress"
+    REPO / "updated_configs" / "data" / "mlip-trajs-torchsim-accelerated-stress"
 )
 COMPILED_MODEL = Path(
     os.environ.get(
         "NEQUIP_OEQ_STRESS_MODEL",
         REPO
-        / "paper_v2_configs"
+        / "updated_configs"
         / "data"
         / "models"
         / "nequip-oam-l-oeq-torchsim-stress.nequip.pt2",
@@ -113,7 +118,10 @@ def compile_configuration() -> dict[str, object]:
     return {
         "model": MODEL_ID,
         "mode": "aotinductor",
-        "target": "batch",
+        # Pressure post-processing evaluates one trajectory frame at a time.
+        # NequIP's batch target requires at least two frames, while its ASE
+        # target is the standard static single-frame AOT signature.
+        "target": "ase",
         "modifier": "enable_OpenEquivariance",
         "derivatives": "positions-and-strain-v1",
         "outputs": ["total_energy", "forces", "stress"],
@@ -161,7 +169,7 @@ def ensure_compiled_model() -> Path:
         "--mode",
         "aotinductor",
         "--target",
-        "batch",
+        "ase",
         "--modifiers",
         "enable_OpenEquivariance",
         "--no-tf32",
@@ -218,8 +226,20 @@ def ensure_compiled_model() -> Path:
 
 
 class WithStressNequIPTorchSimCalc(NequIPTorchSimCalc):
-    """Use the standard stress-enabled batch export format."""
-    pass
+    """Load the static single-frame export through the TorchSim integration."""
+
+    @classmethod
+    def _get_aoti_compile_target(cls):
+        # NequIPTorchSimCalc normally requires the multi-frame ``batch``
+        # signature. This evaluator always supplies one system, so use the
+        # compatible static signature while retaining TorchSim transforms and
+        # neighbor-list construction.
+        from nequip.scripts._compile_utils import (
+            AOTI_ASE_TARGET,
+            COMPILE_TARGET_DICT,
+        )
+
+        return COMPILE_TARGET_DICT[AOTI_ASE_TARGET]
 
 
 def load_model() -> NequIPTorchSimCalc:
@@ -238,4 +258,9 @@ def load_model() -> NequIPTorchSimCalc:
 
 
 if __name__ == "__main__":
-    run_torchsim_pressure(MODEL_NAME, load_model(), "torchsim-nequip-stress-postprocessing")
+    if _COMPILE_STRESS_MODE:
+        compile_with_stress(sys.argv[2:])
+    else:
+        run_torchsim_pressure(
+            MODEL_NAME, load_model(), "torchsim-nequip-stress-postprocessing"
+        )
