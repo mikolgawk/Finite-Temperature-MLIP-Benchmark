@@ -27,7 +27,12 @@ from pathlib import Path
 _PRESSURE_ROOT = next(parent for parent in Path(__file__).resolve().parents if parent.name == "pressures")
 sys.path.insert(0, str(_PRESSURE_ROOT))
 from pressure_evaluator import early_cli, run_ase_pressure
-early_cli(__file__, "ase")
+
+# The model compiler is run in a clean subprocess by invoking this script with
+# an internal flag.  Do not let the pressure evaluator consume compiler args.
+_COMPILE_STRESS_MODE = sys.argv[1:2] == ["--compile-stress"]
+if not _COMPILE_STRESS_MODE:
+    early_cli(__file__, "ase")
 
 """Stress-enabled md_nequip.py: record potential stress for every saved trajectory frame."""
 
@@ -222,7 +227,7 @@ def make_calculator():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--compile-stress":
+    if _COMPILE_STRESS_MODE:
         compile_with_stress(sys.argv[2:])
     else:
         run_ase_pressure(MODEL_NAME, make_calculator, "ase+nequip+aotinductor+oeq+stress")
