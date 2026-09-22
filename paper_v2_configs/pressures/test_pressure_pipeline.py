@@ -51,6 +51,22 @@ class PressurePipelineTests(unittest.TestCase):
         self.assertAlmostEqual(pipeline.stress_row(stress, "TiSe2_300K")["pressure_GPa"], -1.5*pipeline.EV_A3_TO_GPA)
         with self.assertRaises(ValueError): pipeline.stress_matrix([np.nan]*6)
 
+    def test_full_stress_tensor_is_symmetrized_without_changing_pressure(self):
+        stress = np.array([
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+        ])
+
+        result = pipeline.stress_matrix(stress)
+        row = pipeline.stress_row(stress, "bulkCu_300K_test")
+
+        np.testing.assert_allclose(result, 0.5 * (stress + stress.T))
+        self.assertAlmostEqual(
+            row["pressure_GPa"],
+            -np.trace(stress) / 3 * pipeline.EV_A3_TO_GPA,
+        )
+
     def test_hdf_step_alignment_and_stride(self):
         p = self.hdf()
         df = pipeline.read_stress_frames(p, self.meta)

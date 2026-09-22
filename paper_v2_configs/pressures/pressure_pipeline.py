@@ -37,9 +37,9 @@ def stress_matrix(value):
         a = a.reshape(3, 3)
     if a.shape != (3, 3) or not np.isfinite(a).all():
         raise ValueError(f"Invalid stress tensor: {a}")
-    if not np.allclose(a, a.T, atol=1e-6, rtol=1e-5):
-        raise ValueError("Stress tensor is not symmetric")
-    return a
+    # Raw full-matrix strain derivatives need not be exactly symmetric in
+    # finite precision.  ASE's Voigt conversion averages the same pairs.
+    return 0.5 * (a + a.T)
 
 
 def stress_row(stress, structure):

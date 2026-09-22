@@ -29,6 +29,45 @@ class ConstantStress(Calculator):
 
 
 class PressureEvaluatorTests(unittest.TestCase):
+    def test_stress_matrix_symmetrizes_full_tensor(self):
+        stress = np.array([
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+        ])
+
+        result = evaluator._stress_matrix(stress)
+
+        np.testing.assert_allclose(result, 0.5 * (stress + stress.T))
+        np.testing.assert_allclose(np.diag(result), np.diag(stress))
+
+    def test_csv_retry_replaces_selected_system_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "pressure.csv"
+            pd.DataFrame([
+                {"system": "hydrogen", "frame_index": 0, "pressure_GPa": 1.0},
+                {"system": "copper", "frame_index": 0, "pressure_GPa": 2.0},
+            ]).to_csv(output, index=False)
+
+            evaluator._write_csv_records(
+                output,
+                [
+                    {"system": "hydrogen", "frame_index": 0, "pressure_GPa": 3.0},
+                    {"system": "hydrogen", "frame_index": 1, "pressure_GPa": 4.0},
+                ],
+                {"hydrogen"},
+            )
+
+            result = pd.read_csv(output)
+            self.assertEqual(result.system.tolist(), ["copper", "hydrogen", "hydrogen"])
+            self.assertEqual(result.pressure_GPa.tolist(), [2.0, 3.0, 4.0])
+
+    def test_failure_system_uses_trajectory_parent(self):
+        self.assertEqual(
+            evaluator._failure_system({"file": "/trajectories/hydrogen/nvt_model.h5"}),
+            "hydrogen",
+        )
+
     def test_frame_count_respects_limit(self):
         with tempfile.TemporaryDirectory() as temporary:
             trajectory = Path(temporary) / "trajectory.h5"

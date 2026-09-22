@@ -40,6 +40,16 @@ def early_cli(script, backend: str) -> None:
         "--trajectory-model",
         help="Trajectory identifier after nvt_; normally inferred from the pressure model name.",
     )
+    parser.add_argument(
+        "--system",
+        dest="systems",
+        action="append",
+        metavar="NAME",
+        help=(
+            "Evaluate only this system and merge it into existing CSV outputs; "
+            "repeat the option to select multiple systems."
+        ),
+    )
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -47,6 +57,11 @@ def early_cli(script, backend: str) -> None:
     _ARGS = parser.parse_args()
     if _ARGS.max_frames is not None and _ARGS.max_frames < 1:
         parser.error("--max-frames must be positive")
+    if _ARGS.systems and _ARGS.max_frames is not None:
+        parser.error(
+            "--max-frames cannot be combined with --system because a partial "
+            "retry would replace the system's complete CSV rows"
+        )
 
 
 def _trajectory_model(model_name: str) -> str:
@@ -80,9 +95,10 @@ def _stress_matrix(value):
         stress = stress.reshape(3, 3)
     if stress.shape != (3, 3) or not np.isfinite(stress).all():
         raise ValueError(f"invalid stress tensor with shape {stress.shape}")
-    if not np.allclose(stress, stress.T, atol=1e-6, rtol=1e-5):
-        raise ValueError("stress tensor is not symmetric")
-    return stress
+    # Some TorchSim adapters return the raw derivative with respect to a full
+    # deformation matrix.  Project it onto the symmetric Cauchy-stress tensor,
+    # matching the off-diagonal averaging used by ASE's Voigt conversion.
+    return 0.5 * (stress + stress.T)
 
 
 def _pressure_row(stress, system: str) -> dict[str, object]:
@@ -141,6 +157,29 @@ def _frame_count(path: Path, limit: int | None) -> int:
     return min(count, limit) if limit is not None else count
 
 
+def _write_csv_records(path: Path, records, replace_systems: set[str]) -> None:
+    """Write records, replacing selected systems in an existing CSV when requested."""
+    import pandas as pd
+
+    new = pd.DataFrame(records)
+    if new.empty:
+        return
+    if replace_systems and path.exists():
+        old = pd.read_csv(path)
+        if "system" not in old.columns or "system" not in new.columns:
+            raise ValueError(f"cannot merge {path}: missing system column")
+        old = old.loc[~old["system"].isin(replace_systems)]
+        new = pd.concat([old, new], ignore_index=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    new.to_csv(temporary, index=False)
+    temporary.replace(path)
+
+
+def _failure_system(failure: dict[str, object]) -> str | None:
+    file = failure.get("file")
+    return Path(file).parent.name if isinstance(file, str) else None
+
+
 def _reference_pressures(path: Path, meta: dict[str, object]):
     from pressure_pipeline import read_stress_frames
 
@@ -159,16 +198,49 @@ def _run(model_name: str, predict, engine: str) -> None:
         raise SystemExit(
             f"No trajectories for {trajectory_model!r} found under {args.traj_dir}"
         )
+    requested_systems = set(getattr(args, "systems", None) or ())
+    if requested_systems:
+        available_systems = {path.parent.name for path in paths}
+        missing_systems = requested_systems - available_systems
+        if missing_systems:
+            missing = ", ".join(sorted(missing_systems))
+            raise SystemExit(f"No {trajectory_model!r} trajectories found for: {missing}")
+        paths = [path for path in paths if path.parent.name in requested_systems]
     metadata = json.loads(args.metadata.read_text())
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f"{trajectory_model}_same-simulation-length_pressure_per_frame.csv"
     full_output = args.output_dir / f"{trajectory_model}_stress_per_frame.csv"
     summary_output = args.output_dir / f"{trajectory_model}_same-simulation-length_pressure_trajectory_summary.csv"
     failure_output = args.output_dir / f"{trajectory_model}_pressure_failures.json"
+    reference_output = args.output_dir / "references" / f"{trajectory_model}.csv"
+    if requested_systems:
+        missing_outputs = [
+            path
+            for path in (output, full_output, summary_output, reference_output)
+            if not path.exists()
+        ]
+        if missing_outputs:
+            missing = ", ".join(str(path) for path in missing_outputs)
+            raise SystemExit(
+                "--system performs a merge-safe retry and requires existing outputs; "
+                f"missing: {missing}"
+            )
     if (output.exists() and full_output.exists() and summary_output.exists()
-            and not failure_output.exists() and not args.force):
+            and not failure_output.exists() and not args.force
+            and not requested_systems):
         print(f"{output} exists; use --force to recompute.")
         return
+
+    preserved_failures = []
+    if requested_systems and failure_output.exists():
+        previous_failures = json.loads(failure_output.read_text())
+        if not isinstance(previous_failures, list):
+            raise ValueError(f"expected a list of failures in {failure_output}")
+        preserved_failures = [
+            failure
+            for failure in previous_failures
+            if _failure_system(failure) not in requested_systems
+        ]
 
     progress_enabled = not args.no_progress
     if progress_enabled:
@@ -282,20 +354,25 @@ def _run(model_name: str, predict, engine: str) -> None:
                 traceback.print_exc()
 
     if rows:
-        pd.DataFrame(full_rows).to_csv(full_output, index=False)
-        pd.DataFrame(rows).to_csv(output, index=False)
-        pd.DataFrame(summaries).to_csv(summary_output, index=False)
+        _write_csv_records(full_output, full_rows, requested_systems)
+        _write_csv_records(output, rows, requested_systems)
+        _write_csv_records(summary_output, summaries, requested_systems)
         reference_dir = args.output_dir / "references"
         reference_dir.mkdir(exist_ok=True)
-        pd.DataFrame(reference_rows).to_csv(reference_dir / f"{trajectory_model}.csv", index=False)
-    failure_output.write_text(json.dumps(failures, indent=2) + "\n") if failures else failure_output.unlink(missing_ok=True)
+        _write_csv_records(reference_output, reference_rows, requested_systems)
+    reported_failures = [*preserved_failures, *failures]
+    if reported_failures:
+        failure_output.write_text(json.dumps(reported_failures, indent=2) + "\n")
+    else:
+        failure_output.unlink(missing_ok=True)
     if failures:
         raise SystemExit(f"Pressure evaluation incomplete: {len(failures)} failures; see {failure_output}")
     if not rows:
         raise SystemExit("No pressure rows were produced")
-    print(f"Saved {output}")
-    print(f"Saved {full_output}")
-    print(f"Saved {summary_output}")
+    action = "Updated" if requested_systems else "Saved"
+    print(f"{action} {output}")
+    print(f"{action} {full_output}")
+    print(f"{action} {summary_output}")
 
 
 def run_ase_pressure(model_name, make_calculator, engine="ase", *, per_system_calculator=False, **_):
