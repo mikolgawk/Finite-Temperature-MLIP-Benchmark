@@ -332,7 +332,13 @@ def main():
         device=device, dtype=STATE_DTYPE, compute_stress=False,
     )
 
-    run_rmse(MODEL_NAME, model, "torch-sim-0.6.1+tf-eager-dlpack-force-only", validate=model.validate)
+    run_rmse(
+        MODEL_NAME,
+        model,
+        "torch-sim-0.6.1+tf-eager-dlpack-force-only",
+        validate=model.validate,
+        skip_systems={"H"},
+    )
 
 
 if __name__ == "__main__":

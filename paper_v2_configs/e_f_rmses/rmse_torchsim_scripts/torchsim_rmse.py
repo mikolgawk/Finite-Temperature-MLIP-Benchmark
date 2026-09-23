@@ -91,7 +91,8 @@ def count_extxyz_frames(path, limit=None):
 
 
 def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
-             require_stress_disabled=True, warmup=True, validate=None):
+             require_stress_disabled=True, warmup=True, validate=None,
+             skip_systems=()):
     """Evaluate the MD model on reference frames, without integrating dynamics.
 
     Extra keywords match the source MD entry points. Validation/warmup are not
@@ -126,6 +127,9 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     )
     for path in file_iterator:
         system = path.parent.name.split('_')[0]
+        if system in skip_systems:
+            progress_print(f'Skipping {path.parent.name} for {model_name}')
+            continue
         match = re.search(r'(\d+)K', path.parent.name)
         temperature = int(match[1]) if match else 0
         try:
