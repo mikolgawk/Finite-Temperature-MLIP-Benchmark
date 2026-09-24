@@ -153,7 +153,9 @@ def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["model", "mean_time_ms_per_step"])
 
 
-def load_and_merge(timings_dir: Path, pressure_file: Path) -> tuple[pd.DataFrame, str]:
+def load_and_merge(
+    timings_dir: Path, pressure_file: Path, dataset_label: str | None = None
+) -> tuple[pd.DataFrame, str]:
     timings_df = load_model_avg_timings(timings_dir)
     if timings_df.empty:
         raise ValueError(f"No valid timing records found in {timings_dir}")
@@ -182,6 +184,9 @@ def load_and_merge(timings_dir: Path, pressure_file: Path) -> tuple[pd.DataFrame
 
     merged = merged.dropna(subset=["mean_time_ms_per_step", pressure_error_col]).copy()
     merged = merged.rename(columns={pressure_error_col: "pressure_error"})
+
+    if dataset_label is not None:
+        merged["dataset"] = dataset_label
 
     if merged.empty:
         raise ValueError("No overlapping models between timing data and pressure scores file.")
@@ -229,66 +234,79 @@ def model_tier(model_name: str) -> str:
 
 
 def plot_pareto(df: pd.DataFrame, y_axis_label: str, output_file: Path) -> None:
-    pareto_mask = is_pareto_optimal(df)
-
     all_df = df.copy()
     all_df["tier"] = all_df["model"].map(model_tier)
-    pareto_df = df[pareto_mask].copy()
-    pareto_df = pareto_df.sort_values("mean_time_ms_per_step")
+    y_values = all_df["pressure_error"].to_numpy()
+    y_min = float(np.min(y_values))
+    y_max = float(np.max(y_values))
+    y_padding = max((y_max - y_min) * 0.05, 1e-6)
 
-    fig, ax = plt.subplots(figsize=(3.53 * 1.5, 3.53 * 1.5))
+    datasets = all_df.get("dataset", pd.Series("dataset", index=all_df.index)).unique()
+    fig, axes = plt.subplots(
+        1,
+        len(datasets),
+        figsize=(3.53 * 1.5 * len(datasets), 3.53 * 1.5),
+        sharey=True,
+        squeeze=False,
+    )
+    axes = axes[0]
 
-    for tier_name in ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Other"]:
-        tier_df = all_df[all_df["tier"] == tier_name]
-        if tier_df.empty:
-            continue
+    for ax, dataset_name in zip(axes, datasets):
+        dataset_df = all_df[all_df["dataset"] == dataset_name]
+        pareto_df = dataset_df[is_pareto_optimal(dataset_df)]
+        pareto_df = pareto_df.sort_values("mean_time_ms_per_step")
+
+        for tier_name in ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Other"]:
+            tier_df = dataset_df[dataset_df["tier"] == tier_name]
+            if tier_df.empty:
+                continue
+            ax.scatter(
+                tier_df["mean_time_ms_per_step"],
+                tier_df["pressure_error"],
+                color=TIER_COLORS[tier_name],
+                alpha=0.9,
+                s=26,
+                label=tier_name,
+                zorder=2,
+            )
+
         ax.scatter(
-            tier_df["mean_time_ms_per_step"],
-            tier_df["pressure_error"],
-            color=TIER_COLORS[tier_name],
+            pareto_df["mean_time_ms_per_step"],
+            pareto_df["pressure_error"],
+            facecolors="none",
+            edgecolors="black",
+            alpha=0.95,
+            s=58,
+            linewidths=1.0,
+            label="Pareto-optimal",
+            zorder=4,
+        )
+        ax.plot(
+            pareto_df["mean_time_ms_per_step"],
+            pareto_df["pressure_error"],
+            color="black",
+            linewidth=1.2,
             alpha=0.9,
-            s=26,
-            label=tier_name,
-            zorder=2,
+            zorder=3,
         )
 
-    ax.scatter(
-        pareto_df["mean_time_ms_per_step"],
-        pareto_df["pressure_error"],
-        facecolors="none",
-        edgecolors="black",
-        alpha=0.95,
-        s=58,
-        linewidths=1.0,
-        label="Pareto-optimal",
-        zorder=4,
-    )
+        for _, row in dataset_df.iterrows():
+            ax.annotate(
+                display_name(row["model"]),
+                (row["mean_time_ms_per_step"], row["pressure_error"]),
+                xytext=(3, 3),
+                textcoords="offset points",
+                fontsize=FONT_SIZE,
+            )
 
-    ax.plot(
-        pareto_df["mean_time_ms_per_step"],
-        pareto_df["pressure_error"],
-        color="black",
-        linewidth=1.2,
-        alpha=0.9,
-        zorder=3,
-    )
+        ax.set_title(dataset_name)
+        ax.set_xlabel("Mean time per step [ms]")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.set_xlim(right=1050)
+        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+        ax.legend(loc="best", frameon=True)
 
-    for _, row in all_df.iterrows():
-        ax.annotate(
-            display_name(row["model"]),
-            (row["mean_time_ms_per_step"], row["pressure_error"]),
-            xytext=(3, 3),
-            textcoords="offset points",
-            fontsize=FONT_SIZE,
-        )
-
-    ax.set_xlabel("Mean time per step [ms]")
-    ax.set_ylabel(y_axis_label)
-    # ax.set_title("Pareto Front: Pressure Error vs Force Eval Time")
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend(loc="best", frameon=True)
-
-    ax.set_xlim(right=590)
+    axes[0].set_ylabel(y_axis_label)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
@@ -306,13 +324,18 @@ def main() -> None:
     )
     parser.add_argument(
         "--timings-dir",
-        default=str(DEFAULT_TIMINGS_DIR),
-        help="Directory containing per-system md_timing_<model>.csv files (timings_fp32_v100).",
+        action="append",
+        help="Directory containing per-system md_timing_<model>.csv files; repeat for overlays.",
     )
     parser.add_argument(
         "--pressure-scores-file",
-        default=str(DEFAULT_PRESSURE_SCORES_FILE),
-        help="CSV with model-level pressure error or pressure similarity columns.",
+        action="append",
+        help="CSV with model-level pressure error or pressure similarity columns; repeat per timing directory.",
+    )
+    parser.add_argument(
+        "--dataset-label",
+        action="append",
+        help="Legend label for each input pair; defaults to the timing directory name.",
     )
     parser.add_argument(
         "--output-file",
@@ -321,8 +344,27 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    merged, y_axis_label = load_and_merge(Path(args.timings_dir), Path(args.pressure_scores_file))
-    plot_pareto(merged, y_axis_label, Path(args.output_file))
+    timings_dirs = args.timings_dir or [str(DEFAULT_TIMINGS_DIR)]
+    pressure_files = args.pressure_scores_file or [str(DEFAULT_PRESSURE_SCORES_FILE)]
+    if len(timings_dirs) != len(pressure_files):
+        parser.error("--timings-dir and --pressure-scores-file must have the same number of values")
+    labels = args.dataset_label or []
+    if labels and len(labels) != len(timings_dirs):
+        parser.error("--dataset-label must have one value per input pair")
+
+    merged_frames = []
+    y_axis_labels = []
+    for index, (timings_dir, pressure_file) in enumerate(zip(timings_dirs, pressure_files)):
+        label = labels[index] if labels else Path(timings_dir).name
+        merged, y_axis_label = load_and_merge(
+            Path(timings_dir), Path(pressure_file), dataset_label=label
+        )
+        merged_frames.append(merged)
+        y_axis_labels.append(y_axis_label)
+
+    if len(set(y_axis_labels)) != 1:
+        parser.error("all pressure score files must use the same pressure error metric")
+    plot_pareto(pd.concat(merged_frames, ignore_index=True), y_axis_labels[0], Path(args.output_file))
 
 
 if __name__ == "__main__":

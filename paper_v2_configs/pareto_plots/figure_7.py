@@ -390,6 +390,7 @@ def load_and_merge(
 	pressure_metrics_file: Path,
 	pressure_scale_gpa: float,
 	clip_pressure_error: bool,
+	dataset_label: str | None = None,
 	combined_metrics_file: Path | None = None,
 	rdf_metrics_file: Path | None = None,
 	vdos_metrics_file: Path | None = None,
@@ -517,6 +518,8 @@ def load_and_merge(
 		)
 
 	merged["Combined Error [%]"] = compute_combined_error(merged)
+	if dataset_label is not None:
+		merged["dataset"] = dataset_label
 
 	for _, row in merged.iterrows():
 		print(
@@ -580,117 +583,118 @@ def model_tier(model_name: str) -> str:
 
 
 def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
-	pareto_mask = is_pareto_optimal(df)
-
 	all_df = df.copy()
+	if "dataset" not in all_df.columns:
+		all_df["dataset"] = "dataset"
 	all_df["tier"] = all_df["model"].map(model_tier)
+	datasets = all_df["dataset"].drop_duplicates().tolist()
+	y_values = all_df["Combined Error [%]"].to_numpy()
+	y_bottom = min(23.0, float(np.nanmin(y_values)) - 0.5)
+	y_top = max(36.0, float(np.nanmax(y_values)) + 0.5)
 
-	pareto_df = df[pareto_mask].copy().sort_values("mean_time_per_step_ms")
-	pareto_df["tier"] = pareto_df["model"].map(model_tier)
+	fig, axes = plt.subplots(
+		1,
+		len(datasets),
+		figsize=(3.53 * 1.5 * len(datasets), 3.53 * 1.5),
+		sharey=True,
+		squeeze=False,
+	)
+	axes = axes[0]
 
-	fig, ax = plt.subplots(figsize=(3.53 * 1.5, 3.53 * 1.5))
+	for ax, dataset_name in zip(axes, datasets):
+		dataset_df = all_df[all_df["dataset"] == dataset_name]
+		pareto_df = dataset_df[is_pareto_optimal(dataset_df)].sort_values("mean_time_per_step_ms")
 
-	for tier_name in ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Other"]:
-		tier_df = all_df[all_df["tier"] == tier_name]
-
-		if tier_df.empty:
-			continue
+		for tier_name in ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Other"]:
+			tier_df = dataset_df[dataset_df["tier"] == tier_name]
+			if tier_df.empty:
+				continue
+			ax.scatter(
+				tier_df["mean_time_per_step_ms"],
+				tier_df["Combined Error [%]"],
+				color=TIER_COLORS[tier_name],
+				alpha=0.9,
+				s=26,
+				label=tier_name,
+				zorder=2,
+			)
 
 		ax.scatter(
-			tier_df["mean_time_per_step_ms"],
-			tier_df["Combined Error [%]"],
-			color=TIER_COLORS[tier_name],
+			pareto_df["mean_time_per_step_ms"],
+			pareto_df["Combined Error [%]"],
+			facecolors="none",
+			edgecolors="black",
+			alpha=0.95,
+			s=58,
+			linewidths=1.0,
+			label="Pareto-optimal",
+			zorder=4,
+		)
+		ax.plot(
+			pareto_df["mean_time_per_step_ms"],
+			pareto_df["Combined Error [%]"],
+			color="black",
+			linewidth=1.2,
 			alpha=0.9,
-			s=26,
-			label=tier_name,
-			zorder=2,
+			zorder=3,
 		)
 
-	ax.scatter(
-		pareto_df["mean_time_per_step_ms"],
-		pareto_df["Combined Error [%]"],
-		facecolors="none",
-		edgecolors="black",
-		alpha=0.95,
-		s=58,
-		linewidths=1.0,
-		label="Pareto-optimal",
-		zorder=4,
-	)
-
-	ax.plot(
-		pareto_df["mean_time_per_step_ms"],
-		pareto_df["Combined Error [%]"],
-		color="black",
-		linewidth=1.2,
-		alpha=0.9,
-		zorder=3,
-	)
-
-	label_texts = []
-	x_vals = all_df["mean_time_per_step_ms"].to_numpy()
-	y_vals = all_df["Combined Error [%]"].to_numpy()
-
-	for xi, yi, model_name in zip(x_vals, y_vals, all_df["model"].values):
-		txt = ax.annotate(
-			display_name(str(model_name)),
-			xy=(xi, yi),
-			xytext=(3, 3),
-			textcoords="offset points",
-			fontsize=FONT_SIZE,
-			alpha=0.8,
-			ha="left",
-			va="bottom",
-			rotation=0,
-			bbox=dict(
-				boxstyle="round,pad=0.08",
-				facecolor="white",
-				edgecolor="none",
-				alpha=0.55,
-			),
-		)
-		label_texts.append(txt)
-
-	if adjust_text is not None and label_texts:
-		try:
-			adjust_text(
-				label_texts,
-				ax=ax,
-				x=x_vals,
-				y=y_vals,
-				avoid_self=True,
-				only_move={"points": "xy", "text": "xy"},
-				force_text=(1.2, 1.4),
-				force_points=(0.8, 1.0),
-				expand_points=(1.3, 1.4),
-				expand_text=(1.2, 1.3),
-				lim=400,
-				arrowprops=dict(
-					arrowstyle="-",
-					color="0.5",
-					lw=0.4,
-					alpha=0.45,
-				),
+		x_vals = dataset_df["mean_time_per_step_ms"].to_numpy()
+		y_vals = dataset_df["Combined Error [%]"].to_numpy()
+		ax.set_xlim(left=0, right=max(590.0, float(np.nanmax(x_vals)) * 1.05))
+		ax.set_ylim(bottom=y_bottom, top=y_top)
+		label_texts = []
+		for xi, yi, model_name in zip(x_vals, y_vals, dataset_df["model"].values):
+			label_texts.append(
+				ax.annotate(
+					display_name(str(model_name)),
+					xy=(xi, yi),
+					xytext=(3, 3),
+					textcoords="offset points",
+					fontsize=FONT_SIZE,
+					alpha=0.8,
+					ha="left",
+					va="bottom",
+					bbox=dict(boxstyle="round,pad=0.08", facecolor="white", edgecolor="none", alpha=0.55),
+				)
 			)
-		except Exception:
-			pass
 
-	ax.set_xlabel(r"Mean time per step [ms]")
-	ax.set_ylabel(r"$\bar{E}_{RPV}$ [%]")
-	ax.set_xlim(right=590)
-	ax.set_ylim(bottom=23.0)
-	ax.grid(True, linestyle="--", alpha=0.4)
-	ax.legend(loc="best", frameon=True)
+		if adjust_text is not None and label_texts:
+			try:
+				adjust_text(
+					label_texts,
+					ax=ax,
+					x=x_vals,
+					y=y_vals,
+					avoid_self=True,
+					only_move={"points": "xy", "text": "xy"},
+					force_text=(2.0, 2.2),
+					force_points=(1.0, 1.2),
+					expand_points=(1.3, 1.4),
+					expand_text=(1.4, 1.5),
+					lim=400,
+					ensure_inside_axes=True,
+					expand_axes=False,
+					arrowprops=dict(arrowstyle="-", color="0.5", lw=0.4, alpha=0.45),
+				)
+			except Exception:
+				pass
 
+		ax.set_title(dataset_name)
+		ax.set_xlabel(r"Mean time per step [ms]")
+		ax.grid(True, linestyle="--", alpha=0.4)
+		ax.legend(loc="best", frameon=True)
+
+	axes[0].set_ylabel(r"$\bar{E}_{RPV}$ [%]")
 	output_file.parent.mkdir(parents=True, exist_ok=True)
-
 	plt.tight_layout()
 	plt.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
 	plt.close(fig)
 
+	pareto_count = sum(len(dataset_df[is_pareto_optimal(dataset_df)]) for dataset_df in (all_df[all_df["dataset"] == name] for name in datasets))
 	print(f"Saved: {output_file}")
 	print(f"Models plotted: {len(all_df)}")
-	print(f"Pareto-optimal models: {len(pareto_df)}")
+	print(f"Pareto-optimal models: {pareto_count}")
 
 
 def main() -> None:
@@ -704,8 +708,8 @@ def main() -> None:
 	parser.add_argument(
 		"--source",
 		choices=SOURCES,
-		default=DEFAULT_SOURCE,
-		help="V2 trajectory source used to derive default timing, RDF, and VDOS inputs.",
+		action="append",
+		help="V2 trajectory source; repeat to create side-by-side subplots.",
 	)
 
 	parser.add_argument(
@@ -737,7 +741,7 @@ def main() -> None:
 
 	parser.add_argument(
 		"--pressure-metrics-file",
-		default=None,
+		action="append",
 		help=(
 			"CSV with pressure histogram similarity/error by model. Expected columns include "
 			"model or mlip_model plus final_mean_pressure_similarity_percent, "
@@ -790,31 +794,38 @@ def main() -> None:
 	)
 
 	args = parser.parse_args()
-	source = args.source
-	default_timings, default_rdf, default_vdos, default_pressure_mode = source_input_paths(source)
-	timings_dir = Path(args.timings_dir) if args.timings_dir else default_timings
-	rdf_metrics_file = (
-		Path(args.rdf_metrics_file) if args.rdf_metrics_file else default_rdf
-	)
-	vdos_metrics_file = (
-		Path(args.vdos_metrics_file) if args.vdos_metrics_file else default_vdos
-	)
-	pressure_backend = args.pressure_backend or source_pressure_backend(source)
-	pressure_mode = args.pressure_mode or default_pressure_mode
+	sources = args.source or [DEFAULT_SOURCE]
+	if len(sources) > 1 and any(
+		value is not None
+		for value in [args.timings_dir, args.combined_metrics_file, args.rdf_metrics_file, args.vdos_metrics_file]
+	):
+		parser.error("custom timing/RDF/VDOS inputs are only supported for one source")
+	if args.pressure_metrics_file and len(args.pressure_metrics_file) not in {1, len(sources)}:
+		parser.error("--pressure-metrics-file must be supplied once or once per --source")
 
-	merged = load_and_merge(
-		timings_dir=timings_dir,
-		combined_metrics_file=(
-			Path(args.combined_metrics_file) if args.combined_metrics_file else None
-		),
-		rdf_metrics_file=rdf_metrics_file,
-		vdos_metrics_file=vdos_metrics_file,
-		pressure_metrics_file=Path(args.pressure_metrics_file) if args.pressure_metrics_file else pressure_path(args.source),
-		pressure_scale_gpa=args.pressure_scale_gpa,
-		clip_pressure_error=not args.no_pressure_clip,
-		pressure_backend=pressure_backend,
-		pressure_mode=pressure_mode,
-	)
+	merged_frames = []
+	for index, source in enumerate(sources):
+		default_timings, default_rdf, default_vdos, default_pressure_mode = source_input_paths(source)
+		pressure_file = (
+			Path(args.pressure_metrics_file[index if len(args.pressure_metrics_file or []) > 1 else 0])
+			if args.pressure_metrics_file
+			else pressure_path(source)
+		)
+		merged_frames.append(
+			load_and_merge(
+				timings_dir=Path(args.timings_dir) if args.timings_dir else default_timings,
+				combined_metrics_file=Path(args.combined_metrics_file) if args.combined_metrics_file else None,
+				rdf_metrics_file=Path(args.rdf_metrics_file) if args.rdf_metrics_file else default_rdf,
+				vdos_metrics_file=Path(args.vdos_metrics_file) if args.vdos_metrics_file else default_vdos,
+				pressure_metrics_file=pressure_file,
+				pressure_scale_gpa=args.pressure_scale_gpa,
+				clip_pressure_error=not args.no_pressure_clip,
+				pressure_backend=args.pressure_backend or source_pressure_backend(source),
+				pressure_mode=args.pressure_mode or default_pressure_mode,
+				dataset_label="accelerated" if source.endswith("-accelerated") else "eager",
+			)
+		)
+	merged = pd.concat(merged_frames, ignore_index=True)
 
 	output_csv = Path(args.output_csv)
 	output_csv.parent.mkdir(parents=True, exist_ok=True)
