@@ -41,8 +41,10 @@ def normalize_calculator_name(name):
     return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_CSV = BASE_DIR / 'results' / 'mean_metrics_by_system_type_and_model.csv'
-OUTPUT_PDF = BASE_DIR / 'plots' / 'plot_SI_energy_rmse_by_system_type.pdf'
+from _plot_inputs import plot_args
+RESULTS_DIR, PLOTS_DIR = plot_args()
+INPUT_CSV = RESULTS_DIR / 'mean_metrics_by_system_type_and_model.csv'
+OUTPUT_PDF = PLOTS_DIR / 'plot_SI_energy_rmse_by_system_type.pdf'
 
 SYSTEM_TYPE_ORDER = [
     'pure metals',
@@ -161,7 +163,7 @@ def main() -> None:
             if tier_sub.empty:
                 continue
 
-            tier_sub['_tier_order'] = pd.Categorical(tier_sub['calculator'], categories=tier_models, ordered=True)
+            tier_sub['_tier_order'] = pd.Categorical(tier_sub['calculator'], categories=list(dict.fromkeys(tier_models)), ordered=True)
             tier_sub = tier_sub.sort_values('_tier_order').drop(columns=['_tier_order']).reset_index(drop=True)
 
             best_idx = tier_sub['energy_rmse'].idxmin()

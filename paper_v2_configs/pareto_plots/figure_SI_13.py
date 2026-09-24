@@ -23,6 +23,7 @@ This penalizes the largest error component more strongly than a simple arithmeti
 from __future__ import annotations
 
 import argparse
+from _figure_data import pressure_path
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -507,7 +508,7 @@ def main() -> None:
 
 	parser.add_argument(
 		"--pressure-metrics-file",
-		default=str(DEFAULT_PRESSURE_METRICS_FILE),
+		default=None,
 		help=(
 			"CSV with pressure histogram similarity/error by model. Expected columns include "
 			"model or mlip_model plus final_mean_pressure_similarity_percent, "
@@ -563,7 +564,7 @@ def main() -> None:
 		vdos_metrics_file=(
 			Path(args.vdos_metrics_file) if args.vdos_metrics_file else default_vdos
 		),
-		pressure_metrics_file=Path(args.pressure_metrics_file),
+		pressure_metrics_file=Path(args.pressure_metrics_file) if args.pressure_metrics_file else pressure_path(args.source),
 		pressure_scale_gpa=args.pressure_scale_gpa,
 		clip_pressure_error=not args.no_pressure_clip,
 		pressure_backend=args.pressure_backend or source_pressure_backend(args.source),

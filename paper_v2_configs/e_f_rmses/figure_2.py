@@ -46,20 +46,10 @@ def normalize_calculator_name(name):
     return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 # Read and aggregate data from per-model RMSE CSV files
-data_dir = BASE_DIR / 'data' / 'e-f-predictions'
-csv_files = sorted(data_dir.rglob('rmse-results-all_*.csv'))
-
-if not csv_files:
-    raise FileNotFoundError(f'No rmse-results-all_*.csv files found in {data_dir}')
-
-all_frames = []
-for csv_file in csv_files:
-    frame = pd.read_csv(csv_file)
-    model_name = csv_file.stem.replace('rmse-results-all_', '', 1)
-    frame['calculator'] = normalize_calculator_name(model_name)
-    all_frames.append(frame)
-
-all_data = pd.concat(all_frames, ignore_index=True)
+from _plot_inputs import plot_args
+results_dir, plots_dir = plot_args()
+all_data = pd.read_csv(results_dir / 'rmse_per_system.csv')
+all_data['calculator'] = all_data['calculator'].map(normalize_calculator_name)
 
 df = (
     all_data.groupby('calculator', as_index=False)[
@@ -74,11 +64,9 @@ mean_summary = df[[
     'force_rmse',
 ]]
 mean_summary['calculator'] = mean_summary['calculator'].map(lambda name: CALCULATOR_RAW_NAMES.get(name, name))
-results_dir = BASE_DIR / 'results'
-plots_dir = BASE_DIR / 'plots'
 results_dir.mkdir(parents=True, exist_ok=True)
 plots_dir.mkdir(parents=True, exist_ok=True)
-mean_summary.to_csv(results_dir / 'mean_metrics_by_model.csv', index=False)
+
 
 # Create figure with 2 subplots
 fig, axes = plt.subplots(1, 2, figsize=(3.53 * 2, 3.53))
@@ -366,7 +354,6 @@ plot_path = plots_dir / 'plot_e_f_rmses.pdf'
 plt.savefig(plot_path)
 print(f"Plot saved as {plot_path}")
 print(
-    "Saved mean_metrics_by_model.csv with per-model means for energy and force RMSE"
 )
 print(
     "Energy RMSE medians -> "

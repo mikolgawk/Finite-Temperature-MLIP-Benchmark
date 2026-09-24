@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from md_success import torchsim_md_succeeded
 
 
 _ARGS = None
@@ -194,6 +198,8 @@ def _run(model_name: str, predict, engine: str) -> None:
         raise RuntimeError("early_cli() must be called before run_pressure()")
     trajectory_model = _trajectory_model(args.trajectory_model or model_name)
     paths = _trajectory_paths(args.traj_dir, trajectory_model)
+    if _BACKEND == "torchsim":
+        paths = [path for path in paths if torchsim_md_succeeded(path)]
     if not paths:
         raise SystemExit(
             f"No trajectories for {trajectory_model!r} found under {args.traj_dir}"
@@ -228,8 +234,12 @@ def _run(model_name: str, predict, engine: str) -> None:
     if (output.exists() and full_output.exists() and summary_output.exists()
             and not failure_output.exists() and not args.force
             and not requested_systems):
-        print(f"{output} exists; use --force to recompute.")
-        return
+        if _BACKEND != "torchsim" or set(pd.read_csv(summary_output)["system"]) <= {
+            path.parent.name for path in paths
+        }:
+            print(f"{output} exists; use --force to recompute.")
+            return
+        print(f"{output} contains systems without completed MD; recomputing.")
 
     preserved_failures = []
     if requested_systems and failure_output.exists():

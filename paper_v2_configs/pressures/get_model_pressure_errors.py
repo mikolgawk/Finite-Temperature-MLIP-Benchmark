@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,9 @@ import pandas as pd
 EXCLUDED_MODELS = {"pet-mad"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent))
+from metric_sources import SOURCES, SOURCE_DATASETS, pressure_input_dir
+
 DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results"
 DEFAULT_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
 DEFAULT_PAIR_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "pressure_pair_similarity_same_simulation_length.csv"
@@ -444,6 +448,7 @@ def ensure_pressure_comparison_file(
     pressure_comparison_file: Path | None,
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = None,
+    output_dir: Path | None = None,
 ) -> Path | None:
     """Create the model pressure-MAE CSV from evaluator summaries when needed."""
     if (
@@ -459,7 +464,7 @@ def ensure_pressure_comparison_file(
         return pressure_comparison_file
 
     destination = pressure_comparison_file or (
-        pressures_dir / "model_mean_pressure_comparison.csv"
+        (output_dir or pressures_dir) / "model_mean_pressure_comparison.csv"
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     comparison.to_csv(destination, index=False)
@@ -564,6 +569,7 @@ def compute_pressure_metric(
     pressure_comparison_file: Path | None,
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = None,
+    source: str | None = None,
 ) -> pd.DataFrame:
     if bins < 2:
         raise ValueError("--bins must be >= 2")
@@ -576,6 +582,9 @@ def compute_pressure_metric(
         bins=bins,
         models=models,
     )
+    if source is not None:
+        pair_df['backend'], pair_df['mode'] = SOURCE_DATASETS[source]
+        pair_df['source'] = source
     if excluded_system_types:
         excluded = {value.strip().lower() for value in excluded_system_types}
         pair_df = pair_df[
@@ -587,6 +596,7 @@ def compute_pressure_metric(
     pressure_comparison_file = ensure_pressure_comparison_file(
         pressures_dir, pressure_comparison_file, models=models,
         excluded_system_types=excluded_system_types,
+        output_dir=model_mean_output_file.parent,
     )
 
     _, model_mean_df, _ = write_metric_outputs(
@@ -666,7 +676,7 @@ def main() -> None:
     parser.add_argument(
         "--output-file",
         type=Path,
-        default=DEFAULT_OUTPUT_FILE,
+        default=None,
         help="Model-level output CSV. Kept for compatibility with earlier workflows.",
     )
     parser.add_argument(
@@ -678,19 +688,19 @@ def main() -> None:
     parser.add_argument(
         "--pair-output-file",
         type=Path,
-        default=DEFAULT_PAIR_OUTPUT_FILE,
+        default=None,
         help="Pair-level pressure histogram similarity output CSV.",
     )
     parser.add_argument(
         "--system-model-mean-output-file",
         type=Path,
-        default=DEFAULT_SYSTEM_MODEL_MEAN_OUTPUT_FILE,
+        default=None,
         help="Mean similarity per (system, model).",
     )
     parser.add_argument(
         "--model-system-type-mean-output-file",
         type=Path,
-        default=DEFAULT_MODEL_SYSTEM_TYPE_MEAN_OUTPUT_FILE,
+        default=None,
         help="Mean similarity per (model, system type).",
     )
     parser.add_argument(
@@ -700,29 +710,50 @@ def main() -> None:
         help=(
             "Optional existing pressure MAE CSV to merge into the model-level output. "
             "If omitted or unusable, it is generated as model_mean_pressure_comparison.csv "
-            "under --pressures-dir from the evaluator trajectory summaries. The histogram "
+            "in the source output directory from the evaluator trajectory summaries. The histogram "
             "score does not use these MAE values."
         ),
     )
 
+    parser.add_argument('--source', action='append', choices=SOURCES, dest='sources')
+    parser.add_argument('--results-dir', type=Path, default=DEFAULT_PRESSURES_DIR,
+                        help='Output root; each source gets its own subdirectory.')
     args = parser.parse_args()
 
-    model_mean_output_file = args.model_mean_output_file or args.output_file
-    compute_pressure_metric(
-        pressures_dir=Path(args.pressures_dir).resolve(),
-        reference_file=Path(args.reference_file).resolve() if args.reference_file else None,
-        model_file_suffix=args.model_file_suffix,
-        bins=args.bins,
-        pair_output_file=Path(args.pair_output_file).resolve(),
-        system_model_mean_output_file=Path(args.system_model_mean_output_file).resolve(),
-        model_mean_output_file=Path(model_mean_output_file).resolve(),
-        model_system_type_mean_output_file=Path(args.model_system_type_mean_output_file).resolve(),
-        pressure_comparison_file=Path(args.pressure_comparison_file).resolve()
-        if args.pressure_comparison_file
-        else None,
-        models=set(args.models) if args.models else None,
-        excluded_system_types=set(args.excluded_system_types or ()),
-    )
+    inputs = args.pressures_dir.resolve()
+    selected = args.sources or [source for source in SOURCES
+        if any(pressure_input_dir(inputs, source).glob(f'*{args.model_file_suffix}'))]
+    if args.models and not args.sources:
+        requested_models = {canonical_pressure_model_name(model) for model in args.models}
+        selected = [source for source in selected if any(
+            canonical_pressure_model_name(parse_model_name(csv_file, args.model_file_suffix)) in requested_models
+            for csv_file in pressure_input_dir(inputs, source).glob(f'*{args.model_file_suffix}')
+        )]
+    # A flat custom input directory must be explicitly assigned to a source.
+    if not selected:
+        parser.error('No pressure datasets found; for a flat --pressures-dir, specify --source.')
+    explicit_outputs = [args.output_file, args.model_mean_output_file, args.pair_output_file,
+                        args.system_model_mean_output_file, args.model_system_type_mean_output_file,
+                        args.pressure_comparison_file]
+    if len(selected) > 1 and any(explicit_outputs):
+        parser.error('Explicit output/comparison files require exactly one --source; use --results-dir for multiple sources.')
+    for source in dict.fromkeys(selected):
+        data = pressure_input_dir(inputs, source)
+        if len(selected) == 1 and any(inputs.glob(f'*{args.model_file_suffix}')):
+            data = inputs
+        output = args.results_dir.resolve() / source
+        compute_pressure_metric(
+            pressures_dir=data,
+            reference_file=args.reference_file.resolve() if args.reference_file else None,
+            model_file_suffix=args.model_file_suffix, bins=args.bins,
+            pair_output_file=args.pair_output_file or output / DEFAULT_PAIR_OUTPUT_FILE.name,
+            system_model_mean_output_file=args.system_model_mean_output_file or output / DEFAULT_SYSTEM_MODEL_MEAN_OUTPUT_FILE.name,
+            model_mean_output_file=args.model_mean_output_file or args.output_file or output / DEFAULT_OUTPUT_FILE.name,
+            model_system_type_mean_output_file=args.model_system_type_mean_output_file or output / DEFAULT_MODEL_SYSTEM_TYPE_MEAN_OUTPUT_FILE.name,
+            pressure_comparison_file=args.pressure_comparison_file,
+            models=set(args.models) if args.models else None,
+            excluded_system_types=set(args.excluded_system_types or ()), source=source,
+        )
 
 
 if __name__ == "__main__":

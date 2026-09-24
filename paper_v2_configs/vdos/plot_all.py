@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pressure-file",
         type=Path,
-        default=CONFIG_DIR / "pressures/results/model_pressure_error_metric.csv",
+        default=None,
     )
     parser.add_argument("--f1-file", type=Path, default=CONFIG_DIR / "data/matbench-scores/f1-scores.csv")
     parser.add_argument("--ksrme-file", type=Path, default=CONFIG_DIR / "data/matbench-scores/ksrme-scores.csv")
@@ -73,6 +73,7 @@ def main() -> None:
     failures: list[str] = []
     for source in dict.fromkeys(sources):
         source_results = results_dir / source
+        pressure_file = args.pressure_file or CONFIG_DIR / "pressures/results" / source / "model_pressure_error_metric.csv"
         source_plots = plots_dir / source
         common = ["--source", source]
         stages = [
@@ -94,7 +95,7 @@ def main() -> None:
                 "Figures SI 7, 8, and 9",
                 [
                     sys.executable, "-u", str(HERE / "figure_SI_7_8_9.py"), *common,
-                    "--pressure-file", str(args.pressure_file.resolve()),
+                    "--pressure-file", str(pressure_file.resolve()),
                     "--f1-file", str(args.f1_file.resolve()),
                     "--ksrme-file", str(args.ksrme_file.resolve()),
                     "--rdf-output-file", str(source_plots / "plot_rdf_correlations_1x3.pdf"),

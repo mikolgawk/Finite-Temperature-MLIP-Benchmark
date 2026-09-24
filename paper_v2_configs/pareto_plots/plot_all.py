@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pressure-file",
         type=Path,
-        default=CONFIG_DIR / "pressures/results/model_pressure_error_metric.csv",
+        default=None,
     )
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
     return parser.parse_args()
@@ -118,18 +118,19 @@ def main() -> None:
             failures.append(label)
 
     for source in dict.fromkeys(sources):
+        pressure_file = args.pressure_file or CONFIG_DIR / "pressures/results" / source / "model_pressure_error_metric.csv"
         source_plots = plots_dir / source
         source_results = results_dir / source
         provenance = [
             "--pressure-backend", "torchsim" if "torchsim" in source else "ase",
             "--pressure-mode", "md_accelerated" if source.endswith("-accelerated") else "md_eager",
         ]
-        common = ["--source", source, "--pressure-file", str(args.pressure_file.resolve()), *provenance]
+        common = ["--source", source, "--pressure-file", str(pressure_file.resolve()), *provenance]
         stages = [
             (
                 "Figure 7",
                 [sys.executable, "-u", str(HERE / "figure_7.py"), "--source", source,
-                 "--pressure-metrics-file", str(args.pressure_file.resolve()), *provenance,
+                 "--pressure-metrics-file", str(pressure_file.resolve()), *provenance,
                  "--output-file", str(source_plots / "figure_7.pdf"),
                  "--output-csv", str(source_results / "figure_7_metrics.csv")],
             ),
@@ -157,7 +158,7 @@ def main() -> None:
             (
                 "Figure SI 13",
                 [sys.executable, "-u", str(HERE / "figure_SI_13.py"), "--source", source,
-                 "--pressure-metrics-file", str(args.pressure_file.resolve()), *provenance,
+                 "--pressure-metrics-file", str(pressure_file.resolve()), *provenance,
                  "--output-file", str(source_plots / "figure_SI_13.pdf"),
                  "--output-csv", str(source_results / "figure_SI_13.csv")],
             ),

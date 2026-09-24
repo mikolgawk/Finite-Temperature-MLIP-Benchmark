@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+from metric_sources import SOURCES
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_EXCLUDED_SYSTEM_TYPES = ("molecular crystals",)
 
@@ -48,7 +50,7 @@ class MetricStage:
     working_directory: Path
 
 
-def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
+def metric_stages(models: tuple[str, ...] = (), sources: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
     """Return the metric stages in the order required by the Pareto plots."""
     energy_force_dir = SCRIPT_DIR / "e_f_rmses"
     pressure_dir = SCRIPT_DIR / "pressures"
@@ -56,6 +58,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
     vdos_dir = SCRIPT_DIR / "vdos"
 
     model_args = tuple(arg for model in models for arg in ("--model", model))
+    source_args = tuple(arg for source in sources for arg in ("--source", source))
     exclusion_args = tuple(
         arg
         for system_type in DEFAULT_EXCLUDED_SYSTEM_TYPES
@@ -72,6 +75,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 str(energy_force_dir / "compute_mean_rmses_by_system_type.py"),
                 *exclusion_args,
                 *model_args,
+                *source_args,
             ),
             working_directory=energy_force_dir,
         ),
@@ -84,6 +88,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 str(pressure_dir / "get_model_pressure_errors.py"),
                 *exclusion_args,
                 *model_args,
+                *source_args,
             ),
             working_directory=pressure_dir,
         ),
@@ -97,6 +102,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 "--compute-only",
                 *exclusion_args,
                 *model_args,
+                *source_args,
             ),
             working_directory=rdf_dir,
         ),
@@ -110,6 +116,7 @@ def metric_stages(models: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
                 "--compute-only",
                 *exclusion_args,
                 *model_args,
+                *source_args,
             ),
             working_directory=vdos_dir,
         ),
@@ -137,6 +144,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="print the selected commands without running them",
     )
+    parser.add_argument("--source", action="append", choices=SOURCES, dest="sources")
     return parser.parse_args()
 
 
@@ -160,7 +168,7 @@ def main() -> None:
     selected = set(args.metrics) if args.metrics else None
     stages = [
         stage
-        for stage in metric_stages(tuple(dict.fromkeys(args.models or ())))
+        for stage in metric_stages(tuple(dict.fromkeys(args.models or ())), tuple(dict.fromkeys(args.sources or ())))
         if selected is None or stage.name in selected
     ]
 

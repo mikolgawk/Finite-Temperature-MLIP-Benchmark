@@ -19,16 +19,20 @@ instead differentiates their positions, as is necessarily done for references.
 
 Every trajectory source is written to a separate subdirectory of ``results``.
 Existing spectra are reused unless ``--overwrite`` is supplied, so interrupted
-or expanded runs can be resumed cheaply. Every expected model/system pair is
-included in the aggregates; missing or unreadable data and failed calculations
-receive 100% error and 0% similarity.
+or expanded runs can be resumed cheaply. TorchSim aggregates include only
+model/system pairs with completed MD. Missing ASE data and failed calculations
+on eligible pairs receive 100% error and 0% similarity.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from md_success import torchsim_md_succeeded
 
 import h5py
 import numpy as np
@@ -412,6 +416,15 @@ def process_source(
     results_dir = args.results_dir.resolve() / source
     spectra_dir = results_dir / SPECTRA_DIR
     trajectories = discover_mlip_trajectories(trajectory_dir)
+    torchsim_source = "torchsim" in source
+    if torchsim_source:
+        trajectories = {
+            system: {
+                model: path for model, path in models.items()
+                if torchsim_md_succeeded(path)
+            }
+            for system, models in trajectories.items()
+        }
     all_discovered_model_names = {
         model for models in trajectories.values() for model in models
     }
@@ -444,11 +457,11 @@ def process_source(
         }
     trajectories = {system: models for system, models in trajectories.items() if models}
 
-    # Preserve explicitly requested models even if no trajectory was produced.
-    # Otherwise, the union across the unfiltered source defines the models
-    # expected for every reference system, ensuring failed MD runs contribute a
-    # 100% penalty even when the calculation is filtered to that failed system.
-    model_names = sorted(selected_models or all_discovered_model_names)
+    # ASE retains its expected-pair penalty; TorchSim scores completed MD only.
+    model_names = sorted(
+        {model for models in trajectories.values() for model in models}
+        if torchsim_source else (selected_models or all_discovered_model_names)
+    )
     expected_systems = (
         selected_systems - excluded_systems
         if selected_systems is not None
@@ -508,17 +521,23 @@ def process_source(
 
     for system in sorted(expected_systems):
         models = trajectories.get(system, {})
+        eligible_models = (
+            [model for model in model_names if model in models]
+            if torchsim_source else model_names
+        )
+        if not eligible_models:
+            continue
         print(f"\n=== System: {system} ===")
         ref_path = reference_dir / system / "traj.extxyz"
         if not ref_path.is_file():
             reason = f"reference trajectory not found: {ref_path}"
             print(f"  [PENALTY] {reason}; assigning 100% error")
-            rows.extend(penalty_row(model, system, reason) for model in model_names)
+            rows.extend(penalty_row(model, system, reason) for model in eligible_models)
             continue
         if system not in metadata:
             reason = "reference metadata entry missing"
             print(f"  [PENALTY] {reason}; assigning 100% error")
-            rows.extend(penalty_row(model, system, reason) for model in model_names)
+            rows.extend(penalty_row(model, system, reason) for model in eligible_models)
             continue
         try:
             timestep_fs = float(metadata[system]["timestep"])
@@ -526,7 +545,7 @@ def process_source(
         except Exception as exc:
             reason = f"could not load reference trajectory: {exc}"
             print(f"  [PENALTY] {reason}; assigning 100% error")
-            rows.extend(penalty_row(model, system, reason) for model in model_names)
+            rows.extend(penalty_row(model, system, reason) for model in eligible_models)
             continue
 
         n_ref = len(reference_positions)
@@ -555,7 +574,7 @@ def process_source(
             ref_cache[n_frames] = spectrum
             return spectrum
 
-        for model in model_names:
+        for model in eligible_models:
             print(f"  Model: {model}")
             mlip_path = models.get(model)
             if mlip_path is None:

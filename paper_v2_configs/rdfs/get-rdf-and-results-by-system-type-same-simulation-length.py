@@ -12,15 +12,16 @@
 
 """Compute matched-length RDF errors for the supported trajectory sources.
 
-Every expected model/system pair contributes to the aggregates. Missing or
-unreadable trajectories and failed RDF calculations receive 100% error instead
-of being omitted.
+TorchSim aggregates include only model/system pairs with completed MD runs.
+Missing ASE trajectories and failed RDF calculations on eligible pairs retain
+the 100% error penalty.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import sys
 import numpy as np
 import pandas as pd
 import mdtraj as mdt
@@ -28,6 +29,9 @@ import h5py
 from ase.data import chemical_symbols
 from ase.io import iread
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from md_success import torchsim_md_succeeded
 
 
 # ============================================================
@@ -319,6 +323,15 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     print(f"\n=== Trajectory source: {trajectory_dir} ===")
     print(f"Results directory: {results_dir}")
     mlip_trajectories = discover_mlip_trajectories(trajectory_dir)
+    torchsim_source = "torchsim" in source
+    if torchsim_source:
+        mlip_trajectories = {
+            system: {
+                model: path for model, path in models.items()
+                if torchsim_md_succeeded(path)
+            }
+            for system, models in mlip_trajectories.items()
+        }
     all_discovered_model_names = {
         model
         for system_models in mlip_trajectories.values()
@@ -369,11 +382,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             for system, models in mlip_trajectories.items()
         }
 
-    # Explicitly requested models remain part of the expected result matrix even
-    # when every one of their trajectories is missing.  Otherwise, use the union
-    # of models discovered across the unfiltered source so that a failed or
-    # filtered-to system is penalized rather than silently omitted from the mean.
-    model_names = sorted(selected_models or all_discovered_model_names)
+    # ASE retains its expected-pair penalty; TorchSim scores completed MD only.
+    model_names = sorted(
+        {model for models in mlip_trajectories.values() for model in models}
+        if torchsim_source else (selected_models or all_discovered_model_names)
+    )
 
     print(
         f"Found {len(reference_trajectories)} reference trajectories and "
@@ -411,6 +424,13 @@ def process_source(args: argparse.Namespace, source: str) -> None:
         print(f"[WARN] MLIP trajectories have no reference trajectory: {system}")
 
     for system, ref_path in sorted(reference_trajectories.items()):
+        system_models = mlip_trajectories.get(system, {})
+        eligible_models = (
+            [model for model in model_names if model in system_models]
+            if torchsim_source else model_names
+        )
+        if not eligible_models:
+            continue
         print(f"\n=== System: {system} ===")
 
         try:
@@ -421,7 +441,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
                 "  [PENALTY] Could not load/compute reference RDF; assigning "
                 f"100% error to all expected models: {exc}"
             )
-            for model in model_names:
+            for model in eligible_models:
                 record_error(model, system)
             continue
 
@@ -440,8 +460,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             n_ref_total: ref_rdf_full,
         }
 
-        system_models = mlip_trajectories.get(system, {})
-        for model in model_names:
+        for model in eligible_models:
             print(f"  Model: {model}")
 
             mlip_path = system_models.get(model)

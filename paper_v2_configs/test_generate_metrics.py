@@ -14,6 +14,11 @@ class GenerateMetricsTests(unittest.TestCase):
                 stage.name,
             )
 
+    def test_source_filters_are_forwarded_to_every_stage(self) -> None:
+        source = 'mlip-trajs-torchsim-accelerated'
+        for stage in generate_metrics.metric_stages(sources=(source,)):
+            self.assertEqual(stage.command[-2:], ('--source', source))
+
     def test_no_model_filter_preserves_existing_commands(self) -> None:
         for stage in generate_metrics.metric_stages():
             self.assertNotIn("--model", stage.command, stage.name)

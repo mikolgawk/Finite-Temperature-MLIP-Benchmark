@@ -25,12 +25,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CONFIG_DIR = HERE.parent
-DATASETS = (
-    "ase:md_eager",
-    "torchsim:md_eager",
-    "ase:md_accelerated",
-    "torchsim:md_accelerated",
-)
+sys.path.insert(0, str(CONFIG_DIR))
+from metric_sources import pressure_input_dir, SOURCE_DATASETS
+DATASET_SOURCES = {":".join(pair): source for source, pair in SOURCE_DATASETS.items()}
+DATASETS = tuple(DATASET_SOURCES)
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,24 +95,24 @@ def main() -> None:
     datasets = args.dataset or [
         dataset
         for dataset in DATASETS
-        if has_pressure_data(results_dir.joinpath(*dataset.split(":")))
+        if has_pressure_data(pressure_input_dir(results_dir, DATASET_SOURCES[dataset]))
     ]
     if not datasets and not args.dry_run:
         raise SystemExit(f"No pressure datasets found in {results_dir}")
     if not datasets:
         datasets = list(DATASETS)
 
-    mae_ranking = results_dir / "model_mean_pressure_comparison.csv"
-    error_ranking = results_dir / "model_pressure_error_metric.csv"
     failures: list[str] = []
 
     with tempfile.TemporaryDirectory(prefix="pressure-plot-inputs-") as temp_dir:
         temp_root = Path(temp_dir)
         for dataset in dict.fromkeys(datasets):
             backend, mode = dataset.split(":")
-            pressures_dir = results_dir / backend / mode
-            output_dir = plots_dir / backend / mode
-            source = f"mlip-trajs-{backend}" + ("-accelerated" if mode == "md_accelerated" else ("-eager" if backend == "torchsim" else ""))
+            source = DATASET_SOURCES[dataset]
+            pressures_dir = pressure_input_dir(results_dir, source)
+            output_dir = plots_dir / source
+            mae_ranking = results_dir / source / "model_mean_pressure_comparison.csv"
+            error_ranking = results_dir / source / "model_pressure_error_metric.csv"
             reference_args = (
                 ["--reference-file", str(args.reference_file.resolve())]
                 if args.reference_file else []

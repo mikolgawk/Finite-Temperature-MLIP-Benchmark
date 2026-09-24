@@ -19,7 +19,7 @@ import pandas as pd
 import seaborn as sns
 
 from _figure_data import (
-    DEFAULT_PRESSURE_FILE,
+    pressure_path,
     DEFAULT_SOURCE,
     SCRIPT_DIR,
     SOURCES,
@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Correlate RDF error with pressure error")
     parser.add_argument("--source", choices=SOURCES, default=DEFAULT_SOURCE)
     parser.add_argument("--rdf-file", default=None, type=Path, help="Override the generated RDF model summary CSV.")
-    parser.add_argument("--pressure-file", default=DEFAULT_PRESSURE_FILE, type=Path)
+    parser.add_argument("--pressure-file", default=None, type=Path)
     parser.add_argument("--pressure-backend", default=None, help="Default: inferred from --source.")
     parser.add_argument("--pressure-mode", default=None, help="Default: inferred from --source.")
     parser.add_argument("--output-csv", type=Path, default=SCRIPT_DIR / "results/rdf_pressure_merged_same_simulation_length.csv")
@@ -195,7 +195,7 @@ def main() -> None:
     backend, mode = source_pressure_provenance(args.source)
     rdf = load_rdf(args.rdf_file or default_rdf)
     pressure = load_pressure(
-        args.pressure_file,
+        args.pressure_file or pressure_path(args.source),
         backend=args.pressure_backend or backend,
         mode=args.pressure_mode or mode,
     )

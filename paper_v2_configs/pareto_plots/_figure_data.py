@@ -18,7 +18,11 @@ SOURCES = (
 )
 DEFAULT_SOURCE = "mlip-trajs-torchsim-eager"
 
-DEFAULT_PRESSURE_FILE = CONFIG_DIR / "pressures" / "results" / "model_pressure_error_metric.csv"
+DEFAULT_PRESSURE_FILE = CONFIG_DIR / "pressures" / "results" / DEFAULT_SOURCE / "model_pressure_error_metric.csv"
+
+
+def pressure_path(source: str) -> Path:
+    return CONFIG_DIR / 'pressures' / 'results' / source / 'model_pressure_error_metric.csv'
 
 
 def source_paths(source: str) -> tuple[Path, Path, Path]:

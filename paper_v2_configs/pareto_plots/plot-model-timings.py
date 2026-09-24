@@ -19,6 +19,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+import sys
+
+PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
+if str(PAPER_V2_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
@@ -37,24 +44,7 @@ DEFAULT_SUMMARY_CSV = SCRIPT_DIR / "results" / "model_timings_summary.csv"
 DEFAULT_OBSERVATIONS_CSV = SCRIPT_DIR / "results" / "model_timings_observations.csv"
 
 
-DISPLAY_NAMES = {
-	"eq-v2-m-omat": "EquiformerV2",
-	"esen-30m-oam": "eSEN-30M-OAM",
-	"grace-mp": "GRACE-2L-MPtrj",
-	"grace-oam": "GRACE-2L-OAM",
-	"mace-mh-omat": "MACE-MH-1-OMAT",
-	"mace-mp-0": "MACE-MP-0",
-	"mace-mpa-0": "MACE-MPA-0",
-	"mattersim-v1-5m": "MatterSim-v1.0.0-5M",
-	"nequip": "NequIP-OAM-L",
-	"orb-v2": "ORB-v2",
-	"orb-v3": "ORB-v3 conservative",
-	"orb-v3-direct": "ORB-v3 direct",
-	"pet-oam-xl": "PET-OAM-XL",
-	"pet-omat-xl": "PET-OMAT-XL",
-	"uma-m-omat": "UMA-M-P1",
-	"uma-s-omat": "UMA-S-P1",
-}
+DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 
 REQUIRED_COLUMNS = {
@@ -71,19 +61,7 @@ def normalize_name(value: object) -> str:
 
 
 def display_name(model: str) -> str:
-	"""Return one short label for all execution variants of a model."""
-	model_key = normalize_name(model)
-	for execution_tag in (
-		"-force-only",
-		"-torchscript",
-		"-compiled",
-		"-compile-force-only",
-		"-turbo-force-only",
-		"-eager",
-	):
-		model_key = model_key.replace(execution_tag, "")
-	model_key = {"nequip-oam-l": "nequip"}.get(model_key, model_key)
-	return DISPLAY_NAMES.get(model_key, model_key)
+    return display_model_name(model)
 
 
 def read_timing_files(

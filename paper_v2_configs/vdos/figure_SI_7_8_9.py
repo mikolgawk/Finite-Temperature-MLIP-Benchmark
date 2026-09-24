@@ -131,10 +131,8 @@ TIER_4_MODELS = [
 
 def source_paths(source: str) -> tuple[Path, Path, Path]:
     """Return source-specific force-RMSE, RDF, and VDOS inputs."""
-    backend_dir = "e-f-predictions" if "torchsim" in source else "e-f-predictions-ase"
-    mode_dir = "md-accelerated" if source.endswith("-accelerated") else "md_eager"
     return (
-        CONFIG_DIR / "e_f_rmses" / "data" / backend_dir / mode_dir,
+        CONFIG_DIR / "e_f_rmses" / "results" / source / "mean_metrics_by_model.csv",
         CONFIG_DIR
         / "rdfs"
         / "results"
@@ -519,7 +517,7 @@ def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
         read_csv(args.rdf_file or default_rdf, "RDF model-summary CSV")
     )
     df_pressure = standardize_pressure(
-        read_csv(args.pressure_file, "Pressure metric CSV"),
+        read_csv(args.pressure_file or CONFIG_DIR / "pressures/results" / args.source / "model_pressure_error_metric.csv", "Pressure metric CSV"),
         backend=args.pressure_backend or pressure_backend,
         mode=args.pressure_mode or pressure_mode,
     )
@@ -609,7 +607,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pressure-file",
         type=Path,
-        default=DEFAULT_PRESSURE_FILE,
+        default=None,
         help="Generated CSV with model-level pressure histogram metrics.",
     )
     parser.add_argument(

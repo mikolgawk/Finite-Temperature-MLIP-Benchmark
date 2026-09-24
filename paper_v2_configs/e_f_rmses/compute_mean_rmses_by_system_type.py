@@ -1,8 +1,13 @@
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from md_success import torchsim_md_succeeded
+from metric_sources import SOURCES
 
 
 DATA_DIR = Path(__file__).resolve().parent / 'data' / 'e-f-predictions'
@@ -55,7 +60,18 @@ def infer_system_type(system: str) -> str:
 
 
 def list_rmse_csv_files(data_dir: Path) -> list[Path]:
-    return sorted(data_dir.rglob('rmse-results-all_*.csv'))
+    csv_files = sorted(data_dir.rglob('rmse-results-all_*.csv'))
+    if data_dir.name != 'e-f-predictions':
+        return csv_files
+
+    # Older TorchSim runners wrote directly under data/md and data/md-accelerated.
+    # Prefer the current summary for each source/model to avoid counting it twice.
+    for legacy_name, current_name in (('md', 'md_eager'), ('md-accelerated', 'md-accelerated')):
+        for legacy_file in sorted((data_dir.parent / legacy_name).glob('rmse-results-all_*.csv')):
+            if not (data_dir / current_name / legacy_file.name).is_file():
+                csv_files.append(legacy_file)
+    csv_files.extend(sorted((data_dir.parent / 'e-f-predictions-ase').rglob('rmse-results-all_*.csv')))
+    return sorted(csv_files)
 
 
 def extract_model_name(csv_path: Path) -> str:
@@ -75,12 +91,25 @@ def canonical_system_key(system_id: str) -> str:
     return system_name
 
 
+def csv_source(csv_file: Path) -> str:
+    for part in csv_file.parts:
+        if part in SOURCES:
+            return part
+    backend = 'ase' if 'e-f-predictions-ase' in csv_file.parts else 'torchsim'
+    accelerated = csv_file.parent.name in {'md-accelerated', 'md_accelerated'}
+    return f'mlip-trajs-{backend}' + ('-accelerated' if accelerated else ('-eager' if backend == 'torchsim' else ''))
+
+
 def load_all_data(
     data_dir: Path,
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = None,
+    md_data_dir: Path | None = None,
+    sources: set[str] | None = None,
 ) -> pd.DataFrame:
     csv_files = list_rmse_csv_files(data_dir)
+    if sources is not None:
+        csv_files = [p for p in csv_files if csv_source(p) in sources]
     if models is not None:
         csv_files = [
             csv_file
@@ -97,10 +126,21 @@ def load_all_data(
             f'No rmse-results-all_*.csv files found in {data_dir}{requested}'
         )
 
+    md_data_dir = md_data_dir or Path(__file__).resolve().parent.parent / 'data'
     frames = []
     for csv_file in csv_files:
         frame = pd.read_csv(csv_file)
         model_name = extract_model_name(csv_file)
+        source = csv_source(csv_file)
+        if 'torchsim' in source and csv_file.parent.name in {'md', 'md_eager', 'md-accelerated', 'md_accelerated', *SOURCES}:
+            if 'trajectory' not in frame.columns:
+                raise ValueError(f'Missing trajectory column in {csv_file}')
+            frame = frame.loc[frame['trajectory'].map(
+                lambda ref: torchsim_md_succeeded(
+                    md_data_dir / source / Path(ref).parent.name / f'nvt_{model_name}.h5'
+                ) if isinstance(ref, str) else False
+            )].copy()
+        frame['source'] = source
         frame['calculator'] = model_name
         frames.append(frame)
 
@@ -135,16 +175,17 @@ def parse_args() -> argparse.Namespace:
         dest='excluded_system_types',
         help='exclude this system type from aggregation (repeatable)',
     )
+    parser.add_argument('--source', action='append', choices=SOURCES, dest='sources')
+    parser.add_argument('--data-dir', type=Path, default=DATA_DIR)
+    parser.add_argument('--results-dir', type=Path, default=RESULTS_DIR)
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    selected_models = set(args.models) if args.models else None
-    excluded_system_types = set(args.excluded_system_types or ())
-    all_data = load_all_data(DATA_DIR, selected_models, excluded_system_types)
-
+def write_source_results(all_data: pd.DataFrame, results_dir: Path, excluded_system_types: set[str]) -> None:
+    results_dir.mkdir(parents=True, exist_ok=True)
+    all_data.to_csv(results_dir / 'rmse_per_system.csv', index=False)
+    all_data.groupby('calculator', as_index=False)[['energy_rmse', 'force_rmse']].mean().to_csv(
+        results_dir / 'mean_metrics_by_model.csv', index=False)
     metrics = ['energy_rmse', 'force_rmse']
 
     mapped_data = all_data[all_data['system_type'].notna()].copy()
@@ -168,8 +209,8 @@ def main() -> None:
         .sort_values(['system_type', 'calculator'], key=lambda c: c.map({t: i for i, t in enumerate(SYSTEM_TYPES)}) if c.name == 'system_type' else c)
     )
 
-    overall_output = RESULTS_DIR / 'mean_metrics_by_system_type.csv'
-    by_model_output = RESULTS_DIR / 'mean_metrics_by_system_type_and_model.csv'
+    overall_output = results_dir / 'mean_metrics_by_system_type.csv'
+    by_model_output = results_dir / 'mean_metrics_by_system_type_and_model.csv'
 
     means_by_system_type.to_csv(overall_output, index=False)
     means_by_system_type_and_model.to_csv(by_model_output, index=False)
@@ -178,6 +219,17 @@ def main() -> None:
     print(f'Saved {by_model_output}')
     print('Mean metrics by system type:')
     print(means_by_system_type.to_string(index=False))
+
+
+def main() -> None:
+    args = parse_args()
+    excluded = set(args.excluded_system_types or ())
+    all_data = load_all_data(args.data_dir, set(args.models) if args.models else None,
+                             excluded, sources=set(args.sources) if args.sources else None)
+    if all_data.empty:
+        raise SystemExit('No RMSE rows remain after source, model, MD-completion and system-type filtering.')
+    for source, frame in all_data.groupby('source'):
+        write_source_results(frame, args.results_dir.resolve() / source, excluded)
 
 
 if __name__ == '__main__':

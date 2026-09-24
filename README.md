@@ -60,8 +60,26 @@ uv run --script paper_v2_configs/generate_metrics.py \
   --metric vdos
 ```
 
-Filtered runs use the standard output paths, so their aggregate summary CSVs
-contain only the selected model(s).
+All four metrics are stored separately by trajectory source under
+`paper_v2_configs/<metric-directory>/results/<source>/`, including
+`mlip-trajs-torchsim-eager` and `mlip-trajs-torchsim-accelerated`.
+Energy/force means and pressure MAEs are computed independently for each source,
+even when model names are identical. Existing raw RMSE and pressure input layouts
+are still supported. Older aggregate CSVs at the results root are no longer used
+by the plotting entry points.
+
+To generate only eager energy/force and pressure metrics:
+
+```bash
+uv run --script paper_v2_configs/generate_metrics.py \
+  --metric energy-force --metric pressure \
+  --source mlip-trajs-torchsim-eager
+```
+
+`--source` is repeatable and defaults to available sources. Filtered runs use
+the standard output paths, so their aggregate summary CSVs contain only the
+selected model(s). RMSE plots also accept `--source`; pressure plots retain the
+`--dataset backend:mode` option.
 
 Once the metric CSV files are available, each analysis directory provides a
 `plot_all.py` entry point that creates every plot supported by that directory:

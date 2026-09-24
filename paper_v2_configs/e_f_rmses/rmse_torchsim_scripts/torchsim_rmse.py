@@ -4,6 +4,10 @@ import csv
 import json
 import re
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from md_success import torchsim_md_succeeded
 
 _ARGS = None
 _SCRIPT = None
@@ -17,6 +21,13 @@ def early_cli(script):
     results_data = Path(__file__).resolve().parent.parent / 'data'
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ref-dir', type=Path, default=benchmark_data / 'ref-trajs')
+    md_source = (
+        'mlip-trajs-torchsim-accelerated'
+        if _SCRIPT.parent.name == 'md-accelerated'
+        else 'mlip-trajs-torchsim-eager'
+    )
+    parser.add_argument('--md-dir', type=Path, default=benchmark_data / md_source,
+                        help='matching TorchSim MD trajectories and timing records')
     parser.add_argument(
         '--output-dir', type=Path,
         default=results_data / 'e-f-predictions' / _SCRIPT.parent.name,
@@ -109,12 +120,19 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     files = sorted(args.ref_dir.rglob('traj*.extxyz'))
     if not files:
         raise SystemExit(f'No traj*.extxyz files found under {args.ref_dir}')
+    files = [path for path in files
+             if path.parent.name.split('_')[0] not in skip_systems
+             and torchsim_md_succeeded(args.md_dir / path.parent.name / f'nvt_{model_name}.h5')]
+    print(f'{model_name}: {len(files)} reference trajectories with completed TorchSim MD')
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f'rmse-results-all_{model_name}.csv'
     failure_file = output.with_suffix('.failures.json')
     if output.exists() and not failure_file.exists() and not args.force:
-        print(f'{output} exists; use --force to recompute.')
-        return
+        with output.open(newline='') as handle:
+            completed_files = {row.get('trajectory') for row in csv.DictReader(handle)}
+        if completed_files == {str(path) for path in files}:
+            print(f'{output} exists; use --force to recompute.')
+            return
     rows, failures, offsets = [], [], {}
     progress_enabled = not args.no_progress
     progress_print = tqdm.write if progress_enabled else print
@@ -127,9 +145,6 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     )
     for path in file_iterator:
         system = path.parent.name.split('_')[0]
-        if system in skip_systems:
-            progress_print(f'Skipping {path.parent.name} for {model_name}')
-            continue
         match = re.search(r'(\d+)K', path.parent.name)
         temperature = int(match[1]) if match else 0
         try:
@@ -190,6 +205,8 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     # Keep a failure marker so an incomplete summary is never silently skipped.
     if failures:
         failure_file.write_text(json.dumps(failures, indent=2) + '\n')
+    if not rows:
+        output.unlink(missing_ok=True)
     if rows:
         temporary = output.with_suffix('.csv.tmp')
         with temporary.open('w', newline='') as handle:
