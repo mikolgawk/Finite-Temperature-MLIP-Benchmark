@@ -125,33 +125,38 @@ def detect_model_column(pressure_df: pd.DataFrame) -> str:
 
 
 def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
-    """Compute mean ms/step per model from timings_fp32_v100 directory.
-
-    Only uses systems that have all 15 timing files (complete systems).
-    """
-    all_systems = [p for p in timings_dir.iterdir() if p.is_dir()]
-    complete_systems = [d for d in all_systems if len(list(d.glob("md_timing_*.csv"))) == 15]
-
+    """Compute mean ms/step per model from valid per-system timing CSVs."""
     model_timings: dict[str, list[float]] = {}
-    for system_dir in complete_systems:
-        for csv_path in sorted(system_dir.glob("md_timing_*.csv")):
-            model_name = csv_path.stem.removeprefix("md_timing_")
-            try:
-                df = pd.read_csv(csv_path)
-                sps = float(df["seconds_per_step"].iloc[0])
-                model_timings.setdefault(model_name, []).append(sps)
-            except Exception as e:
-                print(f"Warning: could not read {csv_path}: {e}")
+    for csv_path in sorted(timings_dir.glob("*/md_timing_*.csv")):
+        if csv_path.stat().st_size == 0:
+            continue  # Empty files mark failed or interrupted runs.
+        model_name = csv_path.stem.removeprefix("md_timing_")
+        try:
+            df = pd.read_csv(csv_path)
+            if df.empty:
+                continue
+            sps = float(df["seconds_per_step"].iloc[0])
+            if not np.isfinite(sps) or sps <= 0:
+                continue
+            if "n_steps" in df:
+                steps = float(df["n_steps"].iloc[0])
+                if not np.isfinite(steps) or steps <= 0:
+                    continue
+            model_timings.setdefault(model_name, []).append(sps)
+        except (ValueError, KeyError, IndexError) as exc:
+            print(f"Warning: could not read {csv_path}: {exc}")
 
     rows = [
         {"model": normalize_model_name(name), "mean_time_ms_per_step": np.mean(vals) * 1000}
         for name, vals in model_timings.items()
     ]
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=["model", "mean_time_ms_per_step"])
 
 
 def load_and_merge(timings_dir: Path, pressure_file: Path) -> tuple[pd.DataFrame, str]:
     timings_df = load_model_avg_timings(timings_dir)
+    if timings_df.empty:
+        raise ValueError(f"No valid timing records found in {timings_dir}")
     pressure_df = pd.read_csv(pressure_file)
 
     pressure_model_col = detect_model_column(pressure_df)
@@ -288,7 +293,6 @@ def plot_pareto(df: pd.DataFrame, y_axis_label: str, output_file: Path) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
     plt.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
-    plt.show()
     plt.close(fig)
 
     print(f"Saved: {output_file}")

@@ -22,7 +22,7 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import gaussian_kde
 
-from get_model_pressure_errors import resolve_reference_pressure_file
+from get_model_pressure_errors import resolve_model_reference_pressure_file
 
 import sys
 
@@ -162,53 +162,48 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate: bool = False) -> pd
     return df
 
 
-def find_reference_file(pressures_dir: Path, explicit_path: str | None) -> Path:
-    local = Path(
+def legacy_reference_files() -> tuple[Path, ...]:
+    return (Path(
         "../data/results/same-simulation-length/reference_pressure_per_frame_same_simulation_length.csv"
-    )
-    return resolve_reference_pressure_file(
-        pressures_dir, explicit_path, (local,)
-    )
+    ),)
 
 
 # ── Data collection ────────────────────────────────────────────────────────────
 
-def build_pressure_dataframe(pressures_dir: Path, reference_file: Path) -> pd.DataFrame:
-    """Return a long-format DataFrame with one row per frame, label = 'Reference' or display name."""
-    ref_df = load_pressure_per_frame_csv(reference_file, deduplicate=True)
-    # Only keep systems that have reference data and are in our SYSTEMS dict
-    ref_df = ref_df[ref_df["structure"].isin(STRUCTURE_TO_TYPE)].copy()
-    ref_df["label"] = REF_LABEL
-    ref_df["model"] = "__reference__"
-
-    valid_structures = set(ref_df["structure"].unique())
-    print(f"[INFO] Reference: {len(ref_df):,} frames across {len(valid_structures)} systems.")
-
+def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None) -> pd.DataFrame:
+    """Return per-frame model and model-matched reference pressure values."""
     model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
     model_files = [f for f in model_files if not f.name.startswith("reference_")]
-
-    parts = [ref_df[["model", "label", "pressure_GPa"]]]
-
+    parts: list[pd.DataFrame] = []
     for model_file in model_files:
         model_name = normalize_model_name(model_file.name.removesuffix(PER_FRAME_SUFFIX))
         if model_name not in TIER_ORDER:
             continue
         try:
+            matched_reference = resolve_model_reference_pressure_file(
+                pressures_dir, model_file, reference_file, legacy_reference_files()
+            )
             df_m = load_pressure_per_frame_csv(model_file)
-        except Exception as exc:
+            df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate=True)
+        except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
             continue
-        # Keep only structures that have reference data
-        df_m = df_m[df_m["structure"].isin(valid_structures)].copy()
-        if df_m.empty:
+        shared_structures = set(df_m["structure"]) & set(df_ref["structure"])
+        df_m = df_m[df_m["structure"].isin(shared_structures)].copy()
+        df_ref = df_ref[df_ref["structure"].isin(shared_structures)].copy()
+        if df_m.empty or df_ref.empty:
             continue
-        df_m["label"] = display_name(model_name)
-        df_m["model"] = model_name
-        parts.append(df_m[["model", "label", "pressure_GPa"]])
-        print(f"[INFO] {display_name(model_name)}: {len(df_m):,} frames")
+        for df, label, kind in ((df_ref, REF_LABEL, "reference"),
+                                (df_m, display_name(model_name), "model")):
+            df["label"] = label
+            df["model"] = model_name
+            df["kind"] = kind
+            parts.append(df[["model", "kind", "label", "pressure_GPa"]])
+        print(f"[INFO] {display_name(model_name)}: {len(df_m):,} frames; reference: {len(df_ref):,} frames")
 
-    df = pd.concat(parts, ignore_index=True)
-    return df
+    if not parts:
+        raise RuntimeError("No usable model/reference pressure pairs could be loaded.")
+    return pd.concat(parts, ignore_index=True)
 
 
 # ── Plotting ───────────────────────────────────────────────────────────────────
@@ -239,14 +234,14 @@ def plot_violin(df: pd.DataFrame, output: str | Path) -> None:
     models_present = [m for m in TIER_ORDER if m in df["model"].unique()]
     display_order = [display_name(m) for m in models_present]
 
-    ref_data = df[df["model"] == "__reference__"]["pressure_GPa"].values
     HALF_WIDTH = 0.42
 
-    _, ax = plt.subplots(figsize=(3.53 * 2, 3.53))
+    fig, ax = plt.subplots(figsize=(3.53 * 2, 3.53))
 
     for i, model_name in enumerate(models_present):
         tier_color = get_tier_color(model_name)
-        model_data = df[df["model"] == model_name]["pressure_GPa"].values
+        ref_data = df[(df["model"] == model_name) & (df["kind"] == "reference")]["pressure_GPa"].values
+        model_data = df[(df["model"] == model_name) & (df["kind"] == "model")]["pressure_GPa"].values
 
         # Left half: reference (grey), right half: prediction (tier colour)
         _half_violin(ax, i, ref_data,   side="left",  color=REF_COLOR,  alpha=0.65, half_width=HALF_WIDTH)
@@ -318,7 +313,7 @@ def plot_violin(df: pd.DataFrame, output: str | Path) -> None:
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output, bbox_inches="tight", pad_inches=0.02)
-    plt.show()
+    plt.close(fig)
     print(f"Saved to {output}")
 
 
@@ -341,8 +336,7 @@ def main() -> None:
     if not pressures_dir.is_dir():
         raise NotADirectoryError(f"Pressures directory not found: {pressures_dir}")
 
-    reference_file = find_reference_file(pressures_dir, args.reference_file)
-    print(f"[INFO] Using reference file: {reference_file}")
+    reference_file = Path(args.reference_file) if args.reference_file else None
 
     df = build_pressure_dataframe(pressures_dir, reference_file)
     print(f"[INFO] Total rows: {len(df):,}")

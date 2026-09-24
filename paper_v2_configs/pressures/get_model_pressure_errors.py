@@ -137,6 +137,40 @@ def resolve_reference_pressure_file(
     )
 
 
+def resolve_model_reference_pressure_file(
+    pressures_dir: Path,
+    model_file: Path,
+    explicit_path: str | Path | None = None,
+    legacy_candidates: tuple[Path, ...] = (),
+) -> Path:
+    """Resolve the reference sampled for one model's pressure CSV."""
+    if explicit_path is not None:
+        candidate = Path(explicit_path)
+        if candidate.is_file():
+            return candidate
+        raise FileNotFoundError(f"Reference per-frame CSV not found: {candidate}")
+
+    name = model_file.name
+    for suffix in (DEFAULT_MODEL_FILE_SUFFIX, "_pressure_per_frame.csv"):
+        if name.endswith(suffix):
+            name = name.removesuffix(suffix)
+            break
+    else:
+        raise ValueError(f"Unrecognized model pressure CSV name: {model_file.name}")
+    name = name.removesuffix("_same-simulation-length")
+    matched = pressures_dir / "references" / f"{name}.csv"
+    if matched.is_file():
+        return matched
+    if any((pressures_dir / "references").glob("*.csv")):
+        raise FileNotFoundError(
+            f"No model-matched reference pressure CSV for {model_file.name}: {matched}"
+        )
+    for candidate in legacy_candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"No model-matched reference pressure CSV for {model_file.name}: {matched}")
+
+
 def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = False) -> pd.DataFrame:
     header = pd.read_csv(csv_path, nrows=0)
     pcol = pressure_column_name(list(header.columns))

@@ -26,7 +26,7 @@ from get_model_pressure_errors import (
     normalize_model_name,
     parse_model_name,
     pressure_histogram_similarity,
-    resolve_reference_pressure_file,
+    resolve_model_reference_pressure_file,
 )
 
 import sys
@@ -147,12 +147,6 @@ def get_tier_color(model: str):
     return "#757575"
 
 
-def find_reference_file(pressures_dir: Path, explicit_path: str | None) -> Path:
-    return resolve_reference_pressure_file(
-        pressures_dir, explicit_path, (DEFAULT_REFERENCE_FILE,)
-    )
-
-
 def make_bin_edges(reference_values: np.ndarray, candidates: Iterable[np.ndarray], bins: int) -> np.ndarray:
     arrays = [reference_values] + [values for values in candidates if values.size > 0]
     lo = min(float(np.min(values)) for values in arrays)
@@ -194,8 +188,11 @@ def choose_best_worst(
     return min(scores, key=scores.get), max(scores, key=scores.get), scores
 
 
-def load_model_values(pressures_dir: Path) -> dict[str, dict[str, np.ndarray]]:
+def load_model_values(
+    pressures_dir: Path, reference_file: Path | None = None
+) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, dict[str, np.ndarray]]]:
     model_values: dict[str, dict[str, np.ndarray]] = {}
+    reference_values: dict[str, dict[str, np.ndarray]] = {}
     model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
     model_files = [path for path in model_files if not path.name.startswith("reference_")]
     if not model_files:
@@ -206,56 +203,50 @@ def load_model_values(pressures_dir: Path) -> dict[str, dict[str, np.ndarray]]:
         if model not in TIER_ORDER:
             continue
         try:
+            matched_reference = resolve_model_reference_pressure_file(
+                pressures_dir, model_file, reference_file, (DEFAULT_REFERENCE_FILE,)
+            )
             model_df = load_pressure_per_frame_csv(model_file)
-        except Exception as exc:
+            reference_df = load_pressure_per_frame_csv(
+                matched_reference, deduplicate_reference=True
+            )
+        except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
             continue
-
-        values_by_system = {
-            str(system): group["pressure_GPa"].to_numpy(dtype=float)
-            for system, group in model_df.groupby("system", sort=False)
-            if not group.empty
-        }
-        if values_by_system:
-            model_values[model] = values_by_system
+        def by_system(df: pd.DataFrame) -> dict[str, np.ndarray]:
+            return {
+                str(system): group["pressure_GPa"].to_numpy(dtype=float)
+                for system, group in df.groupby("system", sort=False)
+                if not group.empty
+            }
+        if not model_df.empty and not reference_df.empty:
+            model_values[model] = by_system(model_df)
+            reference_values[model] = by_system(reference_df)
 
     if not model_values:
-        raise RuntimeError("No usable model per-frame data could be loaded.")
-    return model_values
+        raise RuntimeError("No usable model/reference per-frame pairs could be loaded.")
+    return model_values, reference_values
 
 
 def collect_histogram_panels(
     pressures_dir: Path,
-    reference_file: Path,
+    reference_file: Path | None,
     bins: int,
     expected_models: Iterable[str],
-) -> list[tuple[str, str, np.ndarray, dict[str, np.ndarray], dict[str, float], np.ndarray]]:
-    reference_df = load_pressure_per_frame_csv(reference_file, deduplicate_reference=True)
-    if reference_df.empty:
-        raise RuntimeError(f"No usable reference rows in {reference_file}")
-
-    model_values = load_model_values(pressures_dir)
-    panels: list[tuple[str, str, np.ndarray, dict[str, np.ndarray], dict[str, float], np.ndarray]] = []
-
+) -> list[tuple[str, str, dict[str, np.ndarray], dict[str, np.ndarray], dict[str, float], np.ndarray]]:
+    model_values, reference_values = load_model_values(pressures_dir, reference_file)
+    panels = []
     for system_type, ordered_systems in SYSTEMS.items():
-        reference_by_system = {
-            system: reference_df.loc[
-                reference_df["system"] == system, "pressure_GPa"
-            ].to_numpy(dtype=float)
-            for system in ordered_systems
-            if not reference_df.loc[reference_df["system"] == system].empty
-        }
-
         system_scores: dict[str, dict[str, float]] = {}
-        for system, reference_values in reference_by_system.items():
+        for system in ordered_systems:
+            if not any(system in systems for systems in reference_values.values()):
+                continue
             scores: dict[str, float] = {}
             for model in expected_models:
-                values_by_system = model_values.get(model, {})
-                error = pressure_error_percent(
-                    reference_values, values_by_system.get(system), bins=bins
-                )
-                # Models expected for this dataset but lacking usable pressure
-                # samples receive the same explicit no-data penalty as RDF/VDOS.
+                reference = reference_values.get(model, {}).get(system)
+                prediction = model_values.get(model, {}).get(system)
+                error = (pressure_error_percent(reference, prediction, bins=bins)
+                         if reference is not None else float("nan"))
                 scores[model] = float(error) if np.isfinite(error) else 100.0
             if scores:
                 system_scores[system] = scores
@@ -263,31 +254,36 @@ def collect_histogram_panels(
         if not system_scores:
             print(f"[INFO] Skipping system type without enough data: {system_type}")
             continue
-
         representative_system = max(
-            system_scores,
-            key=lambda system: mean_finite(system_scores[system].values()),
+            system_scores, key=lambda system: mean_finite(system_scores[system].values())
         )
-        reference_values = reference_by_system[representative_system]
+        references_by_model = {
+            model: systems[representative_system]
+            for model, systems in reference_values.items()
+            if representative_system in systems
+        }
         values_by_model = {
-            model: values_by_system[representative_system]
-            for model, values_by_system in model_values.items()
-            if representative_system in values_by_system
+            model: systems[representative_system]
+            for model, systems in model_values.items()
+            if representative_system in systems and model in references_by_model
         }
-        scores = {
-            model: score
-            for model, score in system_scores[representative_system].items()
-        }
-        edges = make_bin_edges(reference_values, values_by_model.values(), bins=bins)
-
+        scores = system_scores[representative_system]
+        if not values_by_model:
+            continue
+        edges = make_bin_edges(
+            next(iter(references_by_model.values())),
+            list(references_by_model.values()) + list(values_by_model.values()),
+            bins=bins,
+        )
         print(
-            "[INFO] Selected "
-            f"{representative_system} for {system_type}: mean model pressure error = "
-            f"{format_error_value(mean_finite(scores.values()))} across {len(scores)} models."
+            f"[INFO] Selected {representative_system} for {system_type}: "
+            f"mean model pressure error = {format_error_value(mean_finite(scores.values()))} "
+            f"across {len(scores)} models."
         )
-        panels.append(
-            (system_type, representative_system, reference_values, values_by_model, scores, edges)
-        )
+        panels.append((
+            system_type, representative_system, references_by_model,
+            values_by_model, scores, edges,
+        ))
 
     if not panels:
         raise RuntimeError("No system types have both reference and model pressure data for plotting.")
@@ -396,7 +392,7 @@ def draw_overall_pressure_error_plot(ax, ranking_df: pd.DataFrame, panel_label: 
 
 def plot_combined(
     pressures_dir: Path,
-    reference_file: Path,
+    reference_file: Path | None,
     ranking_df: pd.DataFrame,
     bins: int,
     output: Path,
@@ -425,7 +421,7 @@ def plot_combined(
     overall_ax = fig.add_subplot(outer_gs[0, :])
     draw_overall_pressure_error_plot(overall_ax, ranking_df, panel_labels[0])
 
-    for idx, (system_type, system, reference_values, values_by_model, model_scores, edges) in enumerate(panels):
+    for idx, (system_type, system, references_by_model, values_by_model, model_scores, edges) in enumerate(panels):
         row = idx // n_hist_cols + 2
         col = idx % n_hist_cols
         bottom_row = idx // n_hist_cols == n_hist_rows - 1
@@ -457,15 +453,19 @@ def plot_combined(
 
             best, worst, scores = choose_best_worst(tier_models, model_scores)
             plotted_models: set[str] = set()
-            ax.hist(
-                reference_values,
-                bins=edges,
-                density=True,
-                histtype="step",
-                color="black",
-                linewidth=1.5,
-                label="Reference",
-            )
+            for model, label, style in (
+                (best, "Reference (best)", "-"),
+                (worst, "Reference (worst)", "--"),
+            ):
+                if model is None or model not in references_by_model:
+                    continue
+                if model == best and style == "--":
+                    continue
+                ax.hist(
+                    references_by_model[model], bins=edges, density=True,
+                    histtype="step", color="black", linewidth=1.5,
+                    linestyle=style, label=label if best != worst else "Reference",
+                )
             if best is not None and best in values_by_model:
                 prefix = "Best/worst" if best == worst else "Best"
                 ax.hist(
@@ -536,7 +536,6 @@ def plot_combined(
 
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output, bbox_inches="tight", pad_inches=0.02)
-    plt.show()
     plt.close(fig)
     print(f"Saved combined pressure panel plot to {output}")
 
@@ -578,7 +577,7 @@ def main() -> None:
     if args.bins < 2:
         raise ValueError("--bins must be >= 2")
 
-    reference_file = find_reference_file(args.pressures_dir, args.reference_file)
+    reference_file = Path(args.reference_file) if args.reference_file else None
     ranking_df = pd.read_csv(args.ranking_file)
     plot_combined(args.pressures_dir, reference_file, ranking_df, args.bins, args.output_file)
 

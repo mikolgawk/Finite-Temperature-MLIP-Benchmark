@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from get_model_pressure_errors import resolve_reference_pressure_file
+from get_model_pressure_errors import resolve_model_reference_pressure_file
 
 import sys
 
@@ -114,15 +114,10 @@ def structure_from_trajectory_file(path_like: str) -> str:
     return Path(str(path_like)).parent.name
 
 
-def find_reference_file(pressures_dir: Path, explicit_path: str | None) -> Path:
-    local_candidate = Path(
-        "../data/results/same-simulation-length/reference_pressure_per_frame_same_simulation_length.csv"
-    )
-    fallback_candidate = Path(__file__).resolve().parent / "results-new" / "reference_pressure_per_frame.csv"
-    return resolve_reference_pressure_file(
-        pressures_dir,
-        explicit_path,
-        (local_candidate, fallback_candidate),
+def legacy_reference_files() -> tuple[Path, ...]:
+    return (
+        Path("../data/results/same-simulation-length/reference_pressure_per_frame_same_simulation_length.csv"),
+        Path(__file__).resolve().parent / "results-new" / "reference_pressure_per_frame.csv",
     )
 
 
@@ -348,84 +343,59 @@ def mean_finite(values: Iterable[float | None]) -> float:
 
 def collect_histogram_panels(
     pressures_dir: Path,
-    reference_file: Path,
+    reference_file: Path | None,
     bins: int,
-) -> list[tuple[str, str, np.ndarray, dict[str, np.ndarray], dict[str, float], np.ndarray]]:
-    ref_df = load_pressure_per_frame_csv(reference_file, deduplicate_reference=True)
-    if ref_df.empty:
-        raise RuntimeError(f"No usable reference rows in {reference_file}")
-
+) -> list[tuple[str, str, dict[str, np.ndarray], dict[str, np.ndarray], dict[str, float], np.ndarray]]:
     model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
     model_files = [path for path in model_files if not path.name.startswith("reference_")]
     if not model_files:
         raise FileNotFoundError(f"No model per-frame files found in {pressures_dir}")
 
     model_data: dict[str, dict[str, np.ndarray]] = {}
+    reference_data: dict[str, dict[str, np.ndarray]] = {}
     for model_file in model_files:
         model_name = parse_model_name(model_file)
         try:
-            df_model = load_pressure_per_frame_csv(model_file, deduplicate_reference=False)
-        except Exception as exc:
+            matched_reference = resolve_model_reference_pressure_file(
+                pressures_dir, model_file, reference_file, legacy_reference_files()
+            )
+            df_model = load_pressure_per_frame_csv(model_file)
+            df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate_reference=True)
+        except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
             continue
-
-        if df_model.empty:
+        if df_model.empty or df_ref.empty:
             continue
 
-        normalized_name = normalize_model_name(model_name)
-        values_by_structure: dict[str, np.ndarray] = {}
-        for structure, structure_df in df_model.groupby("structure", sort=False):
-            values = structure_df["pressure_GPa"].to_numpy(dtype=float)
-            if values.size > 0:
-                values_by_structure[str(structure)] = values
+        def by_structure(df: pd.DataFrame) -> dict[str, np.ndarray]:
+            return {
+                str(structure): group["pressure_GPa"].to_numpy(dtype=float)
+                for structure, group in df.groupby("structure", sort=False)
+                if not group.empty
+            }
 
-        if values_by_structure:
-            model_data[normalized_name] = values_by_structure
+        model_data[model_name] = by_structure(df_model)
+        reference_data[model_name] = by_structure(df_ref)
 
     if not model_data:
-        raise RuntimeError("No usable model per-frame data could be loaded.")
+        raise RuntimeError("No usable model/reference per-frame pairs could be loaded.")
 
-    available_panels: list[
-        tuple[str, str, np.ndarray, dict[str, np.ndarray], dict[str, float], np.ndarray]
-    ] = []
+    available_panels = []
     skipped_types: list[str] = []
-
-    for system_type in SYSTEMS:
-        ref_sub = ref_df.loc[ref_df["system_type"] == system_type].copy()
-        if ref_sub.empty:
-            skipped_types.append(system_type)
-            continue
-
-        structures_present = set(ref_sub["structure"].astype(str).tolist())
-        ordered_structures = [s for s in SYSTEMS[system_type] if s in structures_present]
-        if not ordered_structures:
-            skipped_types.append(system_type)
-            continue
-
-        ref_values_by_structure: dict[str, np.ndarray] = {
-            structure: ref_sub.loc[
-                ref_sub["structure"] == structure, "pressure_GPa"
-            ].to_numpy(dtype=float)
-            for structure in ordered_structures
-        }
-
+    for system_type, ordered_structures in SYSTEMS.items():
         structure_scores_by_model: dict[str, dict[str, float]] = {}
         structure_avg_mae: dict[str, float] = {}
-
         for structure in ordered_structures:
-            ref_values = ref_values_by_structure[structure]
-            if ref_values.size == 0:
-                continue
-
-            scores: dict[str, float] = {}
+            scores = {}
             for model_name, values_by_structure in model_data.items():
-                mae_gpa = pressure_mean_absolute_error_gpa(
-                    ref_values,
-                    values_by_structure.get(structure),
+                ref_values = reference_data[model_name].get(structure)
+                if ref_values is None:
+                    continue
+                score = pressure_mean_absolute_error_gpa(
+                    ref_values, values_by_structure.get(structure)
                 )
-                if np.isfinite(mae_gpa):
-                    scores[model_name] = mae_gpa
-
+                if np.isfinite(score):
+                    scores[model_name] = score
             if scores:
                 structure_scores_by_model[structure] = scores
                 structure_avg_mae[structure] = mean_finite(scores.values())
@@ -433,58 +403,38 @@ def collect_histogram_panels(
         if not structure_avg_mae:
             skipped_types.append(system_type)
             continue
-
         representative_system = max(structure_avg_mae, key=structure_avg_mae.get)
-        ref_vals_plot = ref_values_by_structure[representative_system]
-        if ref_vals_plot.size == 0:
-            skipped_types.append(system_type)
-            continue
-
-        values_by_model_plot: dict[str, np.ndarray] = {}
-        for model_name in TIER_ORDER:
-            values_by_structure = model_data.get(model_name)
-            if values_by_structure is None:
-                continue
-
-            rep_vals = values_by_structure.get(representative_system)
-
-            if rep_vals is not None and rep_vals.size > 0:
-                values_by_model_plot[model_name] = rep_vals
-
-        model_scores = {
-            model: score for model, score in structure_scores_by_model[representative_system].items()
-            if model in values_by_model_plot
+        model_scores = structure_scores_by_model[representative_system]
+        values_by_model = {
+            model: model_data[model][representative_system]
+            for model in model_scores if model in TIER_ORDER
         }
-
-        if not model_scores or not values_by_model_plot:
+        references_by_model = {
+            model: reference_data[model][representative_system]
+            for model in values_by_model
+        }
+        if not values_by_model:
             skipped_types.append(system_type)
             continue
-
+        edges = make_bin_edges(
+            next(iter(references_by_model.values())),
+            list(references_by_model.values()) + list(values_by_model.values()),
+            bins=bins,
+        )
         print(
-            "[INFO] Selected "
-            f"{representative_system} for {system_type}: "
+            f"[INFO] Selected {representative_system} for {system_type}: "
             f"mean model pressure MAE = {structure_avg_mae[representative_system]:.2f} GPa "
-            f"across {len(structure_scores_by_model[representative_system])} models."
+            f"across {len(model_scores)} models."
         )
-
-        bin_edges_plot = make_bin_edges(ref_vals_plot, list(values_by_model_plot.values()), bins=bins)
-        available_panels.append(
-            (
-                system_type,
-                representative_system,
-                ref_vals_plot,
-                values_by_model_plot,
-                model_scores,
-                bin_edges_plot,
-            )
-        )
+        available_panels.append((
+            system_type, representative_system, references_by_model,
+            values_by_model, model_scores, edges,
+        ))
 
     if skipped_types:
         print(f"[INFO] Skipping system types without enough data: {', '.join(skipped_types)}")
-
     if not available_panels:
         raise RuntimeError("No system types have both reference and model pressure data for plotting.")
-
     return available_panels
 
 
@@ -656,7 +606,7 @@ def draw_overall_pressure_mae_plot(ax, ranking_df: pd.DataFrame, panel_label: st
 
 def plot_combined(
     pressures_dir: Path,
-    reference_file: Path,
+    reference_file: Path | None,
     ranking_df: pd.DataFrame,
     bins: int,
     output: str | Path,
@@ -693,7 +643,7 @@ def plot_combined(
     for idx, (
         system_type,
         representative_system,
-        ref_values,
+        references_by_model,
         values_by_model,
         model_scores,
         bin_edges,
@@ -749,16 +699,19 @@ def plot_combined(
             best_model, worst_model, scores = choose_best_worst_from_scores(tier_models, model_scores)
             tier_mean_error = mean_finite(scores.values())
 
-            ax.hist(
-                ref_values,
-                bins=bin_edges,
-                density=True,
-                histtype="step",
-                color="black",
-                linewidth=1.5,
-                linestyle="-",
-                label="Reference",
-            )
+            for model, label, style in (
+                (best_model, "Reference (best)", "-"),
+                (worst_model, "Reference (worst)", "--"),
+            ):
+                if model is None or model not in references_by_model:
+                    continue
+                if model == best_model and style == "--":
+                    continue
+                ax.hist(
+                    references_by_model[model], bins=bin_edges, density=True,
+                    histtype="step", color="black", linewidth=1.5,
+                    linestyle=style, label=label if best_model != worst_model else "Reference",
+                )
 
             if best_model is not None and best_model in values_by_model:
                 best_prefix = "Best/worst" if worst_model == best_model else "Best"
@@ -828,7 +781,7 @@ def plot_combined(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     plt.savefig(output, bbox_inches="tight", pad_inches=0.02)
-    plt.show()
+    plt.close(fig)
     print(f"Saved combined pressure panel plot to {output}")
 
 
@@ -863,7 +816,7 @@ def main() -> None:
     if not pressures_dir.is_dir():
         raise NotADirectoryError(f"Pressures directory not found: {pressures_dir}")
 
-    reference_file = find_reference_file(pressures_dir, args.reference_file)
+    reference_file = Path(args.reference_file) if args.reference_file else None
 
     ranking_file = Path(args.ranking_file)
     if not ranking_file.is_file():
