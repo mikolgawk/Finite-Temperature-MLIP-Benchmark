@@ -18,8 +18,17 @@
 # ///
 """Force-only CHGNet NVT production MD using the energy/force task."""
 
-from md_chgnet import main
+import sys
+from pathlib import Path
+
+
+# The reusable implementation lives one directory above this entry point.  Add
+# that directory before importing so this file does not resolve itself as
+# ``md_chgnet`` and create a circular import.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from md_chgnet_force_only import main
 
 
 if __name__ == "__main__":
-    main(force_only=True)
+    main()
