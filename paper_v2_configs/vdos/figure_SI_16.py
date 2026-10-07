@@ -120,8 +120,8 @@ TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
 TIER_3 = [
     "mattersim-v1-5m",
     "grace-oam",
-    "orb-v3",
-    "orb-v3-direct",
+    "orb-v3-omat",
+    "orb-v3-direct-omat",
     "esen-30m-oam",
     "nequip",
     "eq-v2-m-omat",

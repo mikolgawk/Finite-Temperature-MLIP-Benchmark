@@ -124,7 +124,7 @@ def add_spread_labels(ax, x_vals, y_vals, labels) -> None:
 
 TIER_1 = ["chgnet", "mace-mp-0", "grace-mp"]
 TIER_2 = ["mace-mpa-0", "orb-v2"]
-TIER_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl"]
+TIER_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3-omat", "orb-v3-direct-omat", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl"]
 TIER_4 = ["mace-mh-omat", "uma-s-omat", "uma-m-omat"]
 
 ACCELERATED_TIER_3 = {

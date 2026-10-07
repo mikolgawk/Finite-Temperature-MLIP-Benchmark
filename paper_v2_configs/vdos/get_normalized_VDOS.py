@@ -417,6 +417,9 @@ def process_source(
     spectra_dir = results_dir / SPECTRA_DIR
     trajectories = discover_mlip_trajectories(trajectory_dir)
     torchsim_source = "torchsim" in source
+    all_discovered_model_names = {
+        model for models in trajectories.values() for model in models
+    }
     if torchsim_source:
         trajectories = {
             system: {
@@ -425,10 +428,6 @@ def process_source(
             }
             for system, models in trajectories.items()
         }
-    all_discovered_model_names = {
-        model for models in trajectories.values() for model in models
-    }
-
     selected_systems = set(args.systems) if args.systems else None
     selected_models = set(args.models) if args.models else None
     excluded_system_types = {
@@ -459,9 +458,11 @@ def process_source(
 
     # ASE retains its expected-pair penalty; TorchSim scores completed MD only.
     model_names = sorted(
-        {model for models in trajectories.values() for model in models}
+        all_discovered_model_names
         if torchsim_source else (selected_models or all_discovered_model_names)
     )
+    if selected_models is not None:
+        model_names = [model for model in model_names if model in selected_models]
     expected_systems = (
         selected_systems - excluded_systems
         if selected_systems is not None
@@ -522,8 +523,7 @@ def process_source(
     for system in sorted(expected_systems):
         models = trajectories.get(system, {})
         eligible_models = (
-            [model for model in model_names if model in models]
-            if torchsim_source else model_names
+            model_names if torchsim_source else model_names
         )
         if not eligible_models:
             continue

@@ -324,6 +324,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     print(f"Results directory: {results_dir}")
     mlip_trajectories = discover_mlip_trajectories(trajectory_dir)
     torchsim_source = "torchsim" in source
+    all_discovered_model_names = {
+        model
+        for system_models in mlip_trajectories.values()
+        for model in system_models
+    }
     if torchsim_source:
         mlip_trajectories = {
             system: {
@@ -332,11 +337,6 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             }
             for system, models in mlip_trajectories.items()
         }
-    all_discovered_model_names = {
-        model
-        for system_models in mlip_trajectories.values()
-        for model in system_models
-    }
     reference_trajectories = {
         path.parent.name: path
         for path in sorted(REF_TRAJ_BASE_DIR.glob("*/traj.extxyz"))
@@ -384,9 +384,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
 
     # ASE retains its expected-pair penalty; TorchSim scores completed MD only.
     model_names = sorted(
-        {model for models in mlip_trajectories.values() for model in models}
+        all_discovered_model_names
         if torchsim_source else (selected_models or all_discovered_model_names)
     )
+    if selected_models is not None:
+        model_names = [model for model in model_names if model in selected_models]
 
     print(
         f"Found {len(reference_trajectories)} reference trajectories and "
@@ -426,8 +428,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     for system, ref_path in sorted(reference_trajectories.items()):
         system_models = mlip_trajectories.get(system, {})
         eligible_models = (
-            [model for model in model_names if model in system_models]
-            if torchsim_source else model_names
+            model_names if torchsim_source else model_names
         )
         if not eligible_models:
             continue
