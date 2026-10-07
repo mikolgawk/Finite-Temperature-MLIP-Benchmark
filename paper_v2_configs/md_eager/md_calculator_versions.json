@@ -443,13 +443,13 @@
         }
       }
     },
-    "orb-v3": {
-      "script": "md_orb_v3.py",
+    "orb-v3-omat": {
+      "script": "md_orb_v3_omat.py",
       "simulation_engine": "torch-sim",
       "adapter": "torch_sim.models.orb.OrbModel",
       "model": {
-        "identifier": "orb_v3_conservative_inf_mpa",
-        "loader": "pretrained.orb_v3_conservative_inf_mpa(device=device, precision='float32-highest')",
+        "identifier": "orb_v3_conservative_inf_omat",
+        "loader": "pretrained.orb_v3_conservative_inf_omat(device=device, precision='float32-highest', compile=False)",
         "version": "v3",
         "version_status": "named_registry_model"
       },
@@ -462,9 +462,8 @@
           "status": "exact"
         },
         "orb-models": {
-          "constraint": ">=0.6.2",
-          "status": "indirect",
-          "source": "torch-sim 0.6.1 orb extra"
+          "constraint": "==0.6.2",
+          "status": "exact"
         },
         "torch": {
           "constraint": null,
@@ -477,13 +476,13 @@
         }
       }
     },
-    "orb-v3-direct": {
-      "script": "md_orb_v3_direct.py",
+    "orb-v3-direct-omat": {
+      "script": "md_orb_v3_direct_omat.py",
       "simulation_engine": "torch-sim",
       "adapter": "torch_sim.models.orb.OrbModel",
       "model": {
-        "identifier": "orb_v3_direct_20_mpa",
-        "loader": "pretrained.orb_v3_direct_20_mpa(device=device, precision='float32-highest')",
+        "identifier": "orb_v3_direct_20_omat",
+        "loader": "pretrained.orb_v3_direct_20_omat(device=device, precision='float32-high', compile=False)",
         "version": "v3 direct 20",
         "version_status": "named_registry_model"
       },
@@ -496,9 +495,8 @@
           "status": "exact"
         },
         "orb-models": {
-          "constraint": ">=0.6.2",
-          "status": "indirect",
-          "source": "torch-sim 0.6.1 orb extra"
+          "constraint": "==0.6.2",
+          "status": "exact"
         },
         "torch": {
           "constraint": null,
