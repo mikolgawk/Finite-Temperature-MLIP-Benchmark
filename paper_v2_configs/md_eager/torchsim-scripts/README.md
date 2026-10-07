@@ -56,10 +56,10 @@ process exit status; missing input structures can still be skipped by the MD scr
 ## Run one model
 
 ```bash
-uv run --script md_orb_v3_direct.py
+uv run --script md_orb_v3_direct_omat.py
 
 # Select a GPU for a single model.
-CUDA_VISIBLE_DEVICES=0 uv run --script md_orb_v3_direct.py
+CUDA_VISIBLE_DEVICES=0 uv run --script md_orb_v3_direct_omat.py
 ```
 
 The scripts do not expose a shared command-line configuration interface. Simulation
@@ -79,8 +79,8 @@ settings come from the metadata file and constants in each script.
 | `md_mattersim_v1_5M.py` | MatterSim v1 5M |
 | `md_nequip.py` | NequIP OAM L |
 | `md_orb_v2.py` | ORB v2 |
-| `md_orb_v3.py` | ORB v3 |
-| `md_orb_v3_direct.py` | ORB v3 direct forces |
+| `md_orb_v3_omat.py` | ORB v3 conservative OMAT |
+| `md_orb_v3_direct_omat.py` | ORB v3 direct OMAT forces |
 | `md_pet_oam_xl.py` | PET OAM XL |
 | `md_pet_omat_xl.py` | PET OMat XL |
 | `md_uma_m_omat.py` | UMA M, OMat task |

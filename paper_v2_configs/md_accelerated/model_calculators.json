@@ -176,35 +176,35 @@
       "weight_dtype_verified": false
     },
     {
-      "name": "orb-v3",
+      "name": "orb-v3-omat",
       "package": "orb-models",
       "imports": [
-        "from orb_models.forcefield.calculator import ORBCalculator",
+        "from orb_models.forcefield.inference.calculator import ORBCalculator",
         "from orb_models.forcefield import pretrained"
       ],
-      "calculator_expr": "ORBCalculator(pretrained.orb_v3_conservative_inf_mpa(device='cuda', precision='float32-high'), device='cuda')",
+      "calculator_expr": "(lambda model, adapter: ORBCalculator(model, atoms_adapter=adapter, device='cuda'))(*pretrained.orb_v3_conservative_inf_omat(device='cuda', precision='float32-highest', compile=True))",
       "weight_dtype": "float32",
-      "matmul_precision": "tf32",
+      "matmul_precision": "fp32",
       "precision_settable": true,
       "verified": "source",
-      "dtype_note": "Same TF32 matmul path and global-state caveat as orb-v2. Checkpoint name indicates the conservative variant.",
-      "orb-models_version": "0.5.5",
+      "dtype_note": "OMAT conservative checkpoint, matching md_orb_v3_omat.py; float32-highest with TF32 disabled and compile=True.",
+      "orb-models_version": "0.6.2",
       "weight_dtype_verified": false
     },
     {
-      "name": "orb-v3-direct",
+      "name": "orb-v3-direct-omat",
       "package": "orb-models",
       "imports": [
-        "from orb_models.forcefield.calculator import ORBCalculator",
+        "from orb_models.forcefield.inference.calculator import ORBCalculator",
         "from orb_models.forcefield import pretrained"
       ],
-      "calculator_expr": "ORBCalculator(pretrained.orb_v3_direct_20_mpa(device='cuda', precision='float32-high'), device='cuda')",
+      "calculator_expr": "(lambda model, adapter: ORBCalculator(model, atoms_adapter=adapter, device='cuda'))(*pretrained.orb_v3_direct_20_omat(device='cuda', precision='float32-high', compile=True))",
       "weight_dtype": "float32",
       "matmul_precision": "tf32",
       "precision_settable": true,
       "verified": "source",
-      "dtype_note": "Same TF32 matmul path and global-state caveat as orb-v2.",
-      "orb-models_version": "0.5.5",
+      "dtype_note": "OMAT direct checkpoint, matching md_orb_v3_direct_omat.py; float32-high with TF32 enabled and compile=True.",
+      "orb-models_version": "0.6.2",
       "weight_dtype_verified": false
     },
     {

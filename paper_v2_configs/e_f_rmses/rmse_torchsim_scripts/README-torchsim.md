@@ -1,8 +1,8 @@
 # TorchSim RMSE scripts
 
-`md_eager/` matches `paper_v2_configs/md_eager/torchsim-scripts/` (16 models).
+`md_eager/` matches `paper_v2_configs/md_eager/torchsim-scripts/`.
 `md-accelerated/` matches `paper_v2_configs/md_accelerated/torchsim-scripts/`
-(16 models, including separate UMA compile/turbo variants).
+(including separate UMA compile/turbo variants).
 
 Each entry point preserves its source MD script's inline uv dependencies,
 model implementation, checkpoint, precision, neighbor list and acceleration
@@ -20,12 +20,15 @@ bash md-accelerated/run_all_rmses.sh
 
 Both launchers support `--dry-run` and retain per-model logs. Individual Python
 scripts support `--help`, `--ref-dir`, `--output-dir`, `--max-frames`, `--force`,
-`--raw-energies`, `--isolated-atom-dir`, and `--debug`. Relative CLI paths resolve
+`--raw-energies`, `--isolated-atom-dir`, `--md-dir`, and `--debug`. Relative CLI paths resolve
 against the working directory. Default data paths resolve against the repository.
 CUDA and the same model access/checkpoints/toolchains as the MD runs are required.
 
 The shared `torchsim_rmse.py` evaluates `traj*.extxyz` recursively under
-`paper_v2_configs/data/ref-trajs`. Reference values come from `REF_energy` /
+`paper_v2_configs/data/ref-trajs`, selecting only systems whose matching TorchSim
+MD run has an HDF5 trajectory and a completed timing CSV. The default MD
+source matches the eager or accelerated RMSE runner; `--md-dir` overrides it.
+Reference values come from `REF_energy` /
 `REF_forces` when present, otherwise the ASE reference calculator. Energy RMSE
 is in eV/atom, computed from each frame's energy error divided by its atom count;
 force RMSE is over all Cartesian components in eV/Angstrom. Aromatic systems and
@@ -42,3 +45,11 @@ a nonzero exit status. Incomplete runs are retried; completed summaries are skip
 unless `--force` is supplied. `--max-frames` limits reference and evaluated counts
 to the selected prefix; use a separate `--output-dir` for smoke tests so their
 summaries do not cause full runs to be skipped.
+
+Both modes include `rmse_orb_v3_omat.py` and `rmse_orb_v3_direct_omat.py`.
+These use the conservative/direct OMAT checkpoints and exact MD identifiers.
+The conservative OMAT variant uses `float32-highest` with TF32 disabled; the
+direct OMAT variant uses `float32-high` with TF32 enabled. Eager runners disable
+compilation and accelerated runners enable it, matching the production scripts.
+See [the ORB v3 OMAT workflow](../../README-orb-v3-omat.md) for pressure evaluation
+and generation of all four metrics.
