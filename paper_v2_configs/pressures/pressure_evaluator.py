@@ -20,7 +20,7 @@ def _pressure_root(script: Path) -> Path:
     return next(parent for parent in script.parents if parent.name == "pressures")
 
 
-def early_cli(script, backend: str) -> None:
+def early_cli(script, backend: str, *, default_traj_dir: Path | None = None) -> None:
     """Parse lightweight CLI options before importing a model's dependencies."""
     global _ARGS, _SCRIPT, _BACKEND
     _SCRIPT = Path(script).resolve()
@@ -29,7 +29,7 @@ def early_cli(script, backend: str) -> None:
     data = root.parent / "data"
     accelerated = "md_accelerated" in _SCRIPT.parts
     family = "md_accelerated" if accelerated else "md_eager"
-    default_trajectories = data / (
+    default_trajectories = default_traj_dir if default_traj_dir is not None else data / (
         "mlip-trajs-torchsim-accelerated" if accelerated else "mlip-trajs-torchsim-eager"
     )
     parser = argparse.ArgumentParser(description=__doc__)

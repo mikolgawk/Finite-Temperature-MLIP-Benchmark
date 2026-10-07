@@ -16,15 +16,23 @@ from ase_rmse import REPO, early_cli, run_rmse
 if __name__ == "__main__" and "--compile-force-only" not in sys.argv[1:]:
     early_cli(__file__)
 
-"""ASE counterpart to torchsim-scripts/md_orb_v3.py."""
+"""ASE counterpart to torchsim-scripts/md_orb_v3_omat.py."""
 
+
+
+import torch
+
+torch.set_float32_matmul_precision("highest")
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+torch.backends.cudnn.benchmark = False
 
 
 def make_calculator():
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
-    model, adapter = pretrained.orb_v3_conservative_inf_mpa(
+    model, adapter = pretrained.orb_v3_conservative_inf_omat(
         device="cuda", precision="float32-highest", compile=True,
     )
     model.disable_stress()
@@ -34,5 +42,5 @@ def make_calculator():
 
 
 if __name__ == "__main__":
-    run_rmse("orb-v3-force-only", make_calculator,
+    run_rmse("orb-v3-omat-force-only", make_calculator,
                "ase+orb+compile+force-only")

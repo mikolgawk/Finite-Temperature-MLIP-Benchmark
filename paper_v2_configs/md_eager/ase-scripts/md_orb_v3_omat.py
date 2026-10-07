@@ -8,9 +8,9 @@
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
 # ///
-"""Native ASE energy/force-only counterpart to torchsim-scripts/md_orb_v3.py.
+"""Native ASE energy/force-only counterpart to torchsim-scripts/md_orb_v3_omat.py.
 
-Run: uv run ase-scripts/md_orb_v3.py
+Run: uv run ase-scripts/md_orb_v3_omat.py
 """
 
 """Shared, system-independent ASE NVT driver for the model runners."""
@@ -37,7 +37,7 @@ from tqdm.auto import tqdm
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 METADATA_FILE = REPO / "paper_v2_configs" / "data" / "ref-trajs" / "md_metadata.json"
-OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-torchsim-eager"
+OUT_ROOT = REPO / "paper_v2_configs" / "data" / "mlip-trajs-ase"
 
 CHAIN_LENGTH = 1
 CHAIN_STEPS = 1
@@ -139,7 +139,7 @@ def run_ase_md(
     calculator = make_calculator()
     if "stress" in calculator.implemented_properties:
         raise RuntimeError("ASE production calculator must disable stress")
-    run_name = f"{model_name}-ase"
+    run_name = model_name
 
     for name, meta in metadata.items():
         try:
@@ -281,13 +281,15 @@ def make_calculator():
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
-    model, atoms_adapter = pretrained.orb_v3_conservative_inf_mpa(
+    model, atoms_adapter = pretrained.orb_v3_conservative_inf_omat(
         device="cuda", precision="float32-highest", compile=False
     )
     model.disable_stress()
     assert_eager_module(model)
-    return ORBCalculator(model, atoms_adapter=atoms_adapter, device="cuda")
+    calculator = ORBCalculator(model, atoms_adapter=atoms_adapter, device="cuda")
+    calculator.implemented_properties = ["energy", "free_energy", "forces"]
+    return calculator
 
 
 if __name__ == "__main__":
-    run_ase_md("orb-v3", make_calculator, "ase+orb-models-0.6.2")
+    run_ase_md("orb-v3-omat", make_calculator, "ase+orb-models-0.6.2")

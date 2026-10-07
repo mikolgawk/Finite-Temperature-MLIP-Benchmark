@@ -2,8 +2,10 @@
 from argparse import Namespace
 from pathlib import Path
 import json
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import h5py
 import numpy as np
@@ -29,6 +31,21 @@ class ConstantStress(Calculator):
 
 
 class PressureEvaluatorTests(unittest.TestCase):
+    def test_trajectory_directory_default_can_be_overridden(self):
+        script = Path(__file__).resolve().parent / "md_eager/ase-scripts/pressure_orb_v3_omat.py"
+        default = script.parents[3] / "data/mlip-trajs-ase"
+        custom = Path("/tmp/custom-omat-trajectories")
+        with patch.object(evaluator, "_ARGS"), patch.object(evaluator, "_SCRIPT"), patch.object(evaluator, "_BACKEND"):
+            with patch.object(sys, "argv", [str(script)]):
+                evaluator.early_cli(script, "ase", default_traj_dir=default)
+                self.assertEqual(evaluator._ARGS.traj_dir, default)
+            with patch.object(sys, "argv", [str(script), "--traj-dir", str(custom)]):
+                evaluator.early_cli(script, "ase", default_traj_dir=default)
+                self.assertEqual(evaluator._ARGS.traj_dir, custom)
+            with patch.object(sys, "argv", [str(script)]):
+                evaluator.early_cli(script, "torchsim")
+                self.assertEqual(evaluator._ARGS.traj_dir, script.parents[3] / "data/mlip-trajs-torchsim-eager")
+
     def test_stress_matrix_symmetrizes_full_tensor(self):
         stress = np.array([
             [1.0, 2.0, 3.0],

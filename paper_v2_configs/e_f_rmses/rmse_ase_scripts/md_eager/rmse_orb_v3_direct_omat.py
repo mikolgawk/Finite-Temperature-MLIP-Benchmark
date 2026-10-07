@@ -16,9 +16,9 @@ from ase_rmse import REPO, early_cli, run_rmse
 if __name__ == "__main__" and "--compile-force-only" not in sys.argv[1:]:
     early_cli(__file__)
 
-"""Native ASE energy/force-only counterpart to torchsim-scripts/md_orb_v3.py.
+"""Native ASE energy/force-only counterpart to torchsim-scripts/md_orb_v3_direct_omat.py.
 
-Run: uv run ase-scripts/md_orb_v3.py
+Run: uv run ase-scripts/md_orb_v3_direct_omat.py
 """
 
 """ASE RMSE evaluator derived from the matching MD calculator."""
@@ -46,8 +46,8 @@ CHAIN_STEPS = 1
 SEED = 42
 
 
-torch.set_float32_matmul_precision("highest")
-torch.backends.cuda.matmul.allow_tf32 = False
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = False
 torch.backends.cudnn.benchmark = False
 
@@ -80,8 +80,8 @@ def make_calculator():
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
-    model, atoms_adapter = pretrained.orb_v3_conservative_inf_mpa(
-        device="cuda", precision="float32-highest", compile=False
+    model, atoms_adapter = pretrained.orb_v3_direct_20_omat(
+        device="cuda", precision="float32-high", compile=False
     )
     model.disable_stress()
     assert_eager_module(model)
@@ -89,4 +89,4 @@ def make_calculator():
 
 
 if __name__ == "__main__":
-    run_rmse("orb-v3", make_calculator, "ase+orb-models-0.6.2")
+    run_rmse("orb-v3-direct-omat", make_calculator, "ase+orb-models-0.6.2")

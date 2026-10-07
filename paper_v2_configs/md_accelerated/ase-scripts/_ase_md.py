@@ -118,12 +118,12 @@ def run_ase_md(
     make_calculator: Callable[[], object],
     engine: str,
     synchronize: Callable[[], None] = synchronize_cuda,
-    *, per_system_calculator: bool = False,
+    *, per_system_calculator: bool = False, filename_suffix: str = "-ase",
 ) -> None:
-    """Run an ASE calculator over every system in the MD metadata."""
+    """Run NVT MD; use an empty filename_suffix for canonical per-source names."""
     metadata = json.loads(METADATA_FILE.read_text())
     calculator = None
-    run_name = f"{model_name}-ase"
+    run_name = f"{model_name}{filename_suffix}"
 
     for name, meta in metadata.items():
         atoms = None

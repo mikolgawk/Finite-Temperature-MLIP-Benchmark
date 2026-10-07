@@ -8,17 +8,25 @@
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
 # ///
-"""ASE counterpart to torchsim-scripts/md_orb_v3_direct.py."""
+"""ASE counterpart to torchsim-scripts/md_orb_v3_direct_omat.py."""
 
 from _ase_md import run_ase_md
+
+
+import torch
+
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = False
+torch.backends.cudnn.benchmark = False
 
 
 def make_calculator():
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
-    model, adapter = pretrained.orb_v3_direct_20_mpa(
-        device="cuda", precision="float32-highest", compile=True,
+    model, adapter = pretrained.orb_v3_direct_20_omat(
+        device="cuda", precision="float32-high", compile=True,
     )
     model.disable_stress()
     calculator = ORBCalculator(model, atoms_adapter=adapter, device="cuda")
@@ -27,5 +35,5 @@ def make_calculator():
 
 
 if __name__ == "__main__":
-    run_ase_md("orb-v3-direct-force-only", make_calculator,
-               "ase+orb+compile+force-only")
+    run_ase_md("orb-v3-direct-omat-force-only", make_calculator,
+               "ase+orb+compile+force-only", filename_suffix="")

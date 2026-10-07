@@ -14,9 +14,9 @@ from pathlib import Path
 _PRESSURE_ROOT = next(parent for parent in Path(__file__).resolve().parents if parent.name == "pressures")
 sys.path.insert(0, str(_PRESSURE_ROOT))
 from pressure_evaluator import early_cli, run_ase_pressure
-early_cli(__file__, "ase")
+early_cli(__file__, "ase", default_traj_dir=_PRESSURE_ROOT.parent / "data" / "mlip-trajs-ase")
 
-"""Stress-enabled md_orb_v3_direct.py: record potential stress for every saved trajectory frame."""
+"""Stress-enabled md_orb_v3_omat.py: record potential stress for every saved trajectory frame."""
 
 
 import csv
@@ -268,7 +268,7 @@ def make_calculator():
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
-    model, atoms_adapter = pretrained.orb_v3_direct_20_mpa(
+    model, atoms_adapter = pretrained.orb_v3_conservative_inf_omat(
         device="cuda", precision="float32-highest", compile=False
     )
 
@@ -277,4 +277,4 @@ def make_calculator():
 
 
 if __name__ == "__main__":
-    run_ase_pressure("orb-v3-direct", make_calculator, "ase+orb-models-0.6.2")
+    run_ase_pressure("orb-v3-omat", make_calculator, "ase+orb-models-0.6.2")

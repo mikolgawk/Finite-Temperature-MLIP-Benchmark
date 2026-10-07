@@ -57,29 +57,63 @@ uv run --script generate_metrics.py \
 filters processes all discovered models, including the new OMAT variants.
 The RMSE and pressure batch launchers discover the new runners automatically.
 
-## ASE metric counterparts
+## ASE MD and metrics
 
-The matching ASE runners are also available in both modes:
+The matching ASE MD, RMSE, and pressure runners are available in both modes.
+Run MD first, then evaluate energies/forces on reference frames and stress on the
+saved ASE trajectories. Eager runners use `compile=False`; accelerated runners
+use `compile=True`. Production MD disables stress in both modes.
+
+| Mode | Trajectory source | Conservative identifier | Direct identifier |
+| --- | --- | --- | --- |
+| Eager | `mlip-trajs-ase` | `orb-v3-omat` | `orb-v3-direct-omat` |
+| Accelerated | `mlip-trajs-ase-accelerated` | `orb-v3-omat-force-only` | `orb-v3-direct-omat-force-only` |
+
+ASE trajectories and timing CSVs use these identifiers without an additional
+`-ase` suffix, so the same `--model` filters work across all four metric stages.
+The source directory identifies the backend. MD batch launchers discover the
+new scripts automatically.
+
+Eager:
 
 ```bash
+uv run --script md_eager/ase-scripts/md_orb_v3_omat.py
+uv run --script md_eager/ase-scripts/md_orb_v3_direct_omat.py
 uv run --script e_f_rmses/rmse_ase_scripts/md_eager/rmse_orb_v3_omat.py
 uv run --script e_f_rmses/rmse_ase_scripts/md_eager/rmse_orb_v3_direct_omat.py
 uv run --script pressures/md_eager/ase-scripts/pressure_orb_v3_omat.py
 uv run --script pressures/md_eager/ase-scripts/pressure_orb_v3_direct_omat.py
 
+uv run --script generate_metrics.py \
+  --source mlip-trajs-ase \
+  --model orb-v3-omat \
+  --model orb-v3-direct-omat
+```
+
+Accelerated:
+
+```bash
+uv run --script md_accelerated/ase-scripts/md_orb_v3_omat.py
+uv run --script md_accelerated/ase-scripts/md_orb_v3_direct_omat.py
 uv run --script e_f_rmses/rmse_ase_scripts/md-accelerated/rmse_orb_v3_omat.py
 uv run --script e_f_rmses/rmse_ase_scripts/md-accelerated/rmse_orb_v3_direct_omat.py
 uv run --script pressures/md_accelerated/ase-scripts/pressure_orb_v3_omat.py
 uv run --script pressures/md_accelerated/ase-scripts/pressure_orb_v3_direct_omat.py
+
+uv run --script generate_metrics.py \
+  --source mlip-trajs-ase-accelerated \
+  --model orb-v3-omat-force-only \
+  --model orb-v3-direct-omat-force-only
 ```
 
 Eager ASE RMSE identifiers are `orb-v3-omat`
 and `orb-v3-direct-omat`; accelerated RMSE identifiers add `-force-only`.
 ASE prediction summaries go to
 `e_f_rmses/data/e-f-predictions-ase/{md_eager,md-accelerated}/`. ASE pressure
-evaluators read the saved TorchSim trajectories and write to
+OMAT evaluators default to the corresponding ASE trajectory source and write to
 `pressures/results/ase/{md_eager,md_accelerated}/`. Their results remain separate
-from the TorchSim metric outputs. RDF and VDOS use the existing shared pipelines.
+from the TorchSim metric outputs. Use `--traj-dir` to evaluate another trajectory
+source, including TorchSim. RDF and VDOS use the existing shared pipelines.
 
 ## Results and plots
 

@@ -2,8 +2,9 @@
 
 ASE counterparts to `../rmse_torchsim_scripts`, derived from the calculator
 setups in `../../md_eager/ase-scripts` and `../../md_accelerated/ase-scripts`.
-`md_eager/` contains 17 standard runners and `md-accelerated/` contains 19 accelerated
-runners. Each script retains its source's uv dependency metadata and calculator
+Each mode also includes `rmse_orb_v3_omat.py` and `rmse_orb_v3_direct_omat.py`,
+using the OMAT checkpoints and precision settings of the OMAT TorchSim MD runners.
+Each script retains its source's uv dependency metadata and calculator
 configuration. `_mace.py` and `_uma.py` retain the accelerated stress-disabling
 helpers. The scripts evaluate reference frames without integrating dynamics.
 
@@ -33,7 +34,7 @@ The standard source `md_chgnet.py` contains a self-import rather than a usable
 calculator-loading function. Its RMSE counterpart uses the accelerated source's native
 CHGNet energy/force-only calculator with `torch.compile` removed.
 
-Validation: all 36 Python runners pass `--help` without importing model packages;
+Validation: Python runners pass `--help` without importing model packages;
 both batch launchers pass shell syntax and dry-run checks. The shared evaluator
 was checked with ASE EMT fixtures for known energy/force errors and isolated-atom
 corrections. Full model evaluations require the source dependencies, checkpoints,

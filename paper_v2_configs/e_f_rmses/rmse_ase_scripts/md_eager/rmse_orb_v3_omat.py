@@ -16,9 +16,9 @@ from ase_rmse import REPO, early_cli, run_rmse
 if __name__ == "__main__" and "--compile-force-only" not in sys.argv[1:]:
     early_cli(__file__)
 
-"""Native ASE energy/force-only counterpart to torchsim-scripts/md_orb_v3_direct.py.
+"""Native ASE energy/force-only counterpart to torchsim-scripts/md_orb_v3_omat.py.
 
-Run: uv run ase-scripts/md_orb_v3_direct.py
+Run: uv run ase-scripts/md_orb_v3_omat.py
 """
 
 """ASE RMSE evaluator derived from the matching MD calculator."""
@@ -80,7 +80,7 @@ def make_calculator():
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
-    model, atoms_adapter = pretrained.orb_v3_direct_20_mpa(
+    model, atoms_adapter = pretrained.orb_v3_conservative_inf_omat(
         device="cuda", precision="float32-highest", compile=False
     )
     model.disable_stress()
@@ -89,4 +89,4 @@ def make_calculator():
 
 
 if __name__ == "__main__":
-    run_rmse("orb-v3-direct", make_calculator, "ase+orb-models-0.6.2")
+    run_rmse("orb-v3-omat", make_calculator, "ase+orb-models-0.6.2")

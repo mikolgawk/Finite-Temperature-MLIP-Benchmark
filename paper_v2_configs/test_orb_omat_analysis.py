@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
 from pathlib import Path
 import runpy
@@ -59,7 +61,7 @@ def md_settings(mode: str, suffix: str) -> dict:
 class OrbOmatAnalysisTests(unittest.TestCase):
     def test_v2_orb_v3_runners_and_registries_use_only_omat(self):
         runners = list(ROOT.rglob("*orb_v3*.py"))
-        self.assertEqual(len(runners), 20)
+        self.assertEqual(len(runners), 24)
         for runner in runners:
             self.assertIn("_omat", runner.stem, str(runner))
             for node in ast.walk(ast.parse(runner.read_text())):
@@ -157,7 +159,7 @@ class OrbOmatAnalysisTests(unittest.TestCase):
             for suffix, base in (("orb_v3_omat", "orb-v3-omat"),
                                  ("orb_v3_direct_omat", "orb-v3-direct-omat")):
                 settings = md_settings(mode, suffix)
-                for metric in ("rmse", "pressure"):
+                for metric in ("md", "rmse", "pressure"):
                     with self.subTest(mode=mode, model=base, metric=metric):
                         field = Mock()
                         field.named_modules.return_value = []
@@ -172,7 +174,7 @@ class OrbOmatAnalysisTests(unittest.TestCase):
                         )
                         calculator = SimpleNamespace(implemented_properties=["energy", "forces", "stress"])
                         adapter = Mock(return_value=calculator)
-                        evaluate = Mock(side_effect=lambda name, factory, *args: factory())
+                        evaluate = Mock(side_effect=lambda name, factory, *args, **kwargs: factory())
                         helper = SimpleNamespace(REPO=ROOT.parent, early_cli=Mock(),
                                                  run_rmse=evaluate, run_ase_pressure=evaluate)
                         modules = {
@@ -190,27 +192,95 @@ class OrbOmatAnalysisTests(unittest.TestCase):
                             "ase.md.nose_hoover_chain": SimpleNamespace(NoseHooverChainNVT=Mock()),
                             "ase.md.velocitydistribution": SimpleNamespace(MaxwellBoltzmannDistribution=Mock()),
                             "ase_rmse": helper, "pressure_evaluator": helper,
+                            "_ase_md": SimpleNamespace(run_ase_md=evaluate),
                         }
-                        if metric == "rmse":
+                        if metric == "md":
+                            directory = ROOT / mode / "ase-scripts"
+                        elif metric == "rmse":
                             directory = ROOT / "e_f_rmses/rmse_ase_scripts" / (
                                 "md_eager" if eager else "md-accelerated")
                         else:
                             directory = ROOT / "pressures" / mode / "ase-scripts"
                         script = directory / f"{metric}_{suffix}.py"
                         with patch.dict(sys.modules, modules), patch.object(sys, "path", sys.path.copy()):
-                            runpy.run_path(str(script), run_name="__main__")
+                            if metric == "md" and eager:
+                                namespace = runpy.run_path(str(script))
+                                namespace["make_calculator"]()
+                            else:
+                                runpy.run_path(str(script), run_name="__main__")
                         loader.assert_called_once_with(device="cuda", precision=settings["precision"],
                                                        compile=settings["compile"])
                         adapter.assert_called_once_with(field, atoms_adapter="adapter", device="cuda")
-                        self.assertEqual(field.disable_stress.call_count, int(metric == "rmse"))
-                        expected_name = base + ("" if eager else "-force-only" if metric == "rmse" else "-stress")
-                        self.assertEqual(evaluate.call_args.args[0], expected_name)
-                        helper.early_cli.assert_called_once()
-                        if not eager:
+                        self.assertEqual(field.disable_stress.call_count, int(metric != "pressure"))
+                        expected_name = base + ("" if eager else "-stress" if metric == "pressure" else "-force-only")
+                        if metric != "md" or not eager:
+                            self.assertEqual(evaluate.call_args.args[0], expected_name)
+                        if metric != "md":
+                            helper.early_cli.assert_called_once()
+                        if metric == "pressure":
+                            source = "mlip-trajs-ase" + ("" if eager else "-accelerated")
+                            self.assertEqual(helper.early_cli.call_args.kwargs["default_traj_dir"],
+                                             ROOT / "data" / source)
+                        if not eager or metric == "md":
                             self.assertEqual("stress" in calculator.implemented_properties, metric == "pressure")
-                        else:
-                            torch.set_float32_matmul_precision.assert_called_once_with(settings["matmul"])
-                            self.assertEqual(torch.backends.cuda.matmul.allow_tf32, settings["tf32"])
+                        torch.set_float32_matmul_precision.assert_called_once_with(settings["matmul"])
+                        self.assertEqual(torch.backends.cuda.matmul.allow_tf32, settings["tf32"])
+                        self.assertFalse(torch.backends.cudnn.allow_tf32)
+                        self.assertFalse(torch.backends.cudnn.benchmark)
+
+    def test_ase_omat_md_outputs_feed_metric_trajectory_lookup(self):
+        try:
+            import ase.md.bussi
+            import ase.md.nose_hoover_chain
+        except ImportError:
+            self.skipTest("ASE >=3.26 is required for the production MD driver")
+        import h5py
+        import numpy as np
+        from ase.build import bulk
+        from ase.calculators.emt import EMT
+        from ase.io import write
+
+        class EnergyForceOnlyEMT(EMT):
+            implemented_properties = ["energy", "free_energy", "forces"]
+
+        for mode in ("md_eager", "md_accelerated"):
+            eager = mode == "md_eager"
+            for base in ("orb-v3-omat", "orb-v3-direct-omat"):
+                with self.subTest(mode=mode, model=base), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    system = "bulkCu_300K_test"
+                    write(root / "init.extxyz", bulk("Cu", "fcc", a=3.6, cubic=True))
+                    metadata = root / "metadata.json"
+                    metadata.write_text(json.dumps({system: {
+                        "initfile_path": "init.extxyz", "temperature": 300,
+                        "timestep": 1, "thermostat_coupling_constant": 50,
+                        "thermostat_type": "Langevin", "position_print_stride": 1,
+                        "energy_print_stride": 1, "trajectory_length_ps": 0.002,
+                    }}))
+                    directory = ROOT / mode / "ase-scripts"
+                    with patch.object(sys, "path", [str(directory), *sys.path]):
+                        namespace = runpy.run_path(str(directory / f"md_{base.replace('-', '_')}.py"))
+                    driver = namespace["run_ase_md"]
+                    source = "mlip-trajs-ase" + ("" if eager else "-accelerated")
+                    self.assertEqual(driver.__globals__["OUT_ROOT"], ROOT / "data" / source)
+                    model = base + ("" if eager else "-force-only")
+                    options = {} if eager else {"filename_suffix": ""}
+                    with patch.dict(driver.__globals__, {
+                        "REPO": root, "METADATA_FILE": metadata, "OUT_ROOT": root / source,
+                    }), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        driver(model, EnergyForceOnlyEMT, "ase-test", synchronize=lambda: None, **options)
+                    output = root / source / system
+                    trajectory = output / f"nvt_{model}.h5"
+                    self.assertEqual(_trajectory_paths(root / source, base + "-stress"), [trajectory])
+                    timing = pd.read_csv(output / f"md_timing_{model}.csv")
+                    self.assertEqual(timing.calculator.tolist(), [model])
+                    self.assertEqual(timing.n_steps.tolist(), [2])
+                    with h5py.File(trajectory) as handle:
+                        self.assertEqual(handle.attrs["engine"], "ase")
+                        self.assertEqual(handle.attrs["model"], model)
+                        self.assertEqual(handle["data/positions"].shape, (3, 4, 3))
+                        self.assertTrue(np.isfinite(handle["data/velocities"][:]).all())
+                        self.assertNotIn("stress", handle["data"])
 
     def test_pressure_selects_only_matching_omat_checkpoint(self):
         with tempfile.TemporaryDirectory() as temporary:
