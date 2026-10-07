@@ -387,6 +387,75 @@ def build_pair_rows(
     ).reset_index(drop=True)
 
 
+def add_failed_system_penalties(
+    pair_df: pd.DataFrame,
+    pressures_dir: Path,
+    source: str,
+    models: set[str] | None,
+    excluded_system_types: set[str] | None,
+    bins: int,
+) -> pd.DataFrame:
+    """Add 100% pressure-error rows for failed TorchSim MD pairs."""
+    if "torchsim" not in source:
+        return pair_df
+
+    # The pair table is the authoritative set of systems scored by pressure;
+    # it excludes systems intentionally omitted by the pressure evaluator.
+    systems = set(pair_df["system"].astype(str))
+    discovered_models = set(pair_df["mlip_model"].astype(str))
+    if models is not None:
+        requested = {canonical_pressure_model_name(model) for model in models}
+        discovered_models = {
+            model for model in discovered_models
+            if canonical_pressure_model_name(model) in requested
+        }
+
+    excluded = {value.strip().lower() for value in excluded_system_types or ()}
+    systems = {
+        system for system in systems
+        if (infer_system_type(system) or "").lower() not in excluded
+    }
+    existing = {
+        (system, canonical_pressure_model_name(model))
+        for system, model in zip(pair_df["system"], pair_df["mlip_model"])
+    }
+    backend, mode = SOURCE_DATASETS[source]
+    penalties = []
+    for system in sorted(systems):
+        for model in sorted(discovered_models):
+            model_name = canonical_pressure_model_name(model)
+            if (system, model_name) in existing:
+                continue
+            penalties.append(
+                {
+                    "system": system,
+                    "system_type": infer_system_type(system),
+                    "mlip_model": model_name,
+                    "backend": backend,
+                    "mode": mode,
+                    "pressure_similarity": 0.0,
+                    "pressure_similarity_percent": 0.0,
+                    "pressure_error_fraction": 1.0,
+                    "pressure_error_percent": 100.0,
+                    "pressure_histogram_l1_area": np.nan,
+                    "pressure_histogram_distance": np.nan,
+                    "pressure_ref_histogram_area": np.nan,
+                    "pressure_mlip_histogram_area": np.nan,
+                    "pressure_histogram_min_GPa": np.nan,
+                    "pressure_histogram_max_GPa": np.nan,
+                    "n_ref_frames": 0,
+                    "n_mlip_frames": 0,
+                    "bins": int(bins),
+                    "reference_file": "",
+                    "model_file": "",
+                    "failure_reason": "MLIP MD trajectory missing or incomplete",
+                }
+            )
+    if penalties:
+        pair_df = pd.concat([pair_df, pd.DataFrame(penalties)], ignore_index=True)
+    return pair_df
+
+
 def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataFrame | None:
     if pressure_comparison_file is None or not pressure_comparison_file.is_file():
         return None
@@ -616,6 +685,10 @@ def compute_pressure_metric(
         bins=bins,
         models=models,
     )
+    if source is not None:
+        pair_df = add_failed_system_penalties(
+            pair_df, pressures_dir, source, models, excluded_system_types, bins
+        )
     if source is not None:
         pair_df['backend'], pair_df['mode'] = SOURCE_DATASETS[source]
         pair_df['source'] = source

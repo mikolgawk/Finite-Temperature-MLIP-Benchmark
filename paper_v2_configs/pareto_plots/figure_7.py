@@ -86,7 +86,7 @@ def display_name(model: str) -> str:
 
 TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
 TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
-TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3", "orb-v3-direct", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5M-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
+TIER_3 = ["mattersim-v1-5M", "grace-oam", "orb-v3-omat", "orb-v3-direct-omat", "eSEN-30M-OAM", "nequip", "eq-v2-M-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5M-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
 TIER_4 = ["mace-mh-omat", "mace-mh-omat-compile", "uma-s-omat", "uma-s-omat-compile", "uma-s-omat-turbo", "uma-m-omat", "uma-m-omat-compile", "uma-m-omat-turbo"]
 
 

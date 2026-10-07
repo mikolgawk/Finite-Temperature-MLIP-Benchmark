@@ -88,7 +88,7 @@ STRUCTURE_TO_TYPE = {
 
 TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
 TIER_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
-TIER_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3", "orb-v3-direct", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5m-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
+TIER_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3-omat", "orb-v3-direct-omat", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5m-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
 TIER_4 = ["mace-mh-omat", "mace-mh-omat-compile", "uma-s-omat", "uma-s-omat-compile", "uma-s-omat-turbo", "uma-m-omat", "uma-m-omat-compile", "uma-m-omat-turbo"]
 TIER_ORDER = TIER_1 + TIER_2 + TIER_3 + TIER_4
 

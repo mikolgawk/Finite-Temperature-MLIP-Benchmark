@@ -79,8 +79,8 @@ class PressureEvaluatorTests(unittest.TestCase):
             self.assertEqual(evaluator._frame_count(trajectory, 20), 7)
 
     def test_trajectory_model_tags_are_canonicalized_for_lookup(self):
-        self.assertEqual(evaluator._trajectory_model("orb-v3-force-only-eager"), "orb-v3")
-        self.assertEqual(evaluator._trajectory_model("orb-v3-stress-eager"), "orb-v3")
+        self.assertEqual(evaluator._trajectory_model("orb-v3-omat-force-only-eager"), "orb-v3-omat")
+        self.assertEqual(evaluator._trajectory_model("orb-v3-omat-stress-eager"), "orb-v3-omat")
         self.assertEqual(evaluator._trajectory_model("pet-oam-xl-force-only-torchscript"),
                          "pet-oam-xl-torchscript")
         self.assertEqual(evaluator._trajectory_model("pet-oam-xl-stress-torchscript"),
@@ -89,12 +89,12 @@ class PressureEvaluatorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             trajectory = (
-                Path(temporary) / "system" / "nvt_orb-v3-force-only-eager.h5"
+                Path(temporary) / "system" / "nvt_orb-v3-omat-force-only-eager.h5"
             )
             trajectory.parent.mkdir()
             trajectory.touch()
             self.assertEqual(
-                evaluator._trajectory_paths(Path(temporary), "orb-v3-stress-eager"),
+                evaluator._trajectory_paths(Path(temporary), "orb-v3-omat-stress-eager"),
                 [trajectory],
             )
 

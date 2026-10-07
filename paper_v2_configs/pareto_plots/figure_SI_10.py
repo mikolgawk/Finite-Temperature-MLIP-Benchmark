@@ -102,7 +102,7 @@ def plot_scatter(merged: pd.DataFrame, output_plot: Path) -> None:
 
     tier_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
     tier_2 = ["mace-mpa-0", "mace-mpa-0-compile", "orb-v2"]
-    tier_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5m-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
+    tier_3 = ["mattersim-v1-5m", "grace-oam", "orb-v3-omat", "orb-v3-direct-omat", "esen-30m-oam", "nequip", "eq-v2-m-omat", "pet-oam-xl", "pet-omat-xl", "grace-oam-compiled", "mattersim-v1-5m-compile", "pet-oam-xl-torchscript", "pet-omat-xl-torchscript"]
     tier_4 = ["mace-mh-omat", "mace-mh-omat-compile", "uma-s-omat", "uma-s-omat-compile", "uma-s-omat-turbo", "uma-m-omat", "uma-m-omat-compile", "uma-m-omat-turbo"]
     tier_colors = {
         "tier_1": palette[2],
