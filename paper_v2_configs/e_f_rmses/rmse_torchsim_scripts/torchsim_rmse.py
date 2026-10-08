@@ -1,13 +1,13 @@
 """Shared single-frame TorchSim RMSE evaluation; model setup lives in each runner."""
 import argparse
-import csv
-import json
 import re
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from md_success import torchsim_md_succeeded
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from rmse_results import RmseResults
 
 _ARGS = None
 _SCRIPT = None
@@ -126,14 +126,13 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     print(f'{model_name}: {len(files)} reference trajectories with completed TorchSim MD')
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f'rmse-results-all_{model_name}.csv'
-    failure_file = output.with_suffix('.failures.json')
-    if output.exists() and not failure_file.exists() and not args.force:
-        with output.open(newline='') as handle:
-            completed_files = {row.get('trajectory') for row in csv.DictReader(handle)}
-        if completed_files == {str(path) for path in files}:
-            print(f'{output} exists; use --force to recompute.')
-            return
-    rows, failures, offsets = [], [], {}
+    results = RmseResults(output, files, force=args.force)
+    files = results.files
+    if not files:
+        print(f'{output}: no pending eligible trajectories; use --force to recompute.')
+        results.finish()
+        return
+    offsets = {}
     progress_enabled = not args.no_progress
     progress_print = tqdm.write if progress_enabled else print
     file_iterator = tqdm(
@@ -144,6 +143,7 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
         disable=not progress_enabled,
     )
     for path in file_iterator:
+        row, failures = None, []
         system = path.parent.name.split('_')[0]
         match = re.search(r'(\d+)K', path.parent.name)
         temperature = int(match[1]) if match else 0
@@ -190,31 +190,17 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
                         traceback.print_exc()
             if not n_eval:
                 raise ValueError('No successfully evaluated frames')
-            rows.append(dict(system=system, temperature_K=temperature,
-                             reference_key=f'{system}_{temperature}K', calculator=model_name,
-                             natoms=natoms, n_reference_frames=n_ref, n_evaluated_frames=n_eval,
-                             energy_rmse=np.sqrt(e_squared / n_eval),
-                             force_rmse=np.sqrt(f_squared / n_components),
-                             trajectory=str(path), engine=engine))
-            progress_print(f'{path.parent.name}: E RMSE={rows[-1]["energy_rmse"]:.6g} eV/atom; '
-                           f'F RMSE={rows[-1]["force_rmse"]:.6g} eV/Angstrom '
+            row = dict(system=system, temperature_K=temperature,
+                       reference_key=f'{system}_{temperature}K', calculator=model_name,
+                       natoms=natoms, n_reference_frames=n_ref, n_evaluated_frames=n_eval,
+                       energy_rmse=np.sqrt(e_squared / n_eval),
+                       force_rmse=np.sqrt(f_squared / n_components),
+                       trajectory=str(path), engine=engine)
+            progress_print(f'{path.parent.name}: E RMSE={row["energy_rmse"]:.6g} eV/atom; '
+                           f'F RMSE={row["force_rmse"]:.6g} eV/Angstrom '
                            f'({n_eval}/{n_ref} frames)')
         except Exception as exc:
             failures.append({'file': str(path), 'error': str(exc)})
             progress_print(f'FAILED {path}: {exc}')
-    # Keep a failure marker so an incomplete summary is never silently skipped.
-    if failures:
-        failure_file.write_text(json.dumps(failures, indent=2) + '\n')
-    if not rows:
-        output.unlink(missing_ok=True)
-    if rows:
-        temporary = output.with_suffix('.csv.tmp')
-        with temporary.open('w', newline='') as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-            writer.writeheader()
-            writer.writerows(rows)
-        temporary.replace(output)
-        print(f'Saved {output}')
-    if failures:
-        raise SystemExit(f'Evaluation incomplete: {len(failures)} failures; see {failure_file}')
-    failure_file.unlink(missing_ok=True)
+        results.record(path, row, failures)
+    results.finish()

@@ -30,6 +30,15 @@ force RMSE is over Cartesian components in eV/Angstrom. Isolated-atom correction
 for hydrogen and the acenes match the TorchSim evaluators. Failed evaluations
 produce a `.failures.json` sidecar and a nonzero exit status.
 
+Reruns preserve existing CSV results. When a `.failures.json` sidecar exists,
+only its listed trajectories are retried, including systems with failed frames.
+New result rows are appended; an existing partial row for a retried trajectory
+is replaced to avoid duplicates. Without a sidecar, only trajectories missing
+from the CSV are evaluated. Results and remaining failures are checkpointed after
+each trajectory, and the sidecar is removed once all failures are resolved.
+Saved paths still match after moving the reference data root. Use `--force` to
+discard saved results and recompute all trajectories.
+
 The standard source `md_chgnet.py` contains a self-import rather than a usable
 calculator-loading function. Its RMSE counterpart uses the accelerated source's native
 CHGNet energy/force-only calculator with `torch.compile` removed.
