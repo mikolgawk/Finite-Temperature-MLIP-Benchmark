@@ -172,7 +172,14 @@ class OrbOmatAnalysisTests(unittest.TestCase):
                                 cudnn=SimpleNamespace(allow_tf32=None, benchmark=None)),
                             jit=SimpleNamespace(ScriptModule=type("ScriptModule", (), {})),
                         )
-                        calculator = SimpleNamespace(implemented_properties=["energy", "forces", "stress"])
+                        properties = ["energy", "free_energy", "forces"]
+                        if base == "orb-v3-omat":
+                            properties.extend(["grad_forces", "rotational_grad"])
+                        if metric == "pressure":
+                            properties.append("stress")
+                            if base == "orb-v3-omat":
+                                properties.append("grad_stress")
+                        calculator = SimpleNamespace(implemented_properties=properties.copy())
                         adapter = Mock(return_value=calculator)
                         evaluate = Mock(side_effect=lambda name, factory, *args, **kwargs: factory())
                         helper = SimpleNamespace(REPO=ROOT.parent, early_cli=Mock(),
@@ -211,6 +218,8 @@ class OrbOmatAnalysisTests(unittest.TestCase):
                         loader.assert_called_once_with(device="cuda", precision=settings["precision"],
                                                        compile=settings["compile"])
                         adapter.assert_called_once_with(field, atoms_adapter="adapter", device="cuda")
+                        if base == "orb-v3-omat":
+                            self.assertEqual(calculator.implemented_properties, properties)
                         self.assertEqual(field.disable_stress.call_count, int(metric != "pressure"))
                         expected_name = base + ("" if eager else "-stress" if metric == "pressure" else "-force-only")
                         if metric != "md" or not eager:
