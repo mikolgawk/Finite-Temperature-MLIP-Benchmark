@@ -36,8 +36,8 @@ def make_calculator():
         device="cuda", precision="float32-highest", compile=True,
     )
     model.disable_stress()
+    # Preserve grad_forces: ORBCalculator maps it to ASE's forces.
     calculator = ORBCalculator(model, atoms_adapter=adapter, device="cuda")
-    calculator.implemented_properties = ["energy", "free_energy", "forces"]
     return calculator
 
 

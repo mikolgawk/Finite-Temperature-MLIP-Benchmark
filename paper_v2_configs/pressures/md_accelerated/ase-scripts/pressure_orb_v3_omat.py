@@ -37,8 +37,8 @@ def make_calculator():
         device="cuda", precision="float32-highest", compile=True,
     )
 
+    # Preserve grad_forces and grad_stress for ORBCalculator's ASE mapping.
     calculator = ORBCalculator(model, atoms_adapter=adapter, device="cuda")
-    calculator.implemented_properties = ["energy", "free_energy", "forces", "stress"]
     return calculator
 
 
