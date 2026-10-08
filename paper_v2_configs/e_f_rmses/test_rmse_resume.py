@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 from ase import Atoms
+from ase.calculators.calculator import Calculator, all_changes
 from ase.io import write
 
 
@@ -265,6 +266,132 @@ class RmseResumeTests(unittest.TestCase):
                 self.assertEqual(calls, [])
                 self.assertEqual(fixture.output.read_bytes(), saved)
                 self.assertEqual(fixture.failures.read_bytes(), marker)
+
+
+class IsolatedEnergyCalculator(Calculator):
+    """Native energy-only calculator that rejects periodic correction inputs."""
+
+    implemented_properties = ['energy']
+
+    def calculate(self, atoms=None, properties=('energy',), system_changes=all_changes):
+        super().calculate(atoms, properties, system_changes)
+        if atoms.pbc.any():
+            raise RuntimeError('Expected nonperiodic isolated atom')
+        self.results = {'energy': {'C': 3.0, 'H': 2.0}[atoms[0].symbol]}
+
+
+class TorchSimIsolatedAtomTests(unittest.TestCase):
+    @contextmanager
+    def fixture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(ref_dir=root / 'ref-trajs', output_dir=root / 'results',
+                                   md_dir=root / 'md', isolated_atom_dir=root / 'Hydrogen_E0',
+                                   raw_energies=False, max_frames=None, force=False,
+                                   no_progress=True, debug=False)
+            args.isolated_atom_dir.mkdir()
+            crystal = args.ref_dir / 'naphthalene_295K_Sharma_S'
+            crystal.mkdir(parents=True)
+            for folder, symbol, ref_e in ((crystal, 'C', 1.0), (crystal, 'H', 0.5),
+                                           (args.isolated_atom_dir, 'H', 0.75)):
+                atom = Atoms(symbol, positions=[[0, 0, 0]], pbc=False)
+                atom.info['REF_energy'] = ref_e
+                # Corrections need only energies, so omit reference forces.
+                write(folder / f'isolated_atom_{symbol}.extxyz', atom)
+            for name in ('H_1050K_Rupp_QE', 'naphthalene_295K_Sharma_S', 'picene_295K_Sharma_S'):
+                path = args.ref_dir / name / 'traj.extxyz'
+                path.parent.mkdir(parents=True, exist_ok=True)
+                hydrogen = name.startswith('H_')
+                atoms = Atoms('H' if hydrogen else 'CH', cell=[10, 10, 10], pbc=True)
+                atoms.info['REF_energy'] = 1.0 if hydrogen else 10.0
+                atoms.arrays['REF_forces'] = np.zeros((len(atoms), 3))
+                write(path, [atoms, atoms])
+                md = args.md_dir / name
+                md.mkdir(parents=True)
+                (md / 'nvt_test-model.h5').touch()
+                (md / 'md_timing_test-model.csv').write_text(
+                    f'calculator,system,n_steps\ntest-model,{name},100\n'
+                )
+            output = args.output_dir / 'rmse-results-all_test-model.csv'
+            yield SimpleNamespace(args=args, output=output,
+                                  failures=output.with_suffix('.failures.json'))
+
+    def run_backend(self, fixture, factory):
+        def predict(model, atoms, device, dtype):
+            if not atoms.pbc.all():
+                raise RuntimeError('PBC mismatch')
+            energy = 2.75 if len(atoms) == 1 else 14.5
+            return energy, np.full((len(atoms), 3), 0.25)
+
+        with patch.object(TORCHSIM, '_ARGS', fixture.args), \
+                patch.object(TORCHSIM, 'predict', side_effect=predict) as periodic, \
+                patch.object(TORCHSIM, 'isolated_atom_energy', wraps=TORCHSIM.isolated_atom_energy) as isolated, \
+                redirect_stdout(io.StringIO()):
+            TORCHSIM.run_rmse('test-model', object(), make_isolated_atom_calculator=factory)
+        return periodic, isolated
+
+    def test_native_corrections_preserve_pbc_forces_and_cached_offsets(self):
+        with self.fixture() as fixture:
+            factory = Mock(side_effect=IsolatedEnergyCalculator)
+            periodic, isolated = self.run_backend(fixture, factory)
+
+            factory.assert_called_once_with()
+            self.assertEqual(isolated.call_count, 3)  # shared C/H files, distinct QE H file
+            self.assertEqual(periodic.call_count, 6)
+            with fixture.output.open(newline='') as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 3)
+            for row in rows:
+                self.assertEqual(row['n_evaluated_frames'], '2')
+                self.assertAlmostEqual(float(row['energy_rmse']), 0.5)
+                self.assertAlmostEqual(float(row['force_rmse']), 0.25)
+            for call in isolated.call_args_list:
+                atom = call.args[1]
+                self.assertFalse(atom.pbc.any())
+                self.assertEqual(atom.cell.rank, 0)
+                self.assertIsNone(atom.calc)
+            self.assertFalse(fixture.failures.exists())
+
+            # A completed rerun also avoids loading the native checkpoint.
+            factory.reset_mock()
+            periodic, isolated = self.run_backend(fixture, factory)
+            factory.assert_not_called()
+            periodic.assert_not_called()
+            isolated.assert_not_called()
+
+    def test_raw_energies_skip_native_calculator(self):
+        with self.fixture() as fixture:
+            fixture.args.raw_energies = True
+            factory = Mock(side_effect=AssertionError('Native calculator should not load'))
+            periodic, isolated = self.run_backend(fixture, factory)
+
+            factory.assert_not_called()
+            isolated.assert_not_called()
+            self.assertEqual(periodic.call_count, 6)
+            with fixture.output.open(newline='') as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([float(row['energy_rmse']) for row in rows], [1.75, 2.25, 2.25])
+
+    def test_nonfinite_correction_records_atom_path_and_can_be_retried(self):
+        class NonfiniteCalculator(IsolatedEnergyCalculator):
+            def calculate(self, *args, **kwargs):
+                super().calculate(*args, **kwargs)
+                self.results['energy'] = np.nan
+
+        with self.fixture() as fixture:
+            with self.assertRaisesRegex(SystemExit, 'Evaluation incomplete'):
+                self.run_backend(fixture, Mock(side_effect=NonfiniteCalculator))
+            failures = json.loads(fixture.failures.read_text())
+            self.assertEqual(len(failures), 3)
+            for failure in failures:
+                self.assertIn('isolated_atom_', failure['error'])
+                self.assertIn('Non-finite isolated-atom energy prediction', failure['error'])
+            self.assertFalse(fixture.output.exists())
+
+            periodic, isolated = self.run_backend(fixture, Mock(side_effect=IsolatedEnergyCalculator))
+            self.assertEqual(periodic.call_count, 6)
+            self.assertEqual(isolated.call_count, 3)
+            self.assertFalse(fixture.failures.exists())
 
 
 if __name__ == '__main__':

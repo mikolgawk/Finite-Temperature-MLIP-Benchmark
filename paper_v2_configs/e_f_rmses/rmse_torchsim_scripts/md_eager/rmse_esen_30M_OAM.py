@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from torchsim_rmse import run_rmse, early_cli
+from fairchem_isolated_atoms import make_fairchem_isolated_atom_calculator
 early_cli(__file__)
 
 """Evaluate reference energy/force RMSE with the matching TorchSim MD model."""
@@ -136,7 +137,10 @@ def main():
     model = load_force_only_legacy(checkpoint, "esen", torch.device("cuda"))
     run_rmse(
         "eSEN-30M-OAM-force-only", model,
-        "torch-sim-0.5.2+fairchem-1.10.0-force-only",
+        "torch-sim-0.5.2+fairchem-1.10.0-force-only+ase-isolated-atoms",
+        make_isolated_atom_calculator=lambda: make_fairchem_isolated_atom_calculator(
+            checkpoint, "esen", model.device, seed=SEED,
+        ),
     )
 
 

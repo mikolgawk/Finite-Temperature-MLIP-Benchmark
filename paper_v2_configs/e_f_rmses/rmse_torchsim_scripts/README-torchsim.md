@@ -34,8 +34,20 @@ is in eV/atom, computed from each frame's energy error divided by its atom count
 force RMSE is over all Cartesian components in eV/Angstrom. Aromatic systems and
 hydrogen use the existing benchmark's isolated-atom energy corrections; missing
 required isolated-atom files produce explicit failures. `--raw-energies` disables
-these corrections. Predictions use the TorchSim model directly, including for
-isolated atoms.
+these corrections. Trajectory predictions use the TorchSim model directly.
+For eqV2 and eSEN, isolated-atom energies use a native FairChem `OCPCalculator`
+loaded from the same checkpoint, on the same device, in float32 with AMP
+disabled. This preserves the isolated atoms' nonperiodic flags, which the
+periodic TorchSim legacy adapter rejects. The native calculator computes only
+energies, with force and stress heads disabled, and is loaded only when a
+correction is needed. The native eqV2 instance also handles empty neighbour
+graphs: edge rotations are empty and attention projects a zero incoming-message
+sum, retaining the learned bias, residuals, and feed-forward layers. This avoids
+FairChem 1.10.0's empty-tensor errors without introducing artificial neighbours.
+The periodic TorchSim instance is unchanged. Offsets are cached per reference
+file. These runners'
+CSV `engine` values include `+ase-isolated-atoms` to record the correction
+method. Other models also use TorchSim for their isolated-atom predictions.
 
 Summaries are written to `paper_v2_configs/e_f_rmses/data/e-f-predictions/md_eager/`
 and `paper_v2_configs/e_f_rmses/data/e-f-predictions/md-accelerated/`, respectively, as

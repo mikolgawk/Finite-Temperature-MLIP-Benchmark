@@ -66,6 +66,17 @@ def predict(model, atoms, device, dtype):
     return float(energy.reshape(-1)[0]), forces
 
 
+def isolated_atom_energy(calculator, atoms):
+    """Evaluate only the native ASE calculator's isolated-atom energy."""
+    import numpy as np
+    atom = atoms.copy()
+    atom.calc = calculator
+    energy = float(atom.get_potential_energy())
+    if not np.isfinite(energy):
+        raise ValueError('Non-finite isolated-atom energy prediction')
+    return energy
+
+
 def correction_files(system, args):
     if args.raw_energies:
         return {}
@@ -103,12 +114,14 @@ def count_extxyz_frames(path, limit=None):
 
 def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
              require_stress_disabled=True, warmup=True, validate=None,
-             skip_systems=()):
+             skip_systems=(), make_isolated_atom_calculator=None):
     """Evaluate the MD model on reference frames, without integrating dynamics.
 
     Extra keywords match the source MD entry points. Validation/warmup are not
     needed for untimed RMSE evaluation. Results are cloned before the next call
     because compiled models may reuse CUDA graph output buffers.
+    An optional native ASE calculator is created lazily for isolated-atom
+    energies; trajectory predictions always use the supplied TorchSim model.
     """
     import numpy as np
     import torch
@@ -133,6 +146,7 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
         results.finish()
         return
     offsets = {}
+    isolated_calculator = None
     progress_enabled = not args.no_progress
     progress_print = tqdm.write if progress_enabled else print
     file_iterator = tqdm(
@@ -152,10 +166,20 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
             for symbol, atom_path in correction_files(system, args).items():
                 key = str(atom_path.resolve())
                 if key not in offsets:
-                    atom = read(atom_path)
-                    ref_e = float(atom.info['REF_energy']) if 'REF_energy' in atom.info else float(atom.get_potential_energy())
-                    pred_e, _ = predict(model, atom, device, dtype)
-                    offsets[key] = pred_e - ref_e
+                    try:
+                        atom = read(atom_path)
+                        ref_e = float(atom.info['REF_energy']) if 'REF_energy' in atom.info else float(atom.get_potential_energy())
+                        if not np.isfinite(ref_e):
+                            raise ValueError('Non-finite isolated-atom reference energy')
+                        if make_isolated_atom_calculator is None:
+                            pred_e, _ = predict(model, atom, device, dtype)
+                        else:
+                            if isolated_calculator is None:
+                                isolated_calculator = make_isolated_atom_calculator()
+                            pred_e = isolated_atom_energy(isolated_calculator, atom)
+                        offsets[key] = pred_e - ref_e
+                    except Exception as exc:
+                        raise RuntimeError(f'Isolated-atom correction failed for {atom_path}: {exc}') from exc
                 e0[symbol] = offsets[key]
             e_squared = f_squared = 0.0
             n_eval = n_ref = n_components = 0
