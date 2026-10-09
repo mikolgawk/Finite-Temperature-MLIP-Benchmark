@@ -19,9 +19,8 @@ instead differentiates their positions, as is necessarily done for references.
 
 Every trajectory source is written to a separate subdirectory of ``results``.
 Existing spectra are reused unless ``--overwrite`` is supplied, so interrupted
-or expanded runs can be resumed cheaply. TorchSim aggregates include only
-model/system pairs with completed MD. Missing ASE data and failed calculations
-on eligible pairs receive 100% error and 0% similarity.
+or expanded runs can be resumed cheaply. Failed or missing MD runs and failed
+VDOS calculations receive 100% error and 0% similarity, including in aggregates.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from md_success import torchsim_md_succeeded
+from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -427,8 +426,11 @@ def process_source(
     trajectory_dir = data_dir / source
     results_dir = args.results_dir.resolve() / source
     spectra_dir = results_dir / SPECTRA_DIR
-    trajectories = discover_mlip_trajectories(trajectory_dir)
     torchsim_source = "torchsim" in source
+    trajectories = (
+        discover_torchsim_md_trajectories(trajectory_dir)
+        if torchsim_source else discover_mlip_trajectories(trajectory_dir)
+    )
     all_discovered_model_names = {
         model for models in trajectories.values() for model in models
     }
@@ -468,13 +470,8 @@ def process_source(
         }
     trajectories = {system: models for system, models in trajectories.items() if models}
 
-    # ASE retains its expected-pair penalty; TorchSim scores completed MD only.
-    model_names = sorted(
-        all_discovered_model_names
-        if torchsim_source else (selected_models or all_discovered_model_names)
-    )
-    if selected_models is not None:
-        model_names = [model for model in model_names if model in selected_models]
+    # Retain failed jobs in the expected model/system coverage.
+    model_names = sorted(selected_models or all_discovered_model_names)
     expected_systems = (
         selected_systems - excluded_systems
         if selected_systems is not None
@@ -534,9 +531,7 @@ def process_source(
 
     for system in sorted(expected_systems):
         models = trajectories.get(system, {})
-        eligible_models = (
-            model_names if torchsim_source else model_names
-        )
+        eligible_models = model_names
         if not eligible_models:
             continue
         print(f"\n=== System: {system} ===")

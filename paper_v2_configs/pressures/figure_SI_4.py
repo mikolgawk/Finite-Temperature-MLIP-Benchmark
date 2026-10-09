@@ -22,7 +22,12 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import gaussian_kde
 
-from get_model_pressure_errors import resolve_model_reference_pressure_file
+from get_model_pressure_errors import (
+    filter_completed_pressure_md_rows,
+    pressure_source,
+    resolve_model_reference_pressure_file,
+)
+from pressure_axis_breaks import distribution_axis_windows, finite_values, pressure_axes
 
 import sys
 
@@ -184,6 +189,7 @@ def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None, i
                 pressures_dir, model_file, reference_file, legacy_reference_files()
             )
             df_m = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
+            df_m = filter_completed_pressure_md_rows(df_m, model_name, pressure_source(model_file))
             df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate=True, include_molecular_crystals=include_molecular_crystals)
         except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
@@ -208,108 +214,120 @@ def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None, i
 
 # ── Plotting ───────────────────────────────────────────────────────────────────
 
-def _half_violin(ax, x_center: float, data: np.ndarray, side: str,
-                 color, alpha: float, half_width: float, lw: float = 0.6) -> None:
-    """Draw one half of a split violin using a KDE.
+def _violin_profile(data: np.ndarray, windows):
+    """Sample every visible range and use a bandwidth robust to extreme tails.
 
-    side = 'left'  → fill from (x_center - density) to x_center
-    side = 'right' → fill from x_center to (x_center + density)
+    Quantile sampling bounds rendering cost for long trajectories.  The full
+    frame arrays still determine the median, range, quantiles and Scott factor.
     """
-    kde = gaussian_kde(data, bw_method="scott")
-    y_vals = np.linspace(data.min(), data.max(), 400)
-    density = kde(y_vals)
-    density = density / density.max() * half_width  # normalise to max half-width
+    data = finite_values(data)
+    if data.size == 0:
+        return [(np.array([]), np.array([])) for _ in windows]
+    if np.ptp(data) == 0:
+        return [(np.array([data[0]]), np.array([1.0])) if lo <= data[0] <= hi
+                else (np.array([]), np.array([])) for lo, hi in windows]
+    sample = (np.quantile(data, np.linspace(0, 1, 8192))
+              if data.size > 8192 else data)
+    std = np.std(sample, ddof=1)
+    q25, q75 = np.quantile(data, [0.25, 0.75])
+    robust_std = (q75 - q25) / 1.349
+    scale = min(std, robust_std) if robust_std > 0 else std
+    bandwidth = max(scale * data.size ** (-0.2), np.finfo(float).eps * std)
+    kde = gaussian_kde(sample, bw_method=bandwidth / std)
+    profiles = []
+    for lo, hi in windows:
+        local = sample[(sample >= lo) & (sample <= hi)]
+        if local.size == 0:
+            profiles.append((np.array([]), np.array([])))
+            continue
+        y = np.unique(np.r_[np.linspace(max(lo, data.min()), min(hi, data.max()), 400),
+                            np.quantile(local, np.linspace(0, 1, min(local.size, 200)))])
+        profiles.append((y, kde(y)))
+    peak = max((density.max() for _, density in profiles if density.size), default=1.0)
+    return [(y, density / peak) for y, density in profiles]
 
-    if side == "left":
-        ax.fill_betweenx(y_vals, x_center - density, x_center,
-                         color=color, alpha=alpha, linewidth=0)
-        ax.plot(x_center - density, y_vals, color=color, lw=lw)
-    else:
-        ax.fill_betweenx(y_vals, x_center, x_center + density,
-                         color=color, alpha=alpha, linewidth=0)
-        ax.plot(x_center + density, y_vals, color=color, lw=lw)
+
+def _half_violin(ax, x_center: float, profile, side: str,
+                 color, alpha: float, half_width: float, lw: float = 0.6) -> None:
+    y_vals, density = profile
+    if not y_vals.size:
+        return
+    density = density * half_width
+    edge = x_center - density if side == "left" else x_center + density
+    if y_vals.size == 1:
+        ax.hlines(y_vals[0], min(edge[0], x_center), max(edge[0], x_center), color=color, lw=lw)
+        return
+    ax.fill_betweenx(y_vals, edge, x_center, color=color, alpha=alpha, linewidth=0)
+    ax.plot(edge, y_vals, color=color, lw=lw)
 
 
 def plot_violin(df: pd.DataFrame, output: str | Path) -> None:
     models_present = [m for m in TIER_ORDER if m in df["model"].unique()]
-    display_order = [display_name(m) for m in models_present]
-
-    HALF_WIDTH = 0.42
-
-    fig, ax = plt.subplots(figsize=(3.53 * 2, 3.53))
-
-    for i, model_name in enumerate(models_present):
-        tier_color = get_tier_color(model_name)
-        ref_data = df[(df["model"] == model_name) & (df["kind"] == "reference")]["pressure_GPa"].values
-        model_data = df[(df["model"] == model_name) & (df["kind"] == "model")]["pressure_GPa"].values
-
-        # Left half: reference (grey), right half: prediction (tier colour)
-        _half_violin(ax, i, ref_data,   side="left",  color=REF_COLOR,  alpha=0.65, half_width=HALF_WIDTH)
-        _half_violin(ax, i, model_data, side="right", color=tier_color, alpha=0.65, half_width=HALF_WIDTH)
-
-        # Median markers
-        ax.hlines(np.median(ref_data),   i - HALF_WIDTH, i, colors="black", lw=1.0, linestyles="dashed", zorder=3)
-        ax.hlines(np.median(model_data), i, i + HALF_WIDTH, colors="black", lw=1.0, linestyles="dashed", zorder=3)
-
-        # Centre spine
-        ax.vlines(i, ref_data.min(), ref_data.max(), color="black", lw=0.4, alpha=0.25, zorder=2)
-
-    # ── Tier boundaries and labels ────────────────────────────────────────────
-    tier_counts = [
-        sum(1 for m in tier_models if m in models_present)
-        for _, tier_models, _ in TIER_DEFS
-    ]
+    data_by_model = {
+        model: tuple(finite_values(df.loc[(df["model"] == model) & (df["kind"] == kind),
+                                         "pressure_GPa"].values)
+                     for kind in ("reference", "model"))
+        for model in models_present
+    }
+    references = [pair[0] for pair in data_by_model.values()]
+    windows = distribution_axis_windows([values for pair in data_by_model.values()
+                                         for values in pair], references)
+    reference_center = float(np.median(np.concatenate(references)))
+    core_index = next(i for i, (lo, hi) in enumerate(windows) if lo <= reference_center <= hi)
+    height = 3.53 + 0.55 * (len(windows) - 1)
+    fig = plt.figure(figsize=(3.53 * 2, height),
+                     layout="constrained")
+    spec = fig.add_gridspec(1, 1)[0]
+    axes = pressure_axes(fig, spec, windows, orientation="y", core_index=core_index)
+    half_width = 0.42
+    for i, (model, (ref_data, model_data)) in enumerate(data_by_model.items()):
+        color = get_tier_color(model)
+        ref_profiles = _violin_profile(ref_data, windows)
+        model_profiles = _violin_profile(model_data, windows)
+        for index, ax in enumerate(axes):
+            _half_violin(ax, i, ref_profiles[index], side="left", color=REF_COLOR,
+                         alpha=0.65, half_width=half_width)
+            _half_violin(ax, i, model_profiles[index], side="right", color=color,
+                         alpha=0.65, half_width=half_width)
+            # Mark the FULL distributions' medians and extents on each segment.
+            for values, xmin, xmax, spine_color in (
+                (ref_data, i - half_width, i, REF_COLOR),
+                (model_data, i, i + half_width, color),
+            ):
+                if values.size:
+                    ax.hlines(np.median(values), xmin, xmax, colors="black", lw=1.0,
+                              linestyles="dashed", zorder=3)
+                    ax.vlines(i, values.min(), values.max(), color=spine_color,
+                              lw=0.6, alpha=0.6, zorder=2)
+                    ax.hlines([values.min(), values.max()], i - 0.06, i + 0.06,
+                              color=spine_color, lw=0.6)
+    tier_counts = [sum(model in models_present for model in tier_models)
+                   for _, tier_models, _ in TIER_DEFS]
     cumulative = np.cumsum([0] + tier_counts)
-
-    ymin = df["pressure_GPa"].min()
-    ymax = df["pressure_GPa"].max()
-    ax.set_ylim(ymin - (ymax - ymin) * 0.02, ymax + (ymax - ymin) * 0.18)
-
-    for boundary in cumulative[1:-1]:
-        if 0 < boundary < len(models_present):
-            ax.axvline(boundary - 0.5, color="black", linestyle="--", linewidth=1.2, alpha=0.55)
-
-    tier_label_y = ymax + (ymax - ymin) * 0.05
-
+    for ax in axes:
+        for boundary in np.unique(cumulative[1:-1]):
+            if 0 < boundary < len(models_present):
+                ax.axvline(boundary - 0.5, color="black", linestyle="--",
+                           linewidth=1.2, alpha=0.55)
+        ax.set_xlim(-0.6, len(models_present) - 0.4)
+        ax.grid(axis="y")
+        ax.grid(axis="x", visible=False)
+    top, bottom = axes[-1], axes[0]
     for i, (tier_label, _, tier_color) in enumerate(TIER_DEFS):
-        start = cumulative[i]
-        end = cumulative[i + 1]
-        if start >= end:
-            continue
-        center = (start + end - 1) / 2
-        ax.text(
-            center, tier_label_y, tier_label,
-            ha="center", va="bottom",
-            fontsize=FONT_SIZE - 1, color=tier_color, fontweight="bold",
-        )
-
-    ax.set_xlabel("")
-    ax.set_ylabel("Pressure [GPa]")
-    ax.set_xticks(range(len(display_order)))
-    ax.set_xticklabels(display_order, rotation=45, ha="right", fontsize=FONT_SIZE)
-    ax.set_xlim(-0.6, len(display_order) - 0.4)
-    ax.grid(axis="y")
-    ax.grid(axis="x", visible=False)
-
-    # ── Legend ────────────────────────────────────────────────────────────────
-    # Place legend top just below the tier label baseline (in axes fraction)
-    ymin_ax, ymax_ax = ax.get_ylim()
-    legend_top_frac = (tier_label_y - ymin_ax) / (ymax_ax - ymin_ax) - 0.01
-
-    legend_handles = [
-        mpatches.Patch(facecolor=REF_COLOR, alpha=0.65, label="Reference"),
-    ]
-    for tier_label, _, tier_color in TIER_DEFS:
-        legend_handles.append(mpatches.Patch(facecolor=tier_color, alpha=0.65, label=tier_label))
-    ax.legend(
-        handles=legend_handles,
-        bbox_to_anchor=(0.01, legend_top_frac),
-        loc="upper left",
-        fontsize=LEGEND_FONT_SIZE,
-        framealpha=0.9,
-    )
-
-    plt.tight_layout()
+        start, end = cumulative[i:i + 2]
+        if start < end:
+            top.text((start + end - 1) / 2, 1.04, tier_label,
+                     transform=top.get_xaxis_transform(), ha="center", va="bottom",
+                     fontsize=FONT_SIZE, color=tier_color, fontweight="bold")
+    bottom.set_xticks(range(len(models_present)))
+    bottom.set_xticklabels([display_name(model) for model in models_present],
+                          rotation=45, ha="right", fontsize=FONT_SIZE)
+    fig.supylabel("Pressure [GPa]", fontsize=FONT_SIZE)
+    handles = [mpatches.Patch(facecolor=REF_COLOR, alpha=0.65, label="Reference")]
+    handles.extend(mpatches.Patch(facecolor=color, alpha=0.65, label=label)
+                   for (label, _, color), count in zip(TIER_DEFS, tier_counts) if count)
+    top.legend(handles=handles, loc="upper left", fontsize=LEGEND_FONT_SIZE - 1,
+               framealpha=0.9, ncol=3)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output, bbox_inches="tight", pad_inches=0.02)

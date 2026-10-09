@@ -303,7 +303,6 @@ def plot_pareto(df: pd.DataFrame, y_axis_label: str, output_file: Path) -> None:
                 fontsize=FONT_SIZE,
             )
 
-        ax.set_title(dataset_name)
         ax.set_xlabel("Mean time per step [ms]")
         ax.grid(True, linestyle="--", alpha=0.4)
         ax.set_xlim(right=1050)

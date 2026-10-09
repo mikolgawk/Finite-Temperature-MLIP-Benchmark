@@ -11,7 +11,8 @@ from compute_mean_rmses_by_system_type import list_rmse_csv_files, load_all_data
 class EnergyForceAggregationTests(unittest.TestCase):
     def test_load_all_data_filters_models(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            data_dir = Path(temporary_directory)
+            data_dir = Path(temporary_directory) / "e-f-predictions-ase"
+            data_dir.mkdir()
             for model in ("model-a", "model-b"):
                 pd.DataFrame(
                     {

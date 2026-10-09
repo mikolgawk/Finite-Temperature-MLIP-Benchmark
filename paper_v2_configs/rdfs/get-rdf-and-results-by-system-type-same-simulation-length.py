@@ -12,9 +12,8 @@
 
 """Compute matched-length RDF errors for the supported trajectory sources.
 
-TorchSim aggregates include only model/system pairs with completed MD runs.
-Missing ASE trajectories and failed RDF calculations on eligible pairs retain
-the 100% error penalty.
+Failed or missing MD runs and failed RDF calculations receive 100% error.
+These penalty rows remain in the per-system and aggregate metrics.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from ase.io import iread
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from md_success import torchsim_md_succeeded
+from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -330,8 +329,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     trajectory_dir = MLIP_TRAJ_DIRS[source]
     print(f"\n=== Trajectory source: {trajectory_dir} ===")
     print(f"Results directory: {results_dir}")
-    mlip_trajectories = discover_mlip_trajectories(trajectory_dir)
     torchsim_source = "torchsim" in source
+    mlip_trajectories = (
+        discover_torchsim_md_trajectories(trajectory_dir)
+        if torchsim_source else discover_mlip_trajectories(trajectory_dir)
+    )
     all_discovered_model_names = {
         model
         for system_models in mlip_trajectories.values()
@@ -390,13 +392,8 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             for system, models in mlip_trajectories.items()
         }
 
-    # ASE retains its expected-pair penalty; TorchSim scores completed MD only.
-    model_names = sorted(
-        all_discovered_model_names
-        if torchsim_source else (selected_models or all_discovered_model_names)
-    )
-    if selected_models is not None:
-        model_names = [model for model in model_names if model in selected_models]
+    # Retain failed jobs in the expected model/system coverage.
+    model_names = sorted(selected_models or all_discovered_model_names)
 
     print(
         f"Found {len(reference_trajectories)} reference trajectories and "
@@ -435,9 +432,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
 
     for system, ref_path in sorted(reference_trajectories.items()):
         system_models = mlip_trajectories.get(system, {})
-        eligible_models = (
-            model_names if torchsim_source else model_names
-        )
+        eligible_models = model_names
         if not eligible_models:
             continue
         print(f"\n=== System: {system} ===")

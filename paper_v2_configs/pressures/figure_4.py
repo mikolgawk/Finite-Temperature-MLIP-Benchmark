@@ -24,8 +24,17 @@ import pandas as pd
 import seaborn as sns
 
 from get_model_pressure_errors import (
+    filter_completed_pressure_md_rows,
     pressure_histogram_similarity,
+    pressure_source,
     resolve_model_reference_pressure_file,
+)
+from pressure_axis_breaks import (
+    distribution_axis_windows,
+    histogram_segments,
+    mae_axis_windows,
+    pressure_axes,
+    pressure_tick,
 )
 
 import sys
@@ -219,13 +228,14 @@ def format_model_label(model_name: str, mae_gpa: float | None, prefix: str | Non
         label = f"{prefix}: {label}"
     if mae_gpa is None or not np.isfinite(mae_gpa):
         return label
-    return f"{label} ({mae_gpa:.2f} GPa)"
+    return f"{label} ({format_mae_value(mae_gpa)})"
 
 
 def format_mae_value(mae_gpa: float | None) -> str:
     if mae_gpa is None or not np.isfinite(mae_gpa):
         return "n/a"
-    return f"{mae_gpa:.2f} GPa"
+    value = f"{mae_gpa:.2e}" if abs(mae_gpa) >= 1e4 else f"{mae_gpa:.2f}"
+    return f"{value} GPa"
 
 
 def format_chemical_formula(formula: str) -> str:
@@ -279,42 +289,6 @@ def get_tier_color(model: str):
     if model in TIER_4:
         return palette[0]
     return "#757575"
-
-
-def annotate_median(ax, x_center: float, y_value: float, y_text: float, color, fmt: str = "{:.2f}") -> None:
-    ax.annotate(
-        fmt.format(y_value),
-        xy=(x_center, y_value),
-        xytext=(x_center, y_text),
-        textcoords="data",
-        ha="center",
-        va="bottom",
-        fontsize=FONT_SIZE,
-        fontweight="bold",
-        color=color,
-        zorder=10,
-        annotation_clip=False,
-        arrowprops=dict(
-            arrowstyle="-",
-            color=color,
-            linewidth=0.7,
-            alpha=0.8,
-            shrinkA=0,
-            shrinkB=0,
-        ),
-    )
-
-
-def tier_center(start_idx: float, end_idx: float) -> float:
-    return (start_idx + end_idx) / 2
-
-
-def tier_label_y(y_max: float) -> float:
-    return y_max * 1.31
-
-
-def median_value_label_y(y_max: float) -> float:
-    return y_max * 1.08
 
 
 def get_overall_pressure_mae_per_model(df: pd.DataFrame) -> pd.Series:
@@ -387,6 +361,9 @@ def collect_histogram_panels(
                 pressures_dir, model_file, reference_file, legacy_reference_files()
             )
             df_model = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
+            df_model = filter_completed_pressure_md_rows(
+                df_model, model_name, pressure_source(model_file)
+            )
             df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate_reference=True, include_molecular_crystals=include_molecular_crystals)
         except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
@@ -468,167 +445,65 @@ def collect_histogram_panels(
 def draw_overall_pressure_mae_plot(ax, ranking_df: pd.DataFrame, panel_label: str) -> None:
     if "model" not in ranking_df.columns:
         raise ValueError("Missing required column in input CSV: 'model'")
-
     df = ranking_df.copy()
     df["pressure_mae_GPa"] = get_overall_pressure_mae_per_model(df)
-    df = df.dropna(subset=["pressure_mae_GPa"]).copy()
-
-    if df.empty:
-        raise ValueError("No valid model pressure MAE values found to plot.")
-
-    df["model_key"] = df["model"].apply(lambda m: normalize_model_name(str(m)))
-    # Keep only models explicitly defined in the tier lists.
+    df["model_key"] = df["model"].apply(lambda model: normalize_model_name(str(model)))
+    df = df.dropna(subset=["pressure_mae_GPa"])
     df = df[df["model_key"].isin(TIER_ORDER)].copy()
     if df.empty:
         raise ValueError("No tier-listed models with valid pressure MAE values found to plot.")
-
-    df["tier_order"] = df["model_key"].apply(lambda model: TIER_ORDER.index(model))
+    df["tier_order"] = df["model_key"].map(TIER_ORDER.index)
     df = df.sort_values(["tier_order", "model_key"]).reset_index(drop=True)
-
     models = df["model_key"].to_list()
+    values = df["pressure_mae_GPa"].to_numpy(dtype=float)
+    tiers = []
+    start = 0
+    for label, tier_models, color in TIER_DEFS:
+        tier_values = df.loc[df["model_key"].isin(tier_models), "pressure_mae_GPa"]
+        count = len(tier_values)
+        if count:
+            tiers.append((label, start, start + count, float(tier_values.median()), color))
+            start += count
+    windows = mae_axis_windows(np.r_[values, [tier[3] for tier in tiers]])
+    if len(windows) > 1:
+        fig, spec = ax.figure, ax.get_subplotspec()
+        ax.remove()
+        axes = pressure_axes(fig, spec, windows, orientation="y")
+    else:
+        axes = [ax]
+        ax.set_ylim(windows[0])
     x = np.arange(len(models))
-    bar_colors = [get_tier_color(model) for model in models]
-
-    ax.bar(
-        x,
-        df["pressure_mae_GPa"],
-        width=0.65,
-        color=bar_colors,
-        alpha=0.8,
-        edgecolor="black",
-        linewidth=0.5,
-    )
-
-    ax.text(0.01, 0.95, panel_label, transform=ax.transAxes, ha="left", va="top", fontsize=FONT_SIZE)
-    ax.set_xlabel("Model")
-    ax.set_ylabel("Pressure MAE [GPa]")
-    ax.set_xticks(x)
-    ax.set_xticklabels([display_name(model) for model in models], rotation=45, ha="right", fontsize=FONT_SIZE)
-    ax.grid(axis="y")
-
-    tier1_df = df[df["model_key"].isin(TIER_1)].copy()
-    tier2_df = df[df["model_key"].isin(TIER_2)].copy()
-    tier3_df = df[df["model_key"].isin(TIER_3)].copy()
-    tier4_df = df[df["model_key"].isin(TIER_4)].copy()
-
-    t1_count = len(tier1_df)
-    t2_count = len(tier2_df)
-    t3_count = len(tier3_df)
-    t4_count = len(tier4_df)
-
-    t1_med = tier1_df["pressure_mae_GPa"].median() if t1_count > 0 else np.nan
-    t2_med = tier2_df["pressure_mae_GPa"].median() if t2_count > 0 else np.nan
-    t3_med = tier3_df["pressure_mae_GPa"].median() if t3_count > 0 else np.nan
-    t4_med = tier4_df["pressure_mae_GPa"].median() if t4_count > 0 else np.nan
-
-    print(
-        "Pressure MAE medians -> "
-        f"Tier 1: {format_mae_value(t1_med)}, "
-        f"Tier 2: {format_mae_value(t2_med)}, "
-        f"Tier 3: {format_mae_value(t3_med)}, "
-        f"Tier 4: {format_mae_value(t4_med)}"
-    )
-
-    finite_vals = df["pressure_mae_GPa"].to_numpy(dtype=float)
-    med_vals = np.array([t1_med, t2_med, t3_med, t4_med], dtype=float)
-    all_for_ylim = np.concatenate([
-        finite_vals[np.isfinite(finite_vals)],
-        med_vals[np.isfinite(med_vals)],
-    ]) if (np.isfinite(finite_vals).any() or np.isfinite(med_vals).any()) else np.array([1.0])
-
-    metric_ymax = float(np.nanmax(all_for_ylim))
-    if not np.isfinite(metric_ymax) or metric_ymax <= 0:
-        metric_ymax = 1.0
-    ax.set_ylim(0, metric_ymax * 1.35)
-
-    tier1_end = t1_count - 0.5
-    tier2_end = t1_count + t2_count - 0.5
-    tier3_end = t1_count + t2_count + t3_count - 0.5
-    tier4_end = t1_count + t2_count + t3_count + t4_count - 0.5
-
-    if t1_count > 0 and (t2_count > 0 or t3_count > 0 or t4_count > 0):
-        ax.axvline(x=tier1_end, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-    if t2_count > 0 and (t3_count > 0 or t4_count > 0):
-        ax.axvline(x=tier2_end, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-    if t3_count > 0 and t4_count > 0:
-        ax.axvline(x=tier3_end, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-
-    y_top = tier_label_y(metric_ymax)
-    if t1_count > 0:
-        ax.text((t1_count - 1) / 2, y_top, "Tier 1", ha="center", va="top", fontsize=FONT_SIZE, color=palette[2])
-    if t2_count > 0:
-        ax.text(t1_count + (t2_count - 1) / 2, y_top, "Tier 2", ha="center", va="top", fontsize=FONT_SIZE, color=palette[1])
-    if t3_count > 0:
-        ax.text(t1_count + t2_count + (t3_count - 1) / 2, y_top, "Tier 3", ha="center", va="top", fontsize=FONT_SIZE, color=palette[3])
-    if t4_count > 0:
-        ax.text(
-            t1_count + t2_count + t3_count + (t4_count - 1) / 2,
-            y_top,
-            "Tier 4",
-            ha="center",
-            va="top",
-            fontsize=FONT_SIZE,
-            color=palette[0],
-        )
-
-    if np.isfinite(t1_med):
-        ax.hlines(
-            t1_med, xmin=-0.5, xmax=tier1_end,
-            colors=palette[2], linestyles="--", linewidth=2, alpha=0.9
-        )
-    if np.isfinite(t2_med):
-        ax.hlines(
-            t2_med, xmin=tier1_end, xmax=tier2_end,
-            colors=palette[1], linestyles="--", linewidth=2, alpha=0.9
-        )
-    if np.isfinite(t3_med):
-        ax.hlines(
-            t3_med, xmin=tier2_end, xmax=tier3_end,
-            colors=palette[3], linestyles="--", linewidth=2, alpha=0.9
-        )
-    if np.isfinite(t4_med):
-        ax.hlines(
-            t4_med, xmin=tier3_end, xmax=tier4_end,
-            colors=palette[0], linestyles="--", linewidth=2, alpha=0.9
-        )
-
-    median_label_y = median_value_label_y(metric_ymax)
-
-    # Reduce number of y-axis ticks on overall pressure-MAE plot to avoid overlap
-    try:
-        ax.yaxis.set_major_locator(MaxNLocator(nbins=6, prune='both'))
-    except Exception:
-        pass
-
-    if np.isfinite(t1_med):
-        annotate_median(ax, tier_center(0, t1_count - 1), t1_med, median_label_y, palette[2], fmt="{:.2f}")
-    if np.isfinite(t2_med):
-        annotate_median(
-            ax,
-            tier_center(t1_count, t1_count + t2_count - 1),
-            t2_med,
-            median_label_y,
-            palette[1],
-            fmt="{:.2f}",
-        )
-    if np.isfinite(t3_med):
-        annotate_median(
-            ax,
-            tier_center(t1_count + t2_count, t1_count + t2_count + t3_count - 1),
-            t3_med,
-            median_label_y,
-            palette[3],
-            fmt="{:.2f}",
-        )
-    if np.isfinite(t4_med):
-        annotate_median(
-            ax,
-            tier_center(t1_count + t2_count + t3_count, len(models) - 1),
-            t4_med,
-            median_label_y,
-            palette[0],
-            fmt="{:.2f}",
-        )
+    for segment_index, segment_ax in enumerate(axes):
+        segment_ax.bar(x, values, width=0.65, color=[get_tier_color(m) for m in models],
+                       alpha=0.8, edgecolor="black", linewidth=0.5)
+        segment_ax.set_xlim(-0.6, len(models) - 0.4)
+        segment_ax.grid(axis="y")
+        segment_ax.grid(axis="x", visible=False)
+        segment_ax.yaxis.set_major_locator(MaxNLocator(
+            nbins=3 if segment_index == 0 else 2,
+            min_n_ticks=2, prune="upper" if segment_index == 0 else "both",
+        ))
+        for _, start, end, median, color in tiers:
+            if end < len(models):
+                segment_ax.axvline(end - 0.5, color="black", linestyle="--", linewidth=1.2, alpha=0.7)
+            segment_ax.hlines(median, start - 0.5, end - 0.5,
+                             colors=color, linestyles="--", linewidth=1.5, alpha=0.9)
+    bottom, top = axes[0], axes[-1]
+    bottom.set_xlabel("Model")
+    bottom.set_ylabel("Pressure MAE [GPa]")
+    bottom.set_xticks(x)
+    bottom.set_xticklabels([display_name(model) for model in models], rotation=45,
+                           ha="right", fontsize=FONT_SIZE)
+    top.text(-0.035, 1.05, panel_label, transform=top.transAxes,
+             ha="left", va="bottom", fontsize=FONT_SIZE)
+    for label, start, end, median, color in tiers:
+        top.text((start + end - 1) / 2, 1.06,
+                 f"{label}\nMedian: {pressure_tick(median)}",
+                 transform=top.get_xaxis_transform(), ha="center", va="bottom",
+                 fontsize=FONT_SIZE - 2, color=color)
+    print("Pressure MAE medians -> " + ", ".join(
+        f"{label}: {format_mae_value(median)}" for label, _, _, median, _ in tiers
+    ))
 
 
 def plot_combined(
@@ -647,15 +522,15 @@ def plot_combined(
     )
 
     n_panels = len(available_panels)
-    n_hist_cols = 2
+    n_hist_cols = 3
     n_hist_rows = int(np.ceil(n_panels / n_hist_cols))
 
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.25 + 1.15 * n_hist_rows)))
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.40 + 1.15 * n_hist_rows)))
     outer_gs = gridspec.GridSpec(
         nrows=n_hist_rows + 2,
-        ncols=n_hist_cols,
+        ncols=n_hist_cols * 2,
         figure=fig,
-        height_ratios=[0.78, 0.22] + [1.15] * n_hist_rows,
+        height_ratios=[1.05, 0.35] + [1.15] * n_hist_rows,
         hspace=0.48,
         wspace=0.30,
     )
@@ -671,31 +546,34 @@ def plot_combined(
         references_by_model,
         values_by_model,
         model_scores,
-        bin_edges,
+        _bin_edges,
     ) in enumerate(available_panels):
         visible_models = visible_pressure_models(references_by_model, values_by_model, bins)
-        bin_edges = make_bin_edges(
-            next(iter(references_by_model.values())),
-            [array for model in visible_models
-             for array in (references_by_model[model], values_by_model[model])],
-            bins,
-        )
+        references = list(references_by_model.values())
+        plot_arrays = references + [values_by_model[model] for model in visible_models]
+        windows = distribution_axis_windows(plot_arrays, references)
+        reference_center = float(np.median(references[0]))
+        core_index = next(i for i, (lo, hi) in enumerate(windows)
+                          if lo <= reference_center <= hi)
         row = idx // n_hist_cols + 2
         col = idx % n_hist_cols
         hist_grid_row = idx // n_hist_cols
         is_bottom_hist_row = hist_grid_row == n_hist_rows - 1
+        panels_in_row = min(n_hist_cols, n_panels - hist_grid_row * n_hist_cols)
+        start_col = n_hist_cols - panels_in_row + col * 2
+        panel_spec = outer_gs[row, start_col:start_col + 2]
 
         sub_gs = gridspec.GridSpecFromSubplotSpec(
             nrows=len(TIER_DEFS),
             ncols=1,
-            subplot_spec=outer_gs[row, col],
+            subplot_spec=panel_spec,
             hspace=0.05,
         )
 
         is_left_col = (col == 0)
-        is_right_col = (col == n_hist_cols - 1)
+        is_right_col = (col == panels_in_row - 1)
 
-        panel_ax = fig.add_subplot(outer_gs[row, col], frame_on=False)
+        panel_ax = fig.add_subplot(panel_spec, frame_on=False)
         panel_ax.tick_params(
             labelcolor="none",
             top=False,
@@ -714,15 +592,23 @@ def plot_combined(
             panel_ax.set_xlabel("")
 
         for tier_idx, (tier_label, tier_models, tier_color) in enumerate(TIER_DEFS):
-            ax = fig.add_subplot(sub_gs[tier_idx])
+            axes = pressure_axes(fig, sub_gs[tier_idx], windows,
+                                 orientation="x", core_index=core_index)
+            ax = axes[core_index]
+
+            def draw_histogram(values, **style):
+                for segment_ax, (density, edges) in zip(
+                    axes, histogram_segments(values, windows, bins)
+                ):
+                    segment_ax.stairs(density, edges, linewidth=1.5, **style)
 
             if tier_idx == 0:
                 ax.set_title(f"{system_type}\n{format_system_name(representative_system)}")
-                ax.text(
+                axes[0].text(
                     0.02,
                     0.95,
                     panel_labels[idx + 1],
-                    transform=ax.transAxes,
+                    transform=axes[0].transAxes,
                     ha="left",
                     va="top",
                     fontsize=FONT_SIZE,
@@ -748,49 +634,40 @@ def plot_combined(
                     continue
                 if model == best_model and style == "--":
                     continue
-                ax.hist(
-                    references_by_model[model], bins=bin_edges, density=True,
-                    histtype="step", color="black", linewidth=1.5,
+                draw_histogram(
+                    references_by_model[model], color="black",
                     linestyle=style, label=label if best_model != worst_model else "Reference",
                 )
 
             if best_model is not None and best_model in values_by_model:
                 best_prefix = "Best/worst" if worst_model == best_model else "Best"
-                ax.hist(
+                draw_histogram(
                     values_by_model[best_model],
-                    bins=bin_edges,
-                    density=True,
-                    histtype="step",
                     color=tier_color,
-                    linewidth=1.5,
                     linestyle="-",
                     label=format_model_label(best_model, scores.get(best_model), prefix=best_prefix),
                 )
 
             if worst_model is not None and worst_model != best_model and worst_model in values_by_model:
-                ax.hist(
+                draw_histogram(
                     values_by_model[worst_model],
-                    bins=bin_edges,
-                    density=True,
-                    histtype="step",
                     color=tier_color,
-                    linewidth=1.5,
                     linestyle="--",
                     label=format_model_label(worst_model, scores.get(worst_model), prefix="Worst"),
                 )
 
             if is_right_col:
-                ax.set_ylabel(tier_label, labelpad=2)
-                ax.yaxis.set_label_position("right")
+                axes[-1].set_ylabel(tier_label, labelpad=2)
+                axes[-1].yaxis.set_label_position("right")
             else:
                 ax.set_ylabel("")
 
             ax.set_xlabel("")
-            if tier_idx != len(TIER_DEFS) - 1:
-                ax.tick_params(labelbottom=False)
-            
-            # ax.set_ylim()
-            
+            for segment_ax in axes:
+                segment_ax.tick_params(axis="x", labelsize=FONT_SIZE - 2)
+                if tier_idx != len(TIER_DEFS) - 1:
+                    segment_ax.tick_params(labelbottom=False)
+                    segment_ax.xaxis.get_offset_text().set_visible(False)
 
             handles, labels = ax.get_legend_handles_labels()
             if handles:
@@ -798,7 +675,8 @@ def plot_combined(
                 labels = labels + [
                     f"{tier_label} mean MAE: {format_mae_value(tier_mean_error)}"
                 ]
-                ax.legend(
+                # Span the complete tier row, even when its x axis is broken.
+                axes[-1].legend(
                     handles,
                     labels,
                     loc="upper right",
@@ -810,13 +688,14 @@ def plot_combined(
                     borderaxespad=0.2,
                 )
 
-            ax.grid(True)
+            for segment_ax in axes:
+                segment_ax.grid(True)
             # Limit number of major y ticks to avoid overlapping numeric labels
             try:
-                ax.yaxis.set_major_locator(MaxNLocator(nbins=2, min_n_ticks=1, prune='both'))
+                axes[0].yaxis.set_major_locator(MaxNLocator(nbins=2, min_n_ticks=1, prune='both'))
             except Exception:
                 pass
-            ax.tick_params(axis="y", labelsize=FONT_SIZE, pad=1)
+            axes[0].tick_params(axis="y", labelsize=FONT_SIZE, pad=1)
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)

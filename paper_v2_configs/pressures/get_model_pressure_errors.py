@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ EXCLUDED_MODELS = {"pet-mad"}
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 from metric_sources import SOURCES, SOURCE_DATASETS, pressure_input_dir
+from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -31,6 +33,7 @@ DEFAULT_MODEL_SYSTEM_TYPE_MEAN_OUTPUT_FILE = (
     DEFAULT_PRESSURES_DIR / "pressure_model_system_type_mean_similarity_same_simulation_length.csv"
 )
 DEFAULT_MODEL_FILE_SUFFIX = "_same-simulation-length_pressure_per_frame.csv"
+DEFAULT_MD_DATA_DIR = SCRIPT_DIR.parent / "data"
 TRAJECTORY_SUMMARY_SUFFIX = (
     "_same-simulation-length_pressure_trajectory_summary.csv"
 )
@@ -80,6 +83,54 @@ def canonical_pressure_model_name(name: str) -> str:
     if name == "nequip-oam-l":
         return "nequip"
     return name
+
+
+def pressure_source(path: Path) -> str | None:
+    """Recognize source-specific pressure files, including legacy layouts."""
+    for part in path.parts:
+        if part in SOURCES:
+            return part
+    for backend, mode in SOURCE_DATASETS.values():
+        if backend in path.parts and mode in path.parts:
+            return next(source for source, dataset in SOURCE_DATASETS.items()
+                        if dataset == (backend, mode))
+    for mode in ("md_eager", "md_accelerated"):
+        if mode in path.parts:
+            return f"mlip-trajs-torchsim-{'eager' if mode == 'md_eager' else 'accelerated'}"
+    return None
+
+
+def pressure_md_status(source: str, md_data_dir: Path | None = None) -> dict:
+    """Resolve relocated trajectory paths through the source's local MD data."""
+    root = md_data_dir if md_data_dir is not None else DEFAULT_MD_DATA_DIR
+    trajectories = discover_torchsim_md_trajectories(root / source)
+    return {
+        (system, canonical_pressure_model_name(model)): torchsim_md_succeeded(path)
+        for system, models in trajectories.items() for model, path in models.items()
+    }
+
+
+def filter_completed_pressure_md_rows(
+    frame: pd.DataFrame,
+    model: str,
+    source: str | None,
+    md_data_dir: Path | None = None,
+    md_status: dict | None = None,
+) -> pd.DataFrame:
+    """Exclude failed MD from pressure MAE and distribution plots."""
+    if source is None or "torchsim" not in source:
+        return frame
+    status = md_status if md_status is not None else pressure_md_status(source, md_data_dir)
+    if "system" in frame:
+        systems = frame["system"]
+    elif "structure" in frame:
+        systems = frame["structure"]
+    elif "trajectory_file" in frame:
+        systems = frame["trajectory_file"].map(structure_from_trajectory_file)
+    else:
+        raise ValueError("Cannot validate pressure MD completion without system or trajectory_file.")
+    model = canonical_pressure_model_name(model)
+    return frame.loc[systems.map(lambda system: status.get((system, model), False))].copy()
 
 
 def pressure_column_name(columns: list[str]) -> str:
@@ -279,6 +330,7 @@ def build_pair_rows(
     bins: int,
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
+    allow_empty: bool = False,
 ) -> pd.DataFrame:
     include_crystals = "molecular crystals" not in (excluded_system_types or ())
     fallback_ref_df = None
@@ -304,6 +356,8 @@ def build_pair_rows(
             in normalized_models
         ]
     if not model_files:
+        if allow_empty:
+            return pd.DataFrame(columns=["system", "system_type", "mlip_model", "bins"])
         requested = (
             f" for requested model(s): {', '.join(sorted(models))}"
             if models
@@ -391,6 +445,8 @@ def build_pair_rows(
 
     out_df = pd.DataFrame(rows)
     if out_df.empty:
+        if allow_empty:
+            return pd.DataFrame(columns=["system", "system_type", "mlip_model", "bins"])
         raise RuntimeError("No pressure histogram similarity rows were computed.")
 
     return out_df.sort_values(
@@ -405,28 +461,50 @@ def add_failed_system_penalties(
     models: set[str] | None,
     excluded_system_types: set[str] | None,
     bins: int,
+    md_data_dir: Path | None = None,
 ) -> pd.DataFrame:
-    """Add 100% pressure-error rows for failed TorchSim MD pairs."""
+    """Enforce 100% error for failed MD, replacing even saved pressure scores."""
     pair_df = filter_pressure_systems(pair_df, include_molecular_crystals=True)
     if "torchsim" not in source:
         return pair_df
 
-    # The pair table is the authoritative set of systems scored by pressure;
-    # it excludes systems intentionally omitted by the pressure evaluator.
-    systems = set(pair_df["system"].astype(str))
-    discovered_models = set(pair_df["mlip_model"].astype(str))
+    root = md_data_dir if md_data_dir is not None else DEFAULT_MD_DATA_DIR
+    status = pressure_md_status(source, root)
+    pair_df = pair_df.copy()
+    pair_df["mlip_model"] = pair_df["mlip_model"].map(canonical_pressure_model_name)
+    systems = set(pair_df["system"].astype(str)) | {system for system, _ in status}
+    reference_dir = root / "ref-trajs"
+    systems.update(path.parent.name for path in reference_dir.glob("*/traj.extxyz"))
+    discovered_models = set(pair_df["mlip_model"].astype(str)) | {model for _, model in status}
+    discovered_models.update(
+        canonical_pressure_model_name(parse_model_name(path, DEFAULT_MODEL_FILE_SUFFIX))
+        for path in pressures_dir.rglob(f"*{DEFAULT_MODEL_FILE_SUFFIX}")
+        if not path.name.startswith("reference_")
+    )
     if models is not None:
-        requested = {canonical_pressure_model_name(model) for model in models}
-        discovered_models = {
-            model for model in discovered_models
-            if canonical_pressure_model_name(model) in requested
-        }
+        discovered_models = {canonical_pressure_model_name(model) for model in models}
+    discovered_models -= {canonical_pressure_model_name(model) for model in EXCLUDED_MODELS}
 
     excluded = {value.strip().lower() for value in excluded_system_types or ()}
+    metadata_path = reference_dir / "md_metadata.json"
+    metadata = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
     systems = {
         system for system in systems
         if (infer_system_type(system) or "").lower() not in excluded
+        and not ("stress_print_stride" in metadata.get(system, {})
+                 and metadata[system]["stress_print_stride"] is None)
     }
+    # Apply the same Pt/water exclusion to newly discovered missing pairs.
+    systems = set(filter_pressure_systems(
+        pd.DataFrame({"system": sorted(systems)}), include_molecular_crystals=True
+    )["system"])
+    pair_df = pair_df.loc[
+        pair_df["system"].isin(systems) & pair_df["mlip_model"].isin(discovered_models)
+    ].copy()
+    completed = [status.get((system, model), False)
+                 for system, model in zip(pair_df["system"], pair_df["mlip_model"])]
+    # Discard stale partial-run histograms before filling the expected coverage.
+    pair_df = pair_df.loc[np.asarray(completed, dtype=bool)].copy()
     existing = {
         (system, canonical_pressure_model_name(model))
         for system, model in zip(pair_df["system"], pair_df["mlip_model"])
@@ -460,12 +538,16 @@ def add_failed_system_penalties(
                     "bins": int(bins),
                     "reference_file": "",
                     "model_file": "",
-                    "failure_reason": "MLIP MD trajectory missing or incomplete",
+                    "failure_reason": (
+                        "pressure evaluation missing or invalid"
+                        if status.get((system, model_name), False)
+                        else "MLIP MD trajectory missing or incomplete"
+                    ),
                 }
             )
     if penalties:
         pair_df = pd.concat([pair_df, pd.DataFrame(penalties)], ignore_index=True)
-    return pair_df
+    return pair_df.sort_values(["system", "mlip_model"]).reset_index(drop=True)
 
 
 def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataFrame | None:
@@ -502,6 +584,8 @@ def build_pressure_mae_from_trajectory_summaries(
     pressures_dir: Path,
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
+    source: str | None = None,
+    md_data_dir: Path | None = None,
 ) -> pd.DataFrame | None:
     """Aggregate evaluator-produced trajectory mean errors into model MAE."""
     normalized_models = (
@@ -510,11 +594,14 @@ def build_pressure_mae_from_trajectory_summaries(
         else None
     )
     rows: list[pd.DataFrame] = []
+    source_status = {}
     for summary_file in sorted(
         pressures_dir.rglob(f"*{TRAJECTORY_SUMMARY_SUFFIX}")
     ):
         summary = pd.read_csv(summary_file)
         summary = filter_pressure_systems(summary, include_molecular_crystals=True)
+        if "system" not in summary and "trajectory_file" in summary:
+            summary["system"] = summary["trajectory_file"].map(structure_from_trajectory_file)
         if "absolute_mean_error_GPa" not in summary.columns:
             continue
         if excluded_system_types and "system" in summary:
@@ -534,6 +621,13 @@ def build_pressure_mae_from_trajectory_summaries(
             and canonical_pressure_model_name(model) not in normalized_models
         ):
             continue
+        summary_source = source or pressure_source(summary_file)
+        if summary_source is not None and "torchsim" in summary_source:
+            if summary_source not in source_status:
+                source_status[summary_source] = pressure_md_status(summary_source, md_data_dir)
+            summary = filter_completed_pressure_md_rows(
+                summary, model, summary_source, md_data_dir, source_status[summary_source]
+            )
         rows.append(
             pd.DataFrame(
                 {
@@ -565,23 +659,33 @@ def ensure_pressure_comparison_file(
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
     output_dir: Path | None = None,
+    source: str | None = None,
+    md_data_dir: Path | None = None,
 ) -> Path | None:
     """Create the model pressure-MAE CSV from evaluator summaries when needed."""
+    source = source or pressure_source(pressures_dir)
+    enforce_md_completion = source is not None and "torchsim" in source
     if (
-        pressure_comparison_file is not None
+        not enforce_md_completion
+        and pressure_comparison_file is not None
         and load_pressure_mae_columns(pressure_comparison_file) is not None
     ):
         return pressure_comparison_file
 
     comparison = build_pressure_mae_from_trajectory_summaries(
-        pressures_dir, models=models, excluded_system_types=excluded_system_types
+        pressures_dir, models=models, excluded_system_types=excluded_system_types,
+        source=source, md_data_dir=md_data_dir,
     )
     if comparison is None:
-        return pressure_comparison_file
+        if not enforce_md_completion:
+            return pressure_comparison_file
+        comparison = pd.DataFrame(columns=["model", "error_GPa"])
 
-    destination = pressure_comparison_file or (
-        (output_dir or pressures_dir) / "model_mean_pressure_comparison.csv"
-    )
+    # A model-level cached CSV cannot prove which systems entered its average.
+    # Write a fresh source-specific MAE CSV instead of trusting that cache.
+    destination = (output_dir or pressures_dir) / "model_mean_pressure_comparison.csv"
+    if not enforce_md_completion and pressure_comparison_file is not None:
+        destination = pressure_comparison_file
     destination.parent.mkdir(parents=True, exist_ok=True)
     comparison.to_csv(destination, index=False)
     print(f"Generated pressure MAE comparison from trajectory summaries: {destination}")
@@ -689,7 +793,9 @@ def compute_pressure_metric(
     models: set[str] | None = None,
     excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
     source: str | None = None,
+    md_data_dir: Path | None = None,
 ) -> pd.DataFrame:
+    source = source or pressure_source(pressures_dir)
     if excluded_system_types is None:
         excluded_system_types = set(DEFAULT_EXCLUDED_SYSTEM_TYPES)
     if bins < 2:
@@ -703,11 +809,15 @@ def compute_pressure_metric(
         bins=bins,
         models=models,
         excluded_system_types=excluded_system_types,
+        allow_empty=source is not None and "torchsim" in source,
     )
     if source is not None:
         pair_df = add_failed_system_penalties(
-            pair_df, pressures_dir, source, models, excluded_system_types, bins
+            pair_df, pressures_dir, source, models, excluded_system_types, bins,
+            md_data_dir=md_data_dir,
         )
+        if pair_df.empty:
+            raise RuntimeError("No pressure model/system pairs remain after MD and system selection.")
     if source is not None:
         pair_df['backend'], pair_df['mode'] = SOURCE_DATASETS[source]
         pair_df['source'] = source
@@ -723,6 +833,7 @@ def compute_pressure_metric(
         pressures_dir, pressure_comparison_file, models=models,
         excluded_system_types=excluded_system_types,
         output_dir=model_mean_output_file.parent,
+        source=source, md_data_dir=md_data_dir,
     )
 
     _, model_mean_df, _ = write_metric_outputs(
@@ -834,16 +945,17 @@ def main() -> None:
         type=Path,
         default=None,
         help=(
-            "Optional existing pressure MAE CSV to merge into the model-level output. "
-            "If omitted or unusable, it is generated as model_mean_pressure_comparison.csv "
-            "in the source output directory from the evaluator trajectory summaries. The histogram "
-            "score does not use these MAE values."
+            "Optional existing pressure MAE CSV for ASE data. TorchSim MAEs are always "
+            "regenerated from MD-complete evaluator summaries in the source output directory. "
+            "The histogram score does not use these MAE values."
         ),
     )
 
     parser.add_argument('--source', action='append', choices=SOURCES, dest='sources')
     parser.add_argument('--results-dir', type=Path, default=DEFAULT_PRESSURES_DIR,
                         help='Output root; each source gets its own subdirectory.')
+    parser.add_argument('--md-data-dir', type=Path, default=DEFAULT_MD_DATA_DIR,
+                        help='MD data root used to validate TorchSim completion records.')
     add_molecular_crystal_option(parser)
     args = parser.parse_args()
     args.excluded_system_types = excluded_system_types(args)
@@ -881,6 +993,7 @@ def main() -> None:
             pressure_comparison_file=args.pressure_comparison_file,
             models=set(args.models) if args.models else None,
             excluded_system_types=set(args.excluded_system_types or ()), source=source,
+            md_data_dir=args.md_data_dir.resolve(),
         )
 
 

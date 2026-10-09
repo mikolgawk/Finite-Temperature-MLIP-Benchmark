@@ -148,7 +148,7 @@ def load_all_data(
         frame = pd.read_csv(csv_file)
         model_name = extract_model_name(csv_file)
         source = csv_source(csv_file)
-        if 'torchsim' in source and csv_file.parent.name in {'md', 'md_eager', 'md-accelerated', 'md_accelerated', *SOURCES}:
+        if 'torchsim' in source:
             if 'trajectory' not in frame.columns:
                 raise ValueError(f'Missing trajectory column in {csv_file}')
             frame = frame.loc[frame['trajectory'].map(
@@ -194,6 +194,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--source', action='append', choices=SOURCES, dest='sources')
     parser.add_argument('--data-dir', type=Path, default=DATA_DIR)
     parser.add_argument('--results-dir', type=Path, default=RESULTS_DIR)
+    parser.add_argument('--md-data-dir', type=Path,
+                        help='MD data root used to validate TorchSim completion records.')
     add_molecular_crystal_option(parser)
     args = parser.parse_args()
     args.excluded_system_types = excluded_system_types(args)
@@ -244,7 +246,8 @@ def main() -> None:
     args = parse_args()
     excluded = set(args.excluded_system_types or ())
     all_data = load_all_data(args.data_dir, set(args.models) if args.models else None,
-                             excluded, sources=set(args.sources) if args.sources else None)
+                             excluded, md_data_dir=args.md_data_dir,
+                             sources=set(args.sources) if args.sources else None)
     if all_data.empty:
         raise SystemExit('No RMSE rows remain after source, model, MD-completion and system-type filtering.')
     for source, frame in all_data.groupby('source'):

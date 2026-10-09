@@ -4,6 +4,20 @@ import csv
 from pathlib import Path
 
 
+def discover_torchsim_md_trajectories(source_dir: Path) -> dict[str, dict[str, Path]]:
+    """Include failed jobs whose only remaining output is a timing marker."""
+    trajectories: dict[str, dict[str, Path]] = {}
+    for path in sorted(source_dir.glob("*/nvt_*.h5")):
+        model = path.stem.removeprefix("nvt_")
+        trajectories.setdefault(path.parent.name, {})[model] = path
+    for timing in sorted(source_dir.glob("*/md_timing_*.csv")):
+        model = timing.stem.removeprefix("md_timing_")
+        trajectories.setdefault(timing.parent.name, {}).setdefault(
+            model, timing.with_name(f"nvt_{model}.h5")
+        )
+    return trajectories
+
+
 def torchsim_md_succeeded(trajectory: Path) -> bool:
     """Require both the trajectory and its completed, matching timing record.
 

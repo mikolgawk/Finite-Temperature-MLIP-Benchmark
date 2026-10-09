@@ -90,7 +90,15 @@ class SourceOutputTests(unittest.TestCase):
                 frames.to_csv(directory / 'references/shared.csv', index=False)
                 pd.DataFrame({'system': ['bulkCu_300K'], 'absolute_mean_error_GPa': [value]}).to_csv(
                     directory / ('shared' + pressure.TRAJECTORY_SUMMARY_SUFFIX), index=False)
-            argv = ['pressure', '--pressures-dir', str(root / 'inputs'), '--results-dir', str(root / 'results')]
+                if backend == 'torchsim':
+                    md = root / 'md-data' / source / 'bulkCu_300K'
+                    md.mkdir(parents=True)
+                    (md / 'nvt_shared.h5').touch()
+                    (md / 'md_timing_shared.csv').write_text(
+                        'calculator,system,n_steps\nshared,bulkCu_300K,100\n'
+                    )
+            argv = ['pressure', '--pressures-dir', str(root / 'inputs'),
+                    '--results-dir', str(root / 'results'), '--md-data-dir', str(root / 'md-data')]
             with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(io.StringIO()):
                 pressure.main()
             for value, (source, (backend, mode)) in enumerate(SOURCE_DATASETS.items(), 1):

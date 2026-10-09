@@ -135,7 +135,8 @@ class PressurePipelineTests(unittest.TestCase):
             "pressure_similarity": [0.8, 0.6, 0.0], "bins": [8] * 3,
         })
         penalized = add_failed_system_penalties(
-            pairs, self.root, "mlip-trajs-torchsim-eager", None, set(), 8
+            pairs, self.root, "mlip-trajs-torchsim-eager", None, set(), 8,
+            md_data_dir=self.root,
         )
         self.assertEqual(set(penalized.system), {self.structure})
         self.assertEqual(len(penalized), 2)
@@ -169,6 +170,13 @@ class PressurePipelineTests(unittest.TestCase):
             references = output / "references"
             references.mkdir(parents=True)
             trajectory = self.root / "trajectories" / self.structure / "nvt_test.h5"
+            source = f"mlip-trajs-torchsim-{'eager' if mode == 'md_eager' else 'accelerated'}"
+            local_md = self.root / "md-data" / source / self.structure
+            local_md.mkdir(parents=True)
+            (local_md / "nvt_test.h5").touch()
+            (local_md / "md_timing_test.csv").write_text(
+                f"calculator,system,n_steps\ntest,{self.structure},100\n"
+            )
             model_file = output / f"test{pipeline.SUFFIX}"
             pd.DataFrame(
                 {
@@ -247,6 +255,7 @@ class PressurePipelineTests(unittest.TestCase):
             model_mean_output_file=metric_file,
             model_system_type_mean_output_file=results / "model-type-generated.csv",
             pressure_comparison_file=comparison_file,
+            md_data_dir=self.root / "md-data",
         )
         self.assertTrue(comparison_file.is_file())
         self.assertEqual(

@@ -66,7 +66,18 @@ class PressureFiguresTest(unittest.TestCase):
                 titles = [ax.get_title().split("\n")[0]
                           for ax in fig.axes if ax.get_title()]
                 self.assertEqual(titles, [kind for kind, _ in categories])
-                self.assertGreater(fig.get_size_inches()[1], 3.53 * 3.55)
+                if module is figure_4:
+                    panels_with_titles = [ax for ax in fig.axes if ax.get_title()]
+                    specs = [ax.get_subplotspec().get_topmost_subplotspec()
+                             for ax in panels_with_titles]
+                    self.assertEqual([spec.rowspan.start for spec in specs], [2, 2, 2, 3, 3])
+                    bounds = [ax.get_position() for ax in panels_with_titles]
+                    np.testing.assert_allclose([box.width for box in bounds], bounds[0].width)
+                    top_center = (bounds[1].x0 + bounds[1].x1) / 2
+                    bottom_center = (bounds[3].x0 + bounds[4].x1) / 2
+                    self.assertAlmostEqual(bottom_center, top_center)
+                else:
+                    self.assertGreater(fig.get_size_inches()[1], 3.53 * 3.55)
                 self.assertFalse(output.exists())
 
     def test_each_model_uses_its_own_reference(self) -> None:
