@@ -658,7 +658,6 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 			)
 			label._model_point_label = True
 
-		ax.set_title(dataset_name)
 		ax.set_xlabel(r"Mean time per step [ms]")
 		ax.grid(True, linestyle="--", alpha=0.4)
 		ax.legend(loc="best", frameon=True)
