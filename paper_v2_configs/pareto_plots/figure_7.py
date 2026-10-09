@@ -35,11 +35,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option, include_system, filter_pressure_systems
-
-try:
-	from adjustText import adjust_text
-except Exception:
-	adjust_text = None
+from correlation_labels import inward_label_offset, position_model_labels
 
 
 FONT_SIZE = 6
@@ -592,8 +588,9 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 	all_df["tier"] = all_df["model"].map(model_tier)
 	datasets = all_df["dataset"].drop_duplicates().tolist()
 	y_values = all_df["Combined Error [%]"].to_numpy()
-	y_bottom = min(23.0, float(np.nanmin(y_values)) - 0.5)
-	y_top = max(36.0, float(np.nanmax(y_values)) + 0.5)
+	y_min, y_max = float(np.nanmin(y_values)), float(np.nanmax(y_values))
+	y_padding = max(0.75, (y_max - y_min) * 0.08)
+	y_bottom, y_top = y_min - y_padding, y_max + y_padding
 
 	fig, axes = plt.subplots(
 		1,
@@ -644,44 +641,22 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 
 		x_vals = dataset_df["mean_time_per_step_ms"].to_numpy()
 		y_vals = dataset_df["Combined Error [%]"].to_numpy()
-		ax.set_xlim(left=0, right=max(590.0, float(np.nanmax(x_vals)) * 1.05))
+		ax.set_xlim(left=0, right=max(1.0, float(np.nanmax(x_vals)) * 1.1))
 		ax.set_ylim(bottom=y_bottom, top=y_top)
-		label_texts = []
 		for xi, yi, model_name in zip(x_vals, y_vals, dataset_df["model"].values):
-			label_texts.append(
-				ax.annotate(
-					display_name(str(model_name)),
-					xy=(xi, yi),
-					xytext=(3, 3),
-					textcoords="offset points",
-					fontsize=FONT_SIZE,
-					alpha=0.8,
-					ha="left",
-					va="bottom",
-					bbox=dict(boxstyle="round,pad=0.08", facecolor="white", edgecolor="none", alpha=0.55),
-				)
+			offset, horizontal, vertical = inward_label_offset(ax, float(xi))
+			label = ax.annotate(
+				display_name(str(model_name)),
+				xy=(xi, yi),
+				xytext=offset,
+				textcoords="offset points",
+				fontsize=FONT_SIZE,
+				alpha=0.8,
+				ha=horizontal,
+				va=vertical,
+				bbox=dict(boxstyle="round,pad=0.08", facecolor="white", edgecolor="none", alpha=0.55),
 			)
-
-		if adjust_text is not None and label_texts:
-			try:
-				adjust_text(
-					label_texts,
-					ax=ax,
-					x=x_vals,
-					y=y_vals,
-					avoid_self=True,
-					only_move={"points": "xy", "text": "xy"},
-					force_text=(2.0, 2.2),
-					force_points=(1.0, 1.2),
-					expand_points=(1.3, 1.4),
-					expand_text=(1.4, 1.5),
-					lim=400,
-					ensure_inside_axes=True,
-					expand_axes=False,
-					arrowprops=dict(arrowstyle="-", color="0.5", lw=0.4, alpha=0.45),
-				)
-			except Exception:
-				pass
+			label._model_point_label = True
 
 		ax.set_title(dataset_name)
 		ax.set_xlabel(r"Mean time per step [ms]")
@@ -690,8 +665,9 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 
 	axes[0].set_ylabel(r"$\bar{E}_{RPV}$ [%]")
 	output_file.parent.mkdir(parents=True, exist_ok=True)
-	plt.tight_layout()
-	plt.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
+	fig.tight_layout()
+	position_model_labels(fig, axes)
+	fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
 	plt.close(fig)
 
 	pareto_count = sum(len(dataset_df[is_pareto_optimal(dataset_df)]) for dataset_df in (all_df[all_df["dataset"] == name] for name in datasets))
