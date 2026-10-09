@@ -87,7 +87,7 @@ plots_dir.mkdir(parents=True, exist_ok=True)
 mean_summary.to_csv(results_dir / 'mean_metrics_by_model_no_molecular_crystals.csv', index=False)
 
 # Create figure with 2 subplots
-fig, axes = plt.subplots(1, 2, figsize=(3.53 * 2, 3.53))
+fig, axes = plt.subplots(1, 2, figsize=(3.53 * 3, 3.53 * 1.4), layout='constrained')
 
 
 tier_1 = [normalize_calculator_name(model) for model in ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]]
@@ -134,7 +134,8 @@ def get_tier_counts(models):
 
 
 def catalog_positions(models, catalog):
-    """Place available models at their positions in the complete tier catalog."""
+    """Keep tier order without reserving slots for unavailable model variants."""
+    catalog = list(dict.fromkeys(model for model in catalog if model in models))
     next_other_position = len(catalog)
     positions = []
     for model in models:
@@ -146,6 +147,8 @@ def catalog_positions(models, catalog):
     return np.asarray(positions, dtype=float), next_other_position
 
 def annotate_median(ax, x_center, y_value, y_text, color, fmt="{:.3f}"):
+    if not np.isfinite(y_value):
+        return
     ax.annotate(
         fmt.format(y_value),
         xy=(x_center, y_value),
@@ -187,22 +190,16 @@ force_df = df.copy()
 energy_models = energy_df['calculator'].values
 force_models = force_df['calculator'].values
 
-energy_catalog = [model for model in tier_order if model != 'EquiformerV2']
-force_catalog = tier_order
+energy_catalog = list(dict.fromkeys(model for model in tier_order if model in energy_models))
+force_catalog = list(dict.fromkeys(model for model in tier_order if model in force_models))
 energy_x_pos, energy_axis_size = catalog_positions(energy_models, energy_catalog)
 force_x_pos, force_axis_size = catalog_positions(force_models, force_catalog)
 
 energy_colors = get_tier_colors(energy_models)
 force_colors = get_tier_colors(force_models)
 
-energy_t1_count = len(tier_1)
-energy_t2_count = len(tier_2)
-energy_t3_count = len([model for model in tier_3 if model != 'EquiformerV2'])
-energy_t4_count = len(tier_4)
-force_t1_count = len(tier_1)
-force_t2_count = len(tier_2)
-force_t3_count = len(tier_3)
-force_t4_count = len(tier_4)
+energy_t1_count, energy_t2_count, energy_t3_count, energy_t4_count = get_tier_counts(energy_models)
+force_t1_count, force_t2_count, force_t3_count, force_t4_count = get_tier_counts(force_models)
 
 # Plot 1: Energy RMSE
 axes[0].bar(energy_x_pos, energy_df['energy_rmse'], color=energy_colors, alpha=0.8, edgecolor='black', linewidth=0.5)
@@ -220,9 +217,9 @@ axes[0].set_ylim(0, energy_ymax * 1.25)
 energy_tier1_end = energy_t1_count - 0.5
 energy_tier2_end = energy_t1_count + energy_t2_count - 0.5
 energy_tier3_end = energy_t1_count + energy_t2_count + energy_t3_count - 0.5
-axes[0].axvline(x=energy_tier1_end, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
-axes[0].axvline(x=energy_tier2_end, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
-axes[0].axvline(x=energy_tier3_end, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+for boundary in sorted({energy_tier1_end, energy_tier2_end, energy_tier3_end}):
+    if -0.5 < boundary < energy_axis_size - 0.5:
+        axes[0].axvline(x=boundary, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 
 # Draw median (dashed) lines for each tier on energy plot
 t1_energy_values = energy_df[energy_df['calculator'].isin(tier_1)]['energy_rmse']
@@ -275,14 +272,13 @@ annotate_median(
 )
 
 # Add tier labels
-axes[0].text(tier_center(0, energy_t1_count - 1), tier_label_y(energy_ymax), 'Tier 1',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_1'])
-axes[0].text(tier_center(energy_t1_count, energy_t1_count + energy_t2_count - 1), tier_label_y(energy_ymax), 'Tier 2',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_2'])
-axes[0].text(tier_center(energy_t1_count + energy_t2_count, energy_t1_count + energy_t2_count + energy_t3_count - 1), tier_label_y(energy_ymax), 'Tier 3',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_3'])
-axes[0].text(tier_center(energy_t1_count + energy_t2_count + energy_t3_count, len(energy_catalog) - 1), tier_label_y(energy_ymax), 'Tier 4',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_4'])
+start = 0
+for index, count in enumerate(get_tier_counts(energy_models), start=1):
+    if count:
+        axes[0].text(tier_center(start, start + count - 1), tier_label_y(energy_ymax),
+                     f'Tier {index}', ha='center', fontsize=FONT_SIZE,
+                     color=tier_colors[f'tier_{index}'])
+    start += count
 
 # Plot 2: Force RMSE
 axes[1].bar(force_x_pos, force_df['force_rmse'], color=force_colors, alpha=0.8, edgecolor='black', linewidth=0.5)
@@ -300,9 +296,9 @@ axes[1].set_ylim(0, force_ymax * 1.25)
 force_tier1_end = force_t1_count - 0.5
 force_tier2_end = force_t1_count + force_t2_count - 0.5
 force_tier3_end = force_t1_count + force_t2_count + force_t3_count - 0.5
-axes[1].axvline(x=force_tier1_end, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
-axes[1].axvline(x=force_tier2_end, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
-axes[1].axvline(x=force_tier3_end, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+for boundary in sorted({force_tier1_end, force_tier2_end, force_tier3_end}):
+    if -0.5 < boundary < force_axis_size - 0.5:
+        axes[1].axvline(x=boundary, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 
 # Draw median (dashed) lines for each tier on force plot
 t1_force_values = force_df[force_df['calculator'].isin(tier_1)]['force_rmse']
@@ -355,20 +351,18 @@ annotate_median(
 )
 
 # Add tier labels
-axes[1].text(tier_center(0, force_t1_count - 1), tier_label_y(force_ymax), 'Tier 1',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_1'])
-axes[1].text(tier_center(force_t1_count, force_t1_count + force_t2_count - 1), tier_label_y(force_ymax), 'Tier 2',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_2'])
-axes[1].text(tier_center(force_t1_count + force_t2_count, force_t1_count + force_t2_count + force_t3_count - 1), tier_label_y(force_ymax), 'Tier 3',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_3'])
-axes[1].text(tier_center(force_t1_count + force_t2_count + force_t3_count, len(force_catalog) - 1), tier_label_y(force_ymax), 'Tier 4',
-             ha='center', fontsize=FONT_SIZE, color=tier_colors['tier_4'])
+start = 0
+for index, count in enumerate(get_tier_counts(force_models), start=1):
+    if count:
+        axes[1].text(tier_center(start, start + count - 1), tier_label_y(force_ymax),
+                     f'Tier {index}', ha='center', fontsize=FONT_SIZE,
+                     color=tier_colors[f'tier_{index}'])
+    start += count
 
 # Subplot labels
-axes[0].text(0.02, 0.96, '(a)', transform=axes[0].transAxes, ha='left', va='top', fontsize=FONT_SIZE)
-axes[1].text(0.02, 0.96, '(b)', transform=axes[1].transAxes, ha='left', va='top', fontsize=FONT_SIZE)
+axes[0].text(0, 1.02, '(a)', transform=axes[0].transAxes, ha='left', va='bottom', fontsize=FONT_SIZE)
+axes[1].text(0, 1.02, '(b)', transform=axes[1].transAxes, ha='left', va='bottom', fontsize=FONT_SIZE)
 
-plt.tight_layout()
 plot_path = plots_dir / 'plot_e_f_rmses_no_molecular_crystals.pdf'
 plt.savefig(plot_path)
 print(f"Plot saved as {plot_path}")

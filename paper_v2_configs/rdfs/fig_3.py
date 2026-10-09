@@ -465,15 +465,7 @@ def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
 
     models = df["Calculator"].to_list()
     model_norms = df["calculator_norm"].to_list()
-    next_other_position = len(tier_order_norm)
-    x_positions = []
-    for model_norm in model_norms:
-        if model_norm in tier_order_norm:
-            x_positions.append(tier_order_norm.index(model_norm))
-        else:
-            x_positions.append(next_other_position)
-            next_other_position += 1
-    x_pos = np.asarray(x_positions, dtype=float)
+    x_pos = np.arange(len(df), dtype=float)
     tier_colors = {
         "tier_1": palette[2],
         "tier_2": palette[1],
@@ -495,7 +487,7 @@ def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
             colors.append("#757575")
 
     ax.bar(x_pos, df["RDF Error [%]"], color=colors, alpha=0.8, edgecolor="black", linewidth=0.5)
-    ax.text(0.01, 0.95, "(a)", transform=ax.transAxes, ha="left", va="top", fontsize=FONT_SIZE)
+    ax.text(0, 1.02, "(a)", transform=ax.transAxes, ha="left", va="bottom", fontsize=FONT_SIZE)
     ax.set_xlabel("Model")
     ax.set_ylabel("RDF error [%]")
     ax.set_xticks(x_pos)
@@ -526,31 +518,18 @@ def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
         y_max = max(1.0, float(max_val))
         ax.set_ylim(0, y_max * 1.25)
 
-    tier_ranges = [
-        ("Tier 1", tier_colors["tier_1"], t1_med, -0.5, len(TIER_1) - 0.5),
-        (
-            "Tier 2",
-            tier_colors["tier_2"],
-            t2_med,
-            len(TIER_1) - 0.5,
-            len(TIER_1) + len(TIER_2) - 0.5,
-        ),
-        (
-            "Tier 3",
-            tier_colors["tier_3"],
-            t3_med,
-            len(TIER_1) + len(TIER_2) - 0.5,
-            len(TIER_1) + len(TIER_2) + len(TIER_3) - 0.5,
-        ),
-        (
-            "Tier 4",
-            tier_colors["tier_4"],
-            t4_med,
-            len(TIER_1) + len(TIER_2) + len(TIER_3) - 0.5,
-            len(tier_order_norm) - 0.5,
-        ),
-    ]
-    ax.set_xlim(-0.5, max(len(tier_order_norm) - 0.5, next_other_position - 0.5))
+    tier_ranges = []
+    start = -0.5
+    for index, (tier_models, median) in enumerate(zip(
+        (TIER_1_NORM, TIER_2_NORM, TIER_3_NORM, TIER_4_NORM),
+        (t1_med, t2_med, t3_med, t4_med),
+    ), start=1):
+        count = sum(model in tier_models for model in model_norms)
+        if count:
+            end = start + count
+            tier_ranges.append((f"Tier {index}", tier_colors[f"tier_{index}"], median, start, end))
+            start = end
+    ax.set_xlim(-0.5, max(0.5, len(df) - 0.5))
 
     for _, _, _, _, boundary in tier_ranges[:-1]:
         ax.axvline(
@@ -606,19 +585,22 @@ def plot_combined(
     system_groups = [(kind, systems) for kind, systems in SYSTEMS.items()
                      if include_system(kind, include_molecular_crystals)]
     n_panel_rows = int(np.ceil(len(system_groups) / 3))
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.0 + 1.15 * n_panel_rows)))
+    fig = plt.figure(
+        figsize=(3.53 * 3.0, 3.53 * (1.5 + 1.4 * n_panel_rows)),
+        layout="constrained",
+    )
     outer_gs = gridspec.GridSpec(
-        2 + n_panel_rows,
+        1 + n_panel_rows,
         6,
         figure=fig,
-        wspace=0.30,
-        hspace=0.48,
-        height_ratios=[0.78, 0.22] + [1.15] * n_panel_rows,
+        wspace=0.12,
+        hspace=0.12,
+        height_ratios=[0.9] + [1.4] * n_panel_rows,
     )
     panel_labels = ["(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)"]
 
     for idx, (system_type, system_list) in enumerate(system_groups):
-        panel_row_idx = 2 + idx // 3
+        panel_row_idx = 1 + idx // 3
         panel_col_idx = idx % 3
         panels_in_row = min(3, len(system_groups) - (idx // 3) * 3)
         start_col = 3 - panels_in_row + panel_col_idx * 2

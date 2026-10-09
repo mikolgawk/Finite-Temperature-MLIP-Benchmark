@@ -46,11 +46,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option, filter_pressure_systems
-
-try:
-	from adjustText import adjust_text
-except Exception:
-	adjust_text = None
+from correlation_labels import inward_label_offset, position_model_labels
 
 
 FONT_SIZE = 6
@@ -394,20 +390,24 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 		zorder=3,
 	)
 
-	label_texts = []
 	x_vals = all_df["mean_time_per_step_ms"].to_numpy()
 	y_vals = all_df["Combined Error [%]"].to_numpy()
+	ax.set_xlim(left=0, right=max(1.0, float(np.nanmax(x_vals)) * 1.1))
+	y_min, y_max = float(np.nanmin(y_vals)), float(np.nanmax(y_vals))
+	y_padding = max(0.75, (y_max - y_min) * 0.08)
+	ax.set_ylim(bottom=y_min - y_padding, top=y_max + y_padding)
 
 	for xi, yi, model_name in zip(x_vals, y_vals, all_df["model"].values):
+		offset, horizontal, vertical = inward_label_offset(ax, float(xi))
 		txt = ax.annotate(
 			display_name(str(model_name)),
 			xy=(xi, yi),
-			xytext=(3, 3),
+			xytext=offset,
 			textcoords="offset points",
 			fontsize=FONT_SIZE,
 			alpha=0.8,
-			ha="left",
-			va="bottom",
+			ha=horizontal,
+			va=vertical,
 			rotation=0,
 			bbox=dict(
 				boxstyle="round,pad=0.08",
@@ -416,43 +416,18 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 				alpha=0.55,
 			),
 		)
-		label_texts.append(txt)
+		txt._model_point_label = True
 
-	if adjust_text is not None and label_texts:
-		try:
-			adjust_text(
-				label_texts,
-				ax=ax,
-				x=x_vals,
-				y=y_vals,
-				avoid_self=True,
-				only_move={"points": "xy", "text": "xy"},
-				force_text=(1.2, 1.4),
-				force_points=(0.8, 1.0),
-				expand_points=(1.3, 1.4),
-				expand_text=(1.2, 1.3),
-				lim=400,
-				arrowprops=dict(
-					arrowstyle="-",
-					color="0.5",
-					lw=0.4,
-					alpha=0.45,
-				),
-			)
-		except Exception:
-			pass
-
-	# ax.set_xlabel("Mean time per step [ms]")
 	ax.set_xlabel(r"Mean time per step [ms]")
 	ax.set_ylabel(r"$L_{\mathrm{RPV}}$ error [%]")
-	ax.set_xlim(right=590)
 	ax.grid(True, linestyle="--", alpha=0.4)
 	ax.legend(loc="best", frameon=True)
 
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 
-	plt.tight_layout()
-	plt.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
+	fig.tight_layout()
+	position_model_labels(fig, [ax])
+	fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
 	plt.close(fig)
 
 	print(f"Saved: {output_file}")

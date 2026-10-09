@@ -128,23 +128,17 @@ def main() -> None:
     ]
 
     n_panels = len(system_types_to_plot)
-    custom_layout_5 = (n_panels == 5)
-
-    if custom_layout_5:
-        fig = plt.figure(figsize=(3.53 * 2, 3.53 * 2))
-        gs = fig.add_gridspec(2, 6)
-        axes_flat = [
-            fig.add_subplot(gs[0, 0:2]),
-            fig.add_subplot(gs[0, 2:4]),
-            fig.add_subplot(gs[0, 4:6]),
-            fig.add_subplot(gs[1, 1:3]),
-            fig.add_subplot(gs[1, 3:5]),
-        ]
-    else:
-        ncols = 3
-        nrows = (n_panels + ncols - 1) // ncols
-        fig, axes = plt.subplots(nrows, ncols, figsize=(3.53 * ncols, 3.53 * nrows), squeeze=False)
-        axes_flat = axes.flatten().tolist()
+    if not n_panels:
+        raise ValueError(f'No system types with finite RMSE data in {INPUT_CSV}')
+    ncols = min(3, n_panels)
+    nrows = (n_panels + ncols - 1) // ncols
+    fig = plt.figure(figsize=(3.53 * ncols, 3.53 * nrows), layout='constrained')
+    gs = fig.add_gridspec(nrows, ncols * 2)
+    axes_flat = []
+    for idx in range(n_panels):
+        panels_in_row = min(ncols, n_panels - (idx // ncols) * ncols)
+        start_col = ncols - panels_in_row + (idx % ncols) * 2
+        axes_flat.append(fig.add_subplot(gs[idx // ncols, start_col:start_col + 2]))
 
     for idx, system_type in enumerate(system_types_to_plot):
         ax = axes_flat[idx]
@@ -202,10 +196,7 @@ def main() -> None:
 
         ax.set_title(system_type.title())
         ax.set_xlabel('Model')
-        if custom_layout_5:
-            show_ylabel = idx in (0, 3)
-        else:
-            show_ylabel = (idx % 2 == 0)
+        show_ylabel = (idx % ncols == 0)
         ax.set_ylabel(r'Force RMSE [eV/$\AA$]' if show_ylabel else '')
         ax.set_xticks(x)
         ax.set_xticklabels(selected_labels, rotation=45, ha='right', fontsize=8)
@@ -247,14 +238,8 @@ def main() -> None:
                 color=tier_color,
             )
 
-    if not custom_layout_5:
-        for idx in range(len(system_types_to_plot), len(axes_flat)):
-            axes_flat[idx].axis('off')
-
-    plt.tight_layout()
     OUTPUT_PDF.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(OUTPUT_PDF)
-    plt.close(fig)
+    fig.savefig(OUTPUT_PDF)
     plt.close(fig)
     print(f'Saved {OUTPUT_PDF}')
 
