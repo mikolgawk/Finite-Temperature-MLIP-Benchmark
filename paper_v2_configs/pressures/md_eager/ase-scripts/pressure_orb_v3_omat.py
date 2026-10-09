@@ -14,7 +14,7 @@ from pathlib import Path
 _PRESSURE_ROOT = next(parent for parent in Path(__file__).resolve().parents if parent.name == "pressures")
 sys.path.insert(0, str(_PRESSURE_ROOT))
 from pressure_evaluator import early_cli, run_ase_pressure
-early_cli(__file__, "ase", default_traj_dir=_PRESSURE_ROOT.parent / "data" / "mlip-trajs-ase")
+early_cli(__file__, "ase", default_traj_dir=_PRESSURE_ROOT.parent / "data" / "mlip-trajs-ase-eager")
 
 """Stress-enabled md_orb_v3_omat.py: record potential stress for every saved trajectory frame."""
 

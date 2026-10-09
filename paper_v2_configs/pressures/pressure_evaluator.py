@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate stresses on saved TorchSim HDF5 frames without running MD."""
+"""Evaluate stresses on saved MLIP HDF5 frames without running MD."""
 from __future__ import annotations
 
 import argparse
@@ -29,8 +29,9 @@ def early_cli(script, backend: str, *, default_traj_dir: Path | None = None) -> 
     data = root.parent / "data"
     accelerated = "md_accelerated" in _SCRIPT.parts
     family = "md_accelerated" if accelerated else "md_eager"
+    mode = "accelerated" if accelerated else "eager"
     default_trajectories = default_traj_dir if default_traj_dir is not None else data / (
-        "mlip-trajs-torchsim-accelerated" if accelerated else "mlip-trajs-torchsim-eager"
+        f"mlip-trajs-{backend}-{mode}"
     )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--traj-dir", type=Path, default=default_trajectories)
@@ -79,13 +80,18 @@ def _trajectory_model(model_name: str) -> str:
 
 
 def _trajectory_paths(directory: Path, model_name: str) -> list[Path]:
-    """Find trajectories by canonical model name, independent of property tags."""
-    expected = _trajectory_model(model_name)
-    return sorted(
+    """Match model aliases and tags, preferring ASE files over legacy names."""
+    expected = _trajectory_model(model_name.removesuffix("-ase"))
+    matches = sorted(
         path
         for path in directory.rglob("nvt_*.h5")
-        if _trajectory_model(path.stem.removeprefix("nvt_")) == expected
+        if _trajectory_model(path.stem.removeprefix("nvt_").removesuffix("-ase")) == expected
     )
+    ase_directories = {path.parent for path in matches if path.stem.endswith("-ase")}
+    return [
+        path for path in matches
+        if path.stem.endswith("-ase") or path.parent not in ase_directories
+    ]
 
 
 def _stress_matrix(value):

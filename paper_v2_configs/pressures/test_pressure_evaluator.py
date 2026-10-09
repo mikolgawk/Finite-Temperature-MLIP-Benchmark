@@ -103,6 +103,7 @@ class PressureEvaluatorTests(unittest.TestCase):
         self.assertEqual(evaluator._trajectory_model("pet-oam-xl-stress-torchscript"),
                          "pet-oam-xl-torchscript")
         self.assertEqual(evaluator._trajectory_model("nequip-oam-l-force-only"), "nequip")
+        self.assertEqual(evaluator._trajectory_model("chgnet-force-only-ase"), "chgnet-ase")
 
         with tempfile.TemporaryDirectory() as temporary:
             trajectory = (
@@ -115,11 +116,48 @@ class PressureEvaluatorTests(unittest.TestCase):
                 [trajectory],
             )
 
+    def test_ase_trajectory_names_match_pressure_models(self):
+        cases = [
+            ("chgnet", "chgnet-force-only-ase"),
+            ("chgnet-force-only-ase", "chgnet-force-only-ase"),
+            ("nequip-oam-l", "nequip-oam-l-ase"),
+            ("nequip-oam-l-stress", "nequip-oam-l-force-only-ase"),
+            ("mace-mpa-0", "mace-mpa-0-ase"),
+            ("mace-mpa-0-compile", "mace-mpa-0-compile-ase"),
+            ("mattersim-v1-5M-compile-stress", "mattersim-v1-5M-compile-force-only-ase"),
+            ("orb-v3-direct-omat-stress", "orb-v3-direct-omat-force-only"),
+        ]
+        for model, name in cases:
+            with self.subTest(model=model, name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                trajectory = root / "system" / f"nvt_{name}.h5"
+                trajectory.parent.mkdir()
+                trajectory.touch()
+                (trajectory.parent / f"nvt_{name}.h5.inprogress").touch()
+                (trajectory.parent / "nvt_unrelated-ase.h5").touch()
+                self.assertEqual(evaluator._trajectory_paths(root, model), [trajectory])
+
+    def test_ase_trajectory_is_preferred_over_legacy_copy_per_system(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            modern = root / "system" / "nvt_orb-v3-direct-omat-ase.h5"
+            legacy = modern.parent / "nvt_orb-v3-direct-omat.h5"
+            fallback = root / "other-system" / legacy.name
+            modern.parent.mkdir()
+            fallback.parent.mkdir()
+            for path in (modern, legacy, fallback):
+                path.touch()
+            for model in ("orb-v3-direct-omat", "orb-v3-direct-omat-ase"):
+                with self.subTest(model=model):
+                    self.assertEqual(
+                        evaluator._trajectory_paths(root, model), sorted([modern, fallback])
+                    )
+
     def test_ase_evaluator_reads_existing_hdf5_without_running_md(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             system = "bulkCu_300K_test"
-            trajectory = root / "trajectories" / system / "nvt_dummy.h5"
+            trajectory = root / "trajectories" / system / "nvt_dummy-force-only-ase.h5"
             trajectory.parent.mkdir(parents=True)
             with h5py.File(trajectory, "w") as handle:
                 handle.create_dataset("data/atomic_numbers", data=[[29]])
@@ -132,7 +170,7 @@ class PressureEvaluatorTests(unittest.TestCase):
 
             no_stress_system = "bulkCuAu_500K_test"
             no_stress_trajectory = (
-                root / "trajectories" / no_stress_system / "nvt_dummy.h5"
+                root / "trajectories" / no_stress_system / "nvt_dummy-force-only-ase.h5"
             )
             no_stress_trajectory.parent.mkdir(parents=True)
             with h5py.File(no_stress_trajectory, "w") as handle:
