@@ -43,6 +43,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from matbench_scores import matbench_model_key
 from correlation_labels import inward_label_offset, position_model_labels
 from md_success import torchsim_md_succeeded
 from system_filters import filter_pressure_systems, is_molecular_crystal
@@ -495,8 +496,15 @@ def standardize_score(
     out = frame[[model_col, value_col]].rename(
         columns={model_col: "calculator", value_col: output_column}
     )
-    out["calculator"] = out["calculator"].map(normalize_model_name)
+    out["calculator"] = out["calculator"].map(matbench_model_key)
     out[output_column] = pd.to_numeric(out[output_column], errors="coerce")
+    distinct_values = out.groupby("calculator")[output_column].nunique()
+    conflicting_models = distinct_values.index[distinct_values > 1].tolist()
+    if conflicting_models:
+        raise ValueError(
+            f"Conflicting {description} values for Matbench model(s): "
+            + ", ".join(conflicting_models)
+        )
     return aggregate_models(out)
 
 
@@ -554,8 +562,13 @@ def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
     )
 
     joined = df_means.copy()
-    joined = joined.merge(df_f1, on="calculator", how="left")
-    joined = joined.merge(df_ksrme, on="calculator", how="left")
+    joined["matbench_model"] = joined["calculator"].map(matbench_model_key)
+    for scores in (df_f1, df_ksrme):
+        joined = joined.merge(
+            scores.rename(columns={"calculator": "matbench_model"}),
+            on="matbench_model", how="left", validate="many_to_one",
+        )
+    joined = joined.drop(columns="matbench_model")
     joined = joined.merge(df_rdf, on="calculator", how="left")
     joined = joined.merge(df_pressure, on="calculator", how="left")
     joined = joined.merge(df_vdos, on="calculator", how="left")
@@ -764,10 +777,9 @@ def plot_single_error_figure(
     fig, axes_arr = plt.subplots(
         1,
         3,
-        figsize=(SPLIT_FIGSIZE[0] * 1.3, SPLIT_FIGSIZE[1])
-        if exclude_hydrogen_force_rmse else SPLIT_FIGSIZE,
+        figsize=(SPLIT_FIGSIZE[0] * 1.3, SPLIT_FIGSIZE[1]),
         sharey=True,
-        gridspec_kw={"width_ratios": [1.5, 1, 1]} if exclude_hydrogen_force_rmse else None,
+        gridspec_kw={"width_ratios": [1.5, 1, 1]},
     )
     axes = np.asarray(axes_arr)
 
@@ -837,12 +849,10 @@ def plot_single_error_figure(
             if np.nanstd(x) > 0.0 and np.nanstd(y) > 0.0:
                 r = np.corrcoef(x, y)[0, 1]
                 ax.text(
-                    0.98 if exclude_hydrogen_force_rmse else 0.02,
-                    0.985 if exclude_hydrogen_force_rmse else 0.80,
+                    0.98, 0.985,
                     f"r = {r:.2f}",
                     transform=ax.transAxes,
-                    va="top" if exclude_hydrogen_force_rmse else "bottom",
-                    ha="right" if exclude_hydrogen_force_rmse else "left",
+                    va="top", ha="right",
                     fontsize=FONT_SIZE,
                 )
         except Exception:
@@ -853,10 +863,9 @@ def plot_single_error_figure(
     add_tier_legend(fig, tier_colors)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    label_offset = 18 if exclude_hydrogen_force_rmse else 3
-    position_model_labels(fig, axes.ravel(), max_offset_points=label_offset)
+    position_model_labels(fig, axes.ravel(), max_offset_points=18)
     fig.tight_layout(rect=[0, 0, 1, 0.90])
-    position_model_labels(fig, axes.ravel(), max_offset_points=label_offset)
+    position_model_labels(fig, axes.ravel(), max_offset_points=18)
     fig.savefig(output_path)
     print(f"Saved {output_path}")
     plt.close(fig)

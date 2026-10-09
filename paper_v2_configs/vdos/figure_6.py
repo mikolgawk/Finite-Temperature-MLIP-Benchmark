@@ -164,7 +164,6 @@ def plot_correlation_panel(
     threshold: float,
     max_labels: int,
     label_font_size: int,
-    correlation_at_top_right: bool = False,
 ) -> list[str]:
     sub = sub.copy()
     sub["x_value"] = sub[x_col].astype(float)
@@ -194,11 +193,9 @@ def plot_correlation_panel(
         if np.nanstd(x) > 0.0 and np.nanstd(y) > 0.0:
             r = np.corrcoef(x, y)[0, 1]
             ax.text(
-                0.98 if correlation_at_top_right else 0.02,
-                0.985 if correlation_at_top_right else 0.80,
+                0.98, 0.985,
                 f"r = {r:.2f}", transform=ax.transAxes,
-                va="top" if correlation_at_top_right else "bottom",
-                ha="right" if correlation_at_top_right else "left", fontsize=FONT_SIZE,
+                va="top", ha="right", fontsize=FONT_SIZE,
             )
     except Exception:
         pass
@@ -275,10 +272,10 @@ def render_figure(
     fig, axes = plt.subplots(
         len(Y_METRICS),
         3,
-        figsize=(figsize[0] * 1.3, figsize[1]) if exclude_hydrogen_force_rmse else figsize,
+        figsize=(figsize[0] * 1.3, figsize[1]),
         sharex="col",
         sharey="row",
-        gridspec_kw={"width_ratios": [1.5, 1, 1]} if exclude_hydrogen_force_rmse else None,
+        gridspec_kw={"width_ratios": [1.5, 1, 1]},
     )
     label_summary: dict[str, list[str]] = {}
 
@@ -324,16 +321,14 @@ def render_figure(
                 threshold=threshold,
                 max_labels=max_labels,
                 label_font_size=label_font_size,
-                correlation_at_top_right=exclude_hydrogen_force_rmse,
             )
 
     add_tier_legend(fig, tier_colors)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    label_offset = 18 if exclude_hydrogen_force_rmse else 3
-    position_model_labels(fig, axes.ravel(), max_offset_points=label_offset)
+    position_model_labels(fig, axes.ravel(), max_offset_points=18)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
-    position_model_labels(fig, axes.ravel(), max_offset_points=label_offset)
+    position_model_labels(fig, axes.ravel(), max_offset_points=18)
     plt.savefig(output_path)
     plt.show()
     plt.close(fig)
