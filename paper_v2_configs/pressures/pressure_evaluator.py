@@ -9,6 +9,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from md_success import torchsim_md_succeeded
+from system_filters import (
+    add_molecular_crystal_option,
+    include_system,
+    is_molecular_crystal,
+    filter_molecular_crystals,
+)
 
 
 _ARGS = None
@@ -59,6 +65,7 @@ def early_cli(script, backend: str, *, default_traj_dir: Path | None = None) -> 
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    add_molecular_crystal_option(parser)
     _ARGS = parser.parse_args()
     if _ARGS.max_frames is not None and _ARGS.max_frames < 1:
         parser.error("--max-frames must be positive")
@@ -167,7 +174,7 @@ def _frame_count(path: Path, limit: int | None) -> int:
     return min(count, limit) if limit is not None else count
 
 
-def _write_csv_records(path: Path, records, replace_systems: set[str]) -> None:
+def _write_csv_records(path: Path, records, replace_systems: set[str], include_molecular_crystals: bool = False) -> None:
     """Write records, replacing selected systems in an existing CSV when requested."""
     import pandas as pd
 
@@ -175,7 +182,7 @@ def _write_csv_records(path: Path, records, replace_systems: set[str]) -> None:
     if new.empty:
         return
     if replace_systems and path.exists():
-        old = pd.read_csv(path)
+        old = filter_molecular_crystals(pd.read_csv(path), include_molecular_crystals)
         if "system" not in old.columns or "system" not in new.columns:
             raise ValueError(f"cannot merge {path}: missing system column")
         old = old.loc[~old["system"].isin(replace_systems)]
@@ -206,6 +213,9 @@ def _run(model_name: str, predict, engine: str) -> None:
     paths = _trajectory_paths(args.traj_dir, trajectory_model)
     if _BACKEND == "torchsim":
         paths = [path for path in paths if torchsim_md_succeeded(path)]
+    paths = [path for path in paths if include_system(
+        path.parent.name, getattr(args, "include_molecular_crystals", False)
+    )]
     if not paths:
         raise SystemExit(
             f"No trajectories for {trajectory_model!r} found under {args.traj_dir}"
@@ -240,12 +250,13 @@ def _run(model_name: str, predict, engine: str) -> None:
     if (output.exists() and full_output.exists() and summary_output.exists()
             and not failure_output.exists() and not args.force
             and not requested_systems):
-        if _BACKEND != "torchsim" or set(pd.read_csv(summary_output)["system"]) <= {
-            path.parent.name for path in paths
-        }:
+        cached_systems = set(pd.read_csv(summary_output)["system"])
+        selected_systems = {path.parent.name for path in paths}
+        selected_crystals = {system for system in selected_systems if is_molecular_crystal(system)}
+        if cached_systems <= selected_systems and selected_crystals <= cached_systems:
             print(f"{output} exists; use --force to recompute.")
             return
-        print(f"{output} contains systems without completed MD; recomputing.")
+        print(f"{output} contains a different system selection; recomputing.")
 
     preserved_failures = []
     if requested_systems and failure_output.exists():
@@ -256,6 +267,7 @@ def _run(model_name: str, predict, engine: str) -> None:
             failure
             for failure in previous_failures
             if _failure_system(failure) not in requested_systems
+            and include_system(_failure_system(failure), getattr(args, "include_molecular_crystals", False))
         ]
 
     progress_enabled = not args.no_progress
@@ -370,12 +382,16 @@ def _run(model_name: str, predict, engine: str) -> None:
                 traceback.print_exc()
 
     if rows:
-        _write_csv_records(full_output, full_rows, requested_systems)
-        _write_csv_records(output, rows, requested_systems)
-        _write_csv_records(summary_output, summaries, requested_systems)
+        _write_csv_records(full_output, full_rows, requested_systems,
+                           getattr(args, "include_molecular_crystals", False))
+        _write_csv_records(output, rows, requested_systems,
+                           getattr(args, "include_molecular_crystals", False))
+        _write_csv_records(summary_output, summaries, requested_systems,
+                           getattr(args, "include_molecular_crystals", False))
         reference_dir = args.output_dir / "references"
         reference_dir.mkdir(exist_ok=True)
-        _write_csv_records(reference_output, reference_rows, requested_systems)
+        _write_csv_records(reference_output, reference_rows, requested_systems,
+                           getattr(args, "include_molecular_crystals", False))
     reported_failures = [*preserved_failures, *failures]
     if reported_failures:
         failure_output.write_text(json.dumps(reported_failures, indent=2) + "\n")

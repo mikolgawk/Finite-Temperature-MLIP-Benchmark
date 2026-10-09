@@ -34,6 +34,8 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent))
+from system_filters import add_molecular_crystal_option, excluded_system_types
 DATA_DIR = SCRIPT_DIR.parent / "data"
 
 RDF_SCRIPT = SCRIPT_DIR / "get-rdf-and-results-by-system-type-same-simulation-length.py"
@@ -131,7 +133,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="print the commands without running them",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
+    args.excluded_system_types = excluded_system_types(args)
 
     if args.plots_only and args.compute_only:
         parser.error("--plots-only and --compute-only cannot be used together")
@@ -168,6 +172,8 @@ def computation_command(args: argparse.Namespace, sources: list[str]) -> list[st
         command.extend(("--system", system))
     for model in args.models or ():
         command.extend(("--model", model))
+    if args.include_molecular_crystals:
+        command.append("--include-molecular-crystals")
     for system_type in args.excluded_system_types or ():
         command.extend(("--exclude-system-type", system_type))
     return command
@@ -247,7 +253,7 @@ def main() -> None:
                 figure_3_command(
                     source_results,
                     source_plots / "plot_rdf_panel_combined.pdf",
-                ),
+                ) + (["--include-molecular-crystals"] if args.include_molecular_crystals else []),
                 dry_run=args.dry_run,
             )
 
@@ -269,7 +275,7 @@ def main() -> None:
                     source_results,
                     timings_dir,
                     source_plots / "plot_SI_pareto_rdf_time_same_length.pdf",
-                ),
+                ) + (["--include-molecular-crystals"] if args.include_molecular_crystals else []),
                 dry_run=args.dry_run,
             )
 

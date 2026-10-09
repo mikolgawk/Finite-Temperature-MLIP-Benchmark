@@ -33,6 +33,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from md_success import torchsim_md_succeeded
+from system_filters import (
+    DEFAULT_EXCLUDED_SYSTEM_TYPES,
+    add_molecular_crystal_option,
+    excluded_system_types,
+)
 
 import h5py
 import numpy as np
@@ -316,7 +321,12 @@ def spectrum_for_samples(
     return spectrum
 
 
-def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system_types: set[str] | None = None) -> None:
+def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES)) -> None:
+    if excluded_system_types:
+        excluded = {value.strip().lower() for value in excluded_system_types}
+        pair_df = pair_df.loc[
+            ~pair_df["system_type"].fillna("").str.lower().isin(excluded)
+        ].copy()
     pair_df = pair_df.sort_values(["model", "system"]).reset_index(drop=True)
     pair_df.to_csv(results_dir / PAIR_OUTPUT, index=False)
 
@@ -394,7 +404,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--overwrite", action="store_true", help="recompute existing spectra")
     parser.add_argument("--dry-run", action="store_true", help="show discovered inputs only")
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
+    args.excluded_system_types = excluded_system_types(args)
     if args.e_min is not None and args.e_max is not None and args.e_min >= args.e_max:
         parser.error("--e-min must be smaller than --e-max")
     if args.pad_factor < 1:

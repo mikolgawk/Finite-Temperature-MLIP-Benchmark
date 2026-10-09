@@ -7,6 +7,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from md_success import torchsim_md_succeeded
+from system_filters import (
+    DEFAULT_EXCLUDED_SYSTEM_TYPES,
+    add_molecular_crystal_option,
+    excluded_system_types,
+)
 from metric_sources import SOURCES
 
 
@@ -103,7 +108,7 @@ def csv_source(csv_file: Path) -> str:
 def load_all_data(
     data_dir: Path,
     models: set[str] | None = None,
-    excluded_system_types: set[str] | None = None,
+    excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
     md_data_dir: Path | None = None,
     sources: set[str] | None = None,
 ) -> pd.DataFrame:
@@ -178,7 +183,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--source', action='append', choices=SOURCES, dest='sources')
     parser.add_argument('--data-dir', type=Path, default=DATA_DIR)
     parser.add_argument('--results-dir', type=Path, default=RESULTS_DIR)
-    return parser.parse_args()
+    add_molecular_crystal_option(parser)
+    args = parser.parse_args()
+    args.excluded_system_types = excluded_system_types(args)
+    return args
 
 
 def write_source_results(all_data: pd.DataFrame, results_dir: Path, excluded_system_types: set[str]) -> None:

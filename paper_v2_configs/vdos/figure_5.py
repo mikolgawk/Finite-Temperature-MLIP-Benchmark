@@ -36,6 +36,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, filter_molecular_crystals
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -705,7 +706,7 @@ def draw_overall_vdos_error_plot(
         print(f"VDOS Error medians [%] -> {format_tier_median_summary(tier_medians)}")
 
 
-def load_normalized_pairs(path: Path) -> pd.DataFrame:
+def load_normalized_pairs(path: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
     if not path.is_file():
         raise FileNotFoundError(f"VDOS pair table not found: {path}")
     df = pd.read_csv(path)
@@ -765,7 +766,7 @@ def load_normalized_pairs(path: Path) -> pd.DataFrame:
         out["system_type"] = out["system_type"].where(
             out["system_type"].isin(SYSTEM_TYPES), inferred_types
         )
-    return out
+    return filter_molecular_crystals(out, include_molecular_crystals)
 
 
 def plot_combined(
@@ -1047,6 +1048,7 @@ def main() -> None:
         default=SCRIPT_DIR / "plots" / "plot_vdos_panel_combined.pdf",
         help="Output plot file path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     source_results = SCRIPT_DIR / "results" / args.source
@@ -1056,7 +1058,7 @@ def main() -> None:
     model_means_path = args.model_mean_file or (
         source_results / "vdos_model_mean_ev_normalized_same_simulation_length.csv"
     )
-    normalized_pairs = load_normalized_pairs(normalized_pairs_path)
+    normalized_pairs = load_normalized_pairs(normalized_pairs_path, include_molecular_crystals=args.include_molecular_crystals)
     model_means = load_model_means(model_means_path)
 
     plot_combined(normalized_pairs, model_means, args.output_file)

@@ -14,6 +14,12 @@ EXCLUDED_MODELS = {"pet-mad"}
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 from metric_sources import SOURCES, SOURCE_DATASETS, pressure_input_dir
+from system_filters import (
+    DEFAULT_EXCLUDED_SYSTEM_TYPES,
+    add_molecular_crystal_option,
+    excluded_system_types,
+    filter_molecular_crystals,
+)
 
 DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results"
 DEFAULT_OUTPUT_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
@@ -171,7 +177,7 @@ def resolve_model_reference_pressure_file(
     raise FileNotFoundError(f"No model-matched reference pressure CSV for {model_file.name}: {matched}")
 
 
-def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = False) -> pd.DataFrame:
+def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = False, include_molecular_crystals: bool = False) -> pd.DataFrame:
     header = pd.read_csv(csv_path, nrows=0)
     pcol = pressure_column_name(list(header.columns))
 
@@ -186,6 +192,7 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = Fa
 
     df["system"] = df["trajectory_file"].apply(structure_from_trajectory_file)
     df["system_type"] = df["system"].map(infer_system_type)
+    df = filter_molecular_crystals(df, include_molecular_crystals)
 
     if deduplicate_reference:
         if "frame_index" in df.columns:
@@ -271,11 +278,13 @@ def build_pair_rows(
     model_file_suffix: str,
     bins: int,
     models: set[str] | None = None,
+    excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
 ) -> pd.DataFrame:
+    include_crystals = "molecular crystals" not in (excluded_system_types or ())
     fallback_ref_df = None
     if reference_file is not None and reference_file.is_file():
         fallback_ref_df = load_pressure_per_frame_csv(
-            reference_file, deduplicate_reference=True
+            reference_file, deduplicate_reference=True, include_molecular_crystals=include_crystals
         )
         if fallback_ref_df.empty:
             raise RuntimeError(f"No usable reference rows in {reference_file}")
@@ -322,7 +331,7 @@ def build_pair_rows(
             backend = mode = ""
 
         try:
-            model_df = load_pressure_per_frame_csv(model_file, deduplicate_reference=False)
+            model_df = load_pressure_per_frame_csv(model_file, deduplicate_reference=False, include_molecular_crystals=include_crystals)
         except Exception as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
             continue
@@ -337,7 +346,7 @@ def build_pair_rows(
         )
         if matched_reference.is_file():
             model_ref_df = load_pressure_per_frame_csv(
-                matched_reference, deduplicate_reference=True
+                matched_reference, deduplicate_reference=True, include_molecular_crystals=include_crystals
             )
             reference_used = matched_reference
         elif fallback_ref_df is not None:
@@ -356,6 +365,8 @@ def build_pair_rows(
             continue
 
         for system in common_systems:
+            if infer_system_type(system) in (excluded_system_types or ()):
+                continue
             ref_vals = model_ref_df.loc[model_ref_df["system"] == system, "pressure_GPa"].to_numpy(dtype=float)
             mlip_vals = model_df.loc[model_df["system"] == system, "pressure_GPa"].to_numpy(dtype=float)
             score = pressure_histogram_similarity(ref_vals, mlip_vals, bins=bins)
@@ -489,7 +500,7 @@ def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataF
 def build_pressure_mae_from_trajectory_summaries(
     pressures_dir: Path,
     models: set[str] | None = None,
-    excluded_system_types: set[str] | None = None,
+    excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
 ) -> pd.DataFrame | None:
     """Aggregate evaluator-produced trajectory mean errors into model MAE."""
     normalized_models = (
@@ -550,7 +561,7 @@ def ensure_pressure_comparison_file(
     pressures_dir: Path,
     pressure_comparison_file: Path | None,
     models: set[str] | None = None,
-    excluded_system_types: set[str] | None = None,
+    excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
     output_dir: Path | None = None,
 ) -> Path | None:
     """Create the model pressure-MAE CSV from evaluator summaries when needed."""
@@ -671,9 +682,11 @@ def compute_pressure_metric(
     model_system_type_mean_output_file: Path,
     pressure_comparison_file: Path | None,
     models: set[str] | None = None,
-    excluded_system_types: set[str] | None = None,
+    excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES),
     source: str | None = None,
 ) -> pd.DataFrame:
+    if excluded_system_types is None:
+        excluded_system_types = set(DEFAULT_EXCLUDED_SYSTEM_TYPES)
     if bins < 2:
         raise ValueError("--bins must be >= 2")
     if not pressures_dir.is_dir():
@@ -684,6 +697,7 @@ def compute_pressure_metric(
         model_file_suffix=model_file_suffix,
         bins=bins,
         models=models,
+        excluded_system_types=excluded_system_types,
     )
     if source is not None:
         pair_df = add_failed_system_penalties(
@@ -825,7 +839,9 @@ def main() -> None:
     parser.add_argument('--source', action='append', choices=SOURCES, dest='sources')
     parser.add_argument('--results-dir', type=Path, default=DEFAULT_PRESSURES_DIR,
                         help='Output root; each source gets its own subdirectory.')
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
+    args.excluded_system_types = excluded_system_types(args)
 
     inputs = args.pressures_dir.resolve()
     selected = args.sources or [source for source in SOURCES

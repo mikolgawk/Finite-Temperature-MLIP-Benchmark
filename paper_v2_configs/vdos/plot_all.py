@@ -22,6 +22,8 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from system_filters import add_molecular_crystal_option
 CONFIG_DIR = HERE.parent
 SOURCES = (
     "mlip-trajs-ase",
@@ -45,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--f1-file", type=Path, default=CONFIG_DIR / "data/matbench-scores/f1-scores.csv")
     parser.add_argument("--ksrme-file", type=Path, default=CONFIG_DIR / "data/matbench-scores/ksrme-scores.csv")
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
+    add_molecular_crystal_option(parser)
     return parser.parse_args()
 
 
@@ -110,6 +113,8 @@ def main() -> None:
             ),
         ]
         for label, command in stages:
+            if args.include_molecular_crystals and Path(command[2]).name in {'figure_5.py', 'figure_SI_16.py'}:
+                command.append("--include-molecular-crystals")
             if not run_stage(f"{label} ({source})", command, args.dry_run):
                 failures.append(f"{label} ({source})")
 

@@ -26,6 +26,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 
 try:
@@ -149,13 +150,15 @@ DEFAULT_RDF_SCORES_FILE = SCRIPT_DIR / "results" / "rdf_similarity_scores_same_s
 DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_SI_pareto_rdf_time_same_length.pdf"
 
 
-def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
+def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
     """Load valid timing CSVs and return mean MD step time for each model."""
     if not timings_dir.is_dir():
         raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 
     model_timings: dict[str, list[float]] = {}
     for csv_path in sorted(timings_dir.glob("*/md_timing_*.csv")):
+        if not include_system(csv_path.parent.name, include_molecular_crystals):
+            continue
         model = metric_model_key(csv_path.stem.removeprefix("md_timing_"))
         try:
             timing = pd.read_csv(csv_path)
@@ -183,8 +186,8 @@ def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def load_and_merge(timings_dir: Path, rdf_file: Path) -> pd.DataFrame:
-    timings_df = load_model_avg_timings(timings_dir)
+def load_and_merge(timings_dir: Path, rdf_file: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
+    timings_df = load_model_avg_timings(timings_dir, include_molecular_crystals)
     rdf_df = pd.read_csv(rdf_file)
 
     rdf_needed = {"Calculator"}
@@ -414,9 +417,10 @@ def main() -> None:
         default=str(DEFAULT_OUTPUT_FILE),
         help="Output plot path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
-    merged = load_and_merge(Path(args.timings_dir), Path(args.rdf_scores_file))
+    merged = load_and_merge(Path(args.timings_dir), Path(args.rdf_scores_file), args.include_molecular_crystals)
     plot_pareto(merged, Path(args.output_file))
 
 

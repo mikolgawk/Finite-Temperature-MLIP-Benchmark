@@ -30,6 +30,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -590,44 +591,31 @@ def plot_combined(
     mlip_base: str,
     rdf_dir: str,
     output: str,
+    include_molecular_crystals: bool = False,
 ) -> None:
     overall_df = load_overall_scores(overall_rdf_file)
     tier_count = len(TIER_DEFS)
 
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * 4.45))
+    system_groups = [(kind, systems) for kind, systems in SYSTEMS.items()
+                     if include_system(kind, include_molecular_crystals)]
+    n_panel_rows = int(np.ceil(len(system_groups) / 3))
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.0 + 1.15 * n_panel_rows)))
     outer_gs = gridspec.GridSpec(
-        5,
+        2 + n_panel_rows,
         6,
         figure=fig,
         wspace=0.30,
         hspace=0.48,
-        height_ratios=[0.78, 0.22, 1.15, 1.15, 1.15],
+        height_ratios=[0.78, 0.22] + [1.15] * n_panel_rows,
     )
     panel_labels = ["(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)"]
 
-    top_row_spans = [(0, 2), (2, 4), (4, 6)]
-    second_row_spans = [(0, 2), (2, 4), (4, 6)]
-    third_row_spans = [(2, 4)]
-
-    for idx, (system_type, system_list) in enumerate(SYSTEMS.items()):
-        if idx < 3:
-            panel_row_idx = 2
-            panel_col_idx = idx
-            panels_in_row = len(top_row_spans)
-            start_col, end_col = top_row_spans[idx]
-        elif idx < 6:
-            panel_row_idx = 3
-            panel_col_idx = idx - 3
-            panels_in_row = len(second_row_spans)
-            start_col, end_col = second_row_spans[panel_col_idx]
-        else:
-            panel_row_idx = 4
-            panel_col_idx = idx - 6
-            panels_in_row = len(third_row_spans)
-            if panel_col_idx >= panels_in_row:
-                warnings.warn(f"No subplot slot configured for {system_type}; skipping")
-                continue
-            start_col, end_col = third_row_spans[panel_col_idx]
+    for idx, (system_type, system_list) in enumerate(system_groups):
+        panel_row_idx = 2 + idx // 3
+        panel_col_idx = idx % 3
+        panels_in_row = min(3, len(system_groups) - (idx // 3) * 3)
+        start_col = 3 - panels_in_row + panel_col_idx * 2
+        end_col = start_col + 2
 
         system = select_system_with_worst_mean_rdf_error(system_list, rdf_csv_dir, rdf_dir)
         system_display_name = format_system_name(system)
@@ -793,6 +781,7 @@ def main() -> None:
         default=str(DEFAULT_OUTPUT_FILE),
         help="Output plot file path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     plot_combined(
@@ -802,6 +791,7 @@ def main() -> None:
         mlip_base=args.mlip_base,
         rdf_dir=args.rdf_save_dir,
         output=args.output_file,
+        include_molecular_crystals=args.include_molecular_crystals,
     )
 
 

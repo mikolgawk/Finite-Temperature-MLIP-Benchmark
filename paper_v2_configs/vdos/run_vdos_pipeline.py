@@ -32,6 +32,8 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent))
+from system_filters import add_molecular_crystal_option, excluded_system_types
 DATA_DIR = SCRIPT_DIR.parent / "data"
 COMPUTE_SCRIPT = SCRIPT_DIR / "get_normalized_VDOS.py"
 PLOT_SCRIPT = SCRIPT_DIR / "plot_vdos_results.py"
@@ -80,7 +82,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plots-only", action="store_true", help="skip VDOS computation")
     parser.add_argument("--compute-only", action="store_true", help="skip plot creation")
     parser.add_argument("--dry-run", action="store_true", help="print commands without running them")
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
+    args.excluded_system_types = excluded_system_types(args)
     if args.plots_only and args.compute_only:
         parser.error("--plots-only and --compute-only cannot be used together")
     if args.e_min is not None and args.e_max is not None and args.e_min >= args.e_max:
@@ -125,6 +129,8 @@ def computation_command(args: argparse.Namespace, sources: list[str]) -> list[st
         command.extend(("--system", system))
     for model in args.models or ():
         command.extend(("--model", model))
+    if args.include_molecular_crystals:
+        command.append("--include-molecular-crystals")
     for system_type in args.excluded_system_types or ():
         command.extend(("--exclude-system-type", system_type))
     if args.metadata is not None:

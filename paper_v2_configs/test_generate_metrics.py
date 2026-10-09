@@ -28,6 +28,11 @@ class GenerateMetricsTests(unittest.TestCase):
             exclusion = stage.command.index("--exclude-system-type")
             self.assertEqual(stage.command[exclusion + 1], "molecular crystals")
 
+    def test_molecular_crystal_opt_in_reaches_every_stage(self) -> None:
+        for stage in generate_metrics.metric_stages(include_molecular_crystals=True):
+            self.assertIn("--include-molecular-crystals", stage.command)
+            self.assertNotIn("--exclude-system-type", stage.command)
+
 
 if __name__ == "__main__":
     unittest.main()

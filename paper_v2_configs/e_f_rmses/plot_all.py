@@ -23,6 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from metric_sources import SOURCES
+from system_filters import add_molecular_crystal_option
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--source', choices=SOURCES, action='append', dest='sources')
     parser.add_argument('--results-dir', type=Path, default=HERE / 'results')
     parser.add_argument('--plots-dir', type=Path, default=HERE / 'plots')
+    add_molecular_crystal_option(parser)
     return parser.parse_args()
 
 
@@ -54,6 +56,8 @@ def main() -> None:
         for label, script in stages:
             command = [sys.executable, "-u", str(script), '--source', source,
                        '--results-dir', str(args.results_dir.resolve()), '--plots-dir', str(args.plots_dir.resolve())]
+            if args.include_molecular_crystals:
+                command.append("--include-molecular-crystals")
             print(f"\n=== {label} ===", flush=True)
             print(f"$ {shlex.join(command)}", flush=True)
             if args.dry_run:

@@ -27,6 +27,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 
 FONT_SIZE = 6
@@ -124,10 +125,12 @@ def detect_model_column(pressure_df: pd.DataFrame) -> str:
     raise ValueError("Could not find model column in pressure scores file (expected mlip_model/model/calculator).")
 
 
-def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
+def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
     """Compute mean ms/step per model from valid per-system timing CSVs."""
     model_timings: dict[str, list[float]] = {}
     for csv_path in sorted(timings_dir.glob("*/md_timing_*.csv")):
+        if not include_system(csv_path.parent.name, include_molecular_crystals):
+            continue
         if csv_path.stat().st_size == 0:
             continue  # Empty files mark failed or interrupted runs.
         model_name = csv_path.stem.removeprefix("md_timing_")
@@ -154,9 +157,10 @@ def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
 
 
 def load_and_merge(
-    timings_dir: Path, pressure_file: Path, dataset_label: str | None = None
+    timings_dir: Path, pressure_file: Path, dataset_label: str | None = None,
+    include_molecular_crystals: bool = False
 ) -> tuple[pd.DataFrame, str]:
-    timings_df = load_model_avg_timings(timings_dir)
+    timings_df = load_model_avg_timings(timings_dir, include_molecular_crystals)
     if timings_df.empty:
         raise ValueError(f"No valid timing records found in {timings_dir}")
     pressure_df = pd.read_csv(pressure_file)
@@ -342,6 +346,7 @@ def main() -> None:
         default=str(DEFAULT_OUTPUT_FILE),
         help="Output plot path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     timings_dirs = args.timings_dir or [str(DEFAULT_TIMINGS_DIR)]
@@ -357,7 +362,8 @@ def main() -> None:
     for index, (timings_dir, pressure_file) in enumerate(zip(timings_dirs, pressure_files)):
         label = labels[index] if labels else Path(timings_dir).name
         merged, y_axis_label = load_and_merge(
-            Path(timings_dir), Path(pressure_file), dataset_label=label
+            Path(timings_dir), Path(pressure_file), dataset_label=label,
+            include_molecular_crystals=args.include_molecular_crystals
         )
         merged_frames.append(merged)
         y_axis_labels.append(y_axis_label)

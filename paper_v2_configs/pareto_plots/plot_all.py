@@ -24,6 +24,8 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from system_filters import add_molecular_crystal_option
 CONFIG_DIR = HERE.parent
 SOURCES = (
     "mlip-trajs-ase",
@@ -44,6 +46,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
+    add_molecular_crystal_option(parser)
     return parser.parse_args()
 
 
@@ -114,6 +117,10 @@ def main() -> None:
         )
     failures: list[str] = []
     for label, command in global_stages:
+        if args.include_molecular_crystals and Path(command[2]).name in {
+            "plot-model-timings.py", "plot-model-timings-vs-system-size.py", "figure_7.py", "figure_SI_13.py",
+        }:
+            command.append("--include-molecular-crystals")
         if not run_stage(label, command, args.dry_run):
             failures.append(label)
 
@@ -164,6 +171,10 @@ def main() -> None:
             ),
         ]
         for label, command in stages:
+            if args.include_molecular_crystals and Path(command[2]).name in {
+                "plot-model-timings.py", "plot-model-timings-vs-system-size.py", "figure_7.py", "figure_SI_13.py",
+            }:
+                command.append("--include-molecular-crystals")
             if not run_stage(f"{label} ({source})", command, args.dry_run):
                 failures.append(f"{label} ({source})")
 

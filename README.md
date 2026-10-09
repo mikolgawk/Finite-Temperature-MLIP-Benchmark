@@ -43,6 +43,13 @@ Then generate all four metric sets with the `uv` script:
 uv run --script paper_v2_configs/generate_metrics.py
 ```
 
+V2 metric computations, raw energy/force and pressure evaluations, and timing
+analysis exclude the five molecular crystals by default: anthracene,
+naphthalene, pentacene, picene, and tetracene. Pass
+`--include-molecular-crystals` to the relevant analysis command to include them.
+Standalone RDF and VDOS commands use the same default. The remaining workload
+contains 14 systems before any metric-specific exclusions or failed MD runs.
+
 To generate all four metric sets for only one model, pass its exact model name
 (the part after `nvt_` in its trajectory filenames):
 

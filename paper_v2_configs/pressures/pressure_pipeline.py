@@ -18,6 +18,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent / "data"
@@ -186,6 +187,9 @@ def run_pipeline(args):
     reference_csv = read_reference_csv(args.reference_file, metadata, args.reference_first_step) if args.reference_file else None
     roots = args.traj_dir or [DATA / "mlip-trajs-torchsim-eager-stress", DATA / "mlip-trajs-torchsim-accelerated-stress", DATA / "mlip-trajs-ase-accelerated-stress"]
     paths = sorted({p.resolve() for root in roots for p in root.rglob(f"{args.prefix or 'nvt_'}*") if p.suffix in {".h5", ".hdf5", ".extxyz", ".xyz"}})
+    paths = [path for path in paths if include_system(
+        path.parent.name, getattr(args, "include_molecular_crystals", False)
+    )]
     if args.model:
         paths = [p for p in paths if p.stem.removeprefix("nvt_").lower() == args.model.lower()]
     if not paths:
@@ -278,6 +282,7 @@ def main(argv=None):
     parser.add_argument("--bins", type=int, default=80)
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--include-interfaces", action="store_true")
+    add_molecular_crystal_option(parser)
     args = parser.parse_args(argv)
     if args.bins < 2: parser.error("--bins must be >= 2")
     run_pipeline(args)

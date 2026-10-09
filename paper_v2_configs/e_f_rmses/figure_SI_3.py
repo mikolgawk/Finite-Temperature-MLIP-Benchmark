@@ -41,7 +41,7 @@ def normalize_calculator_name(name):
     return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 BASE_DIR = Path(__file__).resolve().parent
-from _plot_inputs import plot_args
+from _plot_inputs import plot_args, read_metric_csv
 RESULTS_DIR, PLOTS_DIR = plot_args()
 INPUT_CSV = RESULTS_DIR / 'mean_metrics_by_system_type_and_model.csv'
 OUTPUT_PDF = PLOTS_DIR / 'plot_SI_force_rmse_by_system_type.pdf'
@@ -108,7 +108,7 @@ def main() -> None:
     if not INPUT_CSV.exists():
         raise FileNotFoundError(f'Missing input CSV: {INPUT_CSV}')
 
-    df = pd.read_csv(INPUT_CSV)
+    df = read_metric_csv(INPUT_CSV)
 
     required_columns = {'system_type', 'calculator', 'force_rmse'}
     missing = required_columns - set(df.columns)

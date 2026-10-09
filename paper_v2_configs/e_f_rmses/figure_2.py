@@ -46,9 +46,9 @@ def normalize_calculator_name(name):
     return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 # Read and aggregate data from per-model RMSE CSV files
-from _plot_inputs import plot_args
+from _plot_inputs import plot_args, read_metric_csv
 results_dir, plots_dir = plot_args()
-all_data = pd.read_csv(results_dir / 'rmse_per_system.csv')
+all_data = read_metric_csv(results_dir / 'rmse_per_system.csv')
 all_data['calculator'] = all_data['calculator'].map(normalize_calculator_name)
 
 df = (

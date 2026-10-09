@@ -118,6 +118,40 @@ class RmseResumeTests(unittest.TestCase):
                 self.assertEqual(self.run_backend(fixture), [])
                 self.assertEqual(fixture.output.read_bytes(), saved)
 
+    def test_both_backends_skip_crystals_unless_included(self):
+        for backend in self.backends:
+            with self.subTest(backend=backend.__name__), self.fixture(backend) as fixture:
+                crystal = 'naphthalene_295K_Sharma_S'
+                fixture.paths[0].parent.rename(fixture.args.ref_dir / crystal)
+                md = fixture.args.md_dir / crystal
+                (fixture.args.md_dir / fixture.names[0]).rename(md)
+                (md / 'md_timing_test-model.csv').write_text(
+                    f'calculator,system,n_steps\ntest-model,{crystal},100\n'
+                )
+                calls = self.run_backend(fixture)
+                self.assertEqual(len(calls), 4)
+                self.assertNotIn('naphthalene', {row['system'] for row in self.rows(fixture)})
+
+                fixture.args.include_molecular_crystals = True
+                calls = self.run_backend(fixture)
+                self.assertEqual(len(calls), 2)
+                self.assertIn('naphthalene', {row['system'] for row in self.rows(fixture)})
+
+    def test_cached_crystal_results_and_failures_do_not_enter_default_runs(self):
+        for backend in self.backends:
+            with self.subTest(backend=backend.__name__), self.fixture(backend) as fixture:
+                fixture.args.output_dir.mkdir()
+                crystal = fixture.args.ref_dir / 'naphthalene_295K_Sharma_S/traj.extxyz'
+                with fixture.output.open('w', newline='') as handle:
+                    writer = csv.DictWriter(handle, fieldnames=['system', 'trajectory'])
+                    writer.writeheader()
+                    writer.writerow(dict(system='naphthalene', trajectory=str(crystal)))
+                fixture.failures.write_text(json.dumps([{'file': str(crystal), 'error': 'old failure'}]))
+                calls = self.run_backend(fixture)
+                self.assertEqual(len(calls), 6)
+                self.assertEqual(len(self.rows(fixture)), 3)
+                self.assertFalse(fixture.failures.exists())
+
     def test_retry_failure_keeps_completed_and_previous_partial_results(self):
         for backend in self.backends:
             with self.subTest(backend=backend.__name__), self.fixture(backend) as fixture:
@@ -288,7 +322,7 @@ class TorchSimIsolatedAtomTests(unittest.TestCase):
             args = SimpleNamespace(ref_dir=root / 'ref-trajs', output_dir=root / 'results',
                                    md_dir=root / 'md', isolated_atom_dir=root / 'Hydrogen_E0',
                                    raw_energies=False, max_frames=None, force=False,
-                                   no_progress=True, debug=False)
+                                   no_progress=True, debug=False, include_molecular_crystals=True)
             args.isolated_atom_dir.mkdir()
             crystal = args.ref_dir / 'naphthalene_295K_Sharma_S'
             crystal.mkdir(parents=True)

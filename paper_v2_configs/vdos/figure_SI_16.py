@@ -32,6 +32,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 try:
     from adjustText import adjust_text
@@ -174,12 +175,12 @@ def source_input_paths(source: str) -> tuple[Path, Path]:
     )
 
 
-def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
+def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
     """Return mean MD step time for every model with valid timing CSVs."""
     if not timings_dir.is_dir():
         raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
     model_timings: dict[str, list[float]] = {}
-    all_systems = [d for d in timings_dir.iterdir() if d.is_dir()]
+    all_systems = [d for d in timings_dir.iterdir() if d.is_dir() and include_system(d.name, include_molecular_crystals)]
     for system_dir in sorted(all_systems):
         for csv_path in sorted(system_dir.glob("md_timing_*.csv")):
             model_name = normalize_model_name(csv_path.stem.removeprefix("md_timing_"))
@@ -224,8 +225,8 @@ def _metric_as_percent(series: pd.Series, column: str) -> pd.Series:
     return _as_percent(values)
 
 
-def load_and_merge(timings_dir: Path, vdos_file: Path) -> pd.DataFrame:
-    timings_df = load_model_avg_timings(timings_dir)
+def load_and_merge(timings_dir: Path, vdos_file: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
+    timings_df = load_model_avg_timings(timings_dir, include_molecular_crystals)
     if not vdos_file.is_file():
         raise FileNotFoundError(f"VDOS model summary file not found: {vdos_file}")
     vdos_df = pd.read_csv(vdos_file)
@@ -495,12 +496,14 @@ def main() -> None:
         default=DEFAULT_OUTPUT_FILE,
         help="Output plot path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     default_timings, default_vdos = source_input_paths(args.source)
     merged = load_and_merge(
         args.timings_dir or default_timings,
         args.vdos_scores_file or default_vdos,
+        args.include_molecular_crystals,
     )
     plot_pareto(merged, args.output_file)
 

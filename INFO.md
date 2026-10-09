@@ -563,6 +563,19 @@ stages.
 
 ## Analysis pipeline
 
+V2 metric calculations, raw RMSE and pressure evaluations, and timing/Pareto
+analysis exclude anthracene, naphthalene, pentacene, picene, and tetracene by
+default. This also applies when running the individual analysis scripts.
+Use `--include-molecular-crystals` to opt in, for example:
+
+```bash
+uv run --script paper_v2_configs/generate_metrics.py --include-molecular-crystals
+uv run --script paper_v2_configs/rdfs/run_rdf_pipeline.py --include-molecular-crystals
+```
+
+Explicit `--exclude-system-type` arguments still apply when opting in.
+Regenerate the relevant metrics and plots to refresh previously saved reports.
+
 The V2 analysis stages consume reference, baseline, or accelerated trajectories:
 
 ```text

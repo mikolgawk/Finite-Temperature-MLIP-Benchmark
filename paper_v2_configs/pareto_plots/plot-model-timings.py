@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Plot eager and accelerated TorchSim MD timings in separate figures.
 
-Each ``md_timing_<model>.csv`` in either timing directory contributes one
+Each selected ``md_timing_<model>.csv`` in either timing directory contributes one
 observation: its recorded ``seconds_per_step`` converted to milliseconds.
+The five molecular crystals are excluded unless explicitly included.
 Invalid rows are skipped with a warning, including rows whose calculator does
 not match the filename or whose elapsed time is inconsistent with
 ``n_steps * seconds_per_step``.
@@ -25,6 +26,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -65,7 +67,7 @@ def display_name(model: str) -> str:
 
 
 def read_timing_files(
-	timings_dir: Path, timing_mode: str = "Standard"
+	timings_dir: Path, timing_mode: str = "Standard", *, include_molecular_crystals: bool = False
 ) -> tuple[pd.DataFrame, list[str]]:
 	"""Load and validate one timing observation from every timing CSV."""
 	if not timings_dir.is_dir():
@@ -79,6 +81,8 @@ def read_timing_files(
 	skipped: list[str] = []
 
 	for csv_path in paths:
+		if not include_system(csv_path.parent.name, include_molecular_crystals):
+			continue
 		try:
 			df = pd.read_csv(csv_path)
 		except Exception as exc:
@@ -341,16 +345,17 @@ def parse_args() -> argparse.Namespace:
 	)
 	parser.add_argument("--summary-csv", type=Path, default=DEFAULT_SUMMARY_CSV)
 	parser.add_argument("--observations-csv", type=Path, default=DEFAULT_OBSERVATIONS_CSV)
+	add_molecular_crystal_option(parser)
 	return parser.parse_args()
 
 
 def main() -> None:
 	args = parse_args()
 	standard_observations, standard_skipped = read_timing_files(
-		args.timings_dir, timing_mode="Standard"
+		args.timings_dir, timing_mode="Standard", include_molecular_crystals=args.include_molecular_crystals
 	)
 	accelerated_observations, accelerated_skipped = read_timing_files(
-		args.accelerated_timings_dir, timing_mode="Accelerated"
+		args.accelerated_timings_dir, timing_mode="Accelerated", include_molecular_crystals=args.include_molecular_crystals
 	)
 	accelerated_observations = select_accelerated_timings(accelerated_observations)
 	observations = pd.concat(

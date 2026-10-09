@@ -37,9 +37,9 @@ from pathlib import Path
 
 
 from metric_sources import SOURCES
+from system_filters import DEFAULT_EXCLUDED_SYSTEM_TYPES, add_molecular_crystal_option
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_EXCLUDED_SYSTEM_TYPES = ("molecular crystals",)
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,11 @@ class MetricStage:
     working_directory: Path
 
 
-def metric_stages(models: tuple[str, ...] = (), sources: tuple[str, ...] = ()) -> tuple[MetricStage, ...]:
+def metric_stages(
+    models: tuple[str, ...] = (),
+    sources: tuple[str, ...] = (),
+    include_molecular_crystals: bool = False,
+) -> tuple[MetricStage, ...]:
     """Return the metric stages in the order required by the Pareto plots."""
     energy_force_dir = SCRIPT_DIR / "e_f_rmses"
     pressure_dir = SCRIPT_DIR / "pressures"
@@ -61,9 +65,14 @@ def metric_stages(models: tuple[str, ...] = (), sources: tuple[str, ...] = ()) -
     source_args = tuple(arg for source in sources for arg in ("--source", source))
     exclusion_args = tuple(
         arg
-        for system_type in DEFAULT_EXCLUDED_SYSTEM_TYPES
+        for system_type in (
+            () if include_molecular_crystals else DEFAULT_EXCLUDED_SYSTEM_TYPES
+        )
         for arg in ("--exclude-system-type", system_type)
     )
+
+    if include_molecular_crystals:
+        exclusion_args = ("--include-molecular-crystals",)
 
     return (
         MetricStage(
@@ -145,6 +154,7 @@ def parse_args() -> argparse.Namespace:
         help="print the selected commands without running them",
     )
     parser.add_argument("--source", action="append", choices=SOURCES, dest="sources")
+    add_molecular_crystal_option(parser)
     return parser.parse_args()
 
 
@@ -168,7 +178,11 @@ def main() -> None:
     selected = set(args.metrics) if args.metrics else None
     stages = [
         stage
-        for stage in metric_stages(tuple(dict.fromkeys(args.models or ())), tuple(dict.fromkeys(args.sources or ())))
+        for stage in metric_stages(
+            tuple(dict.fromkeys(args.models or ())),
+            tuple(dict.fromkeys(args.sources or ())),
+            args.include_molecular_crystals,
+        )
         if selected is None or stage.name in selected
     ]
 

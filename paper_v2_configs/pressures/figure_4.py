@@ -31,6 +31,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, filter_molecular_crystals
 
 
 FONT_SIZE = 10
@@ -130,7 +131,7 @@ def pressure_column_name(columns: Iterable[str]) -> str:
     raise ValueError("No pressure column found. Expected one of: pressure_GPa, pressure_ref_GPa")
 
 
-def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = False) -> pd.DataFrame:
+def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = False, include_molecular_crystals: bool = False) -> pd.DataFrame:
     header = pd.read_csv(csv_path, nrows=0)
     pcol = pressure_column_name(header.columns)
 
@@ -153,7 +154,7 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = Fa
         else:
             df = df.drop_duplicates(subset=["trajectory_file", "pressure_GPa"], keep="first")
 
-    return df
+    return filter_molecular_crystals(df, include_molecular_crystals)
 
 
 def choose_best_worst_from_scores(
@@ -345,6 +346,7 @@ def collect_histogram_panels(
     pressures_dir: Path,
     reference_file: Path | None,
     bins: int,
+    include_molecular_crystals: bool = False,
 ) -> list[tuple[str, str, dict[str, np.ndarray], dict[str, np.ndarray], dict[str, float], np.ndarray]]:
     model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
     model_files = [path for path in model_files if not path.name.startswith("reference_")]
@@ -359,8 +361,8 @@ def collect_histogram_panels(
             matched_reference = resolve_model_reference_pressure_file(
                 pressures_dir, model_file, reference_file, legacy_reference_files()
             )
-            df_model = load_pressure_per_frame_csv(model_file)
-            df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate_reference=True)
+            df_model = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
+            df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate_reference=True, include_molecular_crystals=include_molecular_crystals)
         except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
             continue
@@ -610,11 +612,13 @@ def plot_combined(
     ranking_df: pd.DataFrame,
     bins: int,
     output: str | Path,
+    include_molecular_crystals: bool = False,
 ) -> None:
     available_panels = collect_histogram_panels(
         pressures_dir=pressures_dir,
         reference_file=reference_file,
         bins=bins,
+        include_molecular_crystals=include_molecular_crystals,
     )
 
     if len(available_panels) > 4:
@@ -810,6 +814,7 @@ def main() -> None:
         default="plots/plot_pressure_panel_combined_pressure_mae.pdf",
         help="Output plot file path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     pressures_dir = Path(args.pressures_dir)
@@ -832,6 +837,7 @@ def main() -> None:
         ranking_df=ranking_df,
         bins=args.bins,
         output=args.output_file,
+        include_molecular_crystals=args.include_molecular_crystals,
     )
 
 

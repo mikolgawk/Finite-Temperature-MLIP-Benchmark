@@ -6,6 +6,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rmse_results import RmseResults
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from system_filters import add_molecular_crystal_option, include_system
 
 _ARGS = None
 _SCRIPT = None
@@ -30,6 +32,7 @@ def early_cli(script):
     parser.add_argument('--force', action='store_true', help='Recompute existing results.')
     parser.add_argument('--no-progress', action='store_true', help='Disable trajectory and frame progress bars.')
     parser.add_argument('--debug', action='store_true')
+    add_molecular_crystal_option(parser)
     _ARGS = parser.parse_args()
     if _ARGS.max_frames is not None and _ARGS.max_frames < 1:
         parser.error('--max-frames must be positive')
@@ -101,9 +104,17 @@ def run_rmse(model_name, make_calculator, engine='ase', *,
     files = sorted(args.ref_dir.rglob('traj*.extxyz'))
     if not files:
         raise SystemExit(f'No traj*.extxyz files found under {args.ref_dir}')
+    files = [path for path in files if include_system(
+        path.parent.name, getattr(args, 'include_molecular_crystals', False)
+    )]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f'rmse-results-all_{model_name}.csv'
-    results = RmseResults(output, files, force=args.force)
+    results = RmseResults(
+        output, files, force=args.force,
+        exclude_trajectory=lambda path: not include_system(
+            path, getattr(args, 'include_molecular_crystals', False)
+        ),
+    )
     files = results.files
     if not files:
         print(f'{output}: no pending eligible trajectories; use --force to recompute.')

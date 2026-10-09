@@ -25,6 +25,9 @@ from vesin import NeighborList
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+import sys
+sys.path.insert(0, str(SCRIPT_DIR.parent))
+from system_filters import add_molecular_crystal_option
 TIMING_SCRIPT = SCRIPT_DIR / "plot-model-timings.py"
 DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
 DEFAULT_ACCELERATED_TIMINGS_DIR = (
@@ -471,6 +474,7 @@ def parse_args() -> argparse.Namespace:
 		default=DEFAULT_ACCELERATED_OUTPUT_PDF,
 	)
 	parser.add_argument("--results-csv", type=Path, default=DEFAULT_RESULTS_CSV)
+	add_molecular_crystal_option(parser)
 	return parser.parse_args()
 
 
@@ -480,10 +484,10 @@ def main() -> None:
 		raise ValueError("--graph-samples must be non-negative")
 	timing_module = load_timing_module()
 	standard, standard_skipped = timing_module.read_timing_files(
-		args.timings_dir, timing_mode="Standard"
+		args.timings_dir, timing_mode="Standard", include_molecular_crystals=args.include_molecular_crystals
 	)
 	accelerated, accelerated_skipped = timing_module.read_timing_files(
-		args.accelerated_timings_dir, timing_mode="Accelerated"
+		args.accelerated_timings_dir, timing_mode="Accelerated", include_molecular_crystals=args.include_molecular_crystals
 	)
 	observations = pd.concat([standard, accelerated], ignore_index=True)
 	if args.models:

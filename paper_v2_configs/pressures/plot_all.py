@@ -24,6 +24,8 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from system_filters import add_molecular_crystal_option
 CONFIG_DIR = HERE.parent
 sys.path.insert(0, str(CONFIG_DIR))
 from metric_sources import pressure_input_dir, SOURCE_DATASETS
@@ -44,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference-file", type=Path)
     parser.add_argument("--bins", type=int, default=80)
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
+    add_molecular_crystal_option(parser)
     return parser.parse_args()
 
 
@@ -152,6 +155,10 @@ def main() -> None:
             ),
             ]
             for label, command in stages:
+                if args.include_molecular_crystals and Path(command[2]).name in {
+                    'figure_4.py', 'figure_SI_4.py', 'figure_SI_6.py', 'figure_SI_15.py',
+                }:
+                    command.append("--include-molecular-crystals")
                 if not run_stage(f"{label} ({dataset})", command, args.dry_run):
                     failures.append(f"{label} ({dataset})")
 

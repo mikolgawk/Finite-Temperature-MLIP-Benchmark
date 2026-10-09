@@ -30,6 +30,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, filter_molecular_crystals
 
 
 FONT_SIZE = 8
@@ -141,7 +142,7 @@ def pressure_column_name(columns: Iterable[str]) -> str:
     raise ValueError("No pressure column found.")
 
 
-def load_pressure_per_frame_csv(csv_path: Path, deduplicate: bool = False) -> pd.DataFrame:
+def load_pressure_per_frame_csv(csv_path: Path, deduplicate: bool = False, include_molecular_crystals: bool = False) -> pd.DataFrame:
     header = pd.read_csv(csv_path, nrows=0)
     pcol = pressure_column_name(header.columns)
     usecols = ["trajectory_file", pcol]
@@ -159,7 +160,7 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate: bool = False) -> pd
             df = df.drop_duplicates(subset=["trajectory_file", "frame_index"], keep="first")
         else:
             df = df.drop_duplicates(subset=["trajectory_file", "pressure_GPa"], keep="first")
-    return df
+    return filter_molecular_crystals(df, include_molecular_crystals)
 
 
 def legacy_reference_files() -> tuple[Path, ...]:
@@ -170,7 +171,7 @@ def legacy_reference_files() -> tuple[Path, ...]:
 
 # ── Data collection ────────────────────────────────────────────────────────────
 
-def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None) -> pd.DataFrame:
+def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None, include_molecular_crystals: bool = False) -> pd.DataFrame:
     """Return per-frame model and model-matched reference pressure values."""
     model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
     model_files = [f for f in model_files if not f.name.startswith("reference_")]
@@ -183,8 +184,8 @@ def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None) -
             matched_reference = resolve_model_reference_pressure_file(
                 pressures_dir, model_file, reference_file, legacy_reference_files()
             )
-            df_m = load_pressure_per_frame_csv(model_file)
-            df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate=True)
+            df_m = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
+            df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate=True, include_molecular_crystals=include_molecular_crystals)
         except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
             continue
@@ -330,6 +331,7 @@ def main() -> None:
         "--output-file",
         default="plots/plot_pressure_violin_distributions.pdf",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     pressures_dir = Path(args.pressures_dir)
@@ -338,7 +340,7 @@ def main() -> None:
 
     reference_file = Path(args.reference_file) if args.reference_file else None
 
-    df = build_pressure_dataframe(pressures_dir, reference_file)
+    df = build_pressure_dataframe(pressures_dir, reference_file, include_molecular_crystals=args.include_molecular_crystals)
     print(f"[INFO] Total rows: {len(df):,}")
 
     plot_violin(df, args.output_file)

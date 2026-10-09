@@ -35,6 +35,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option
 
 
 FONT_SIZE = 10
@@ -189,7 +190,8 @@ def choose_best_worst(
 
 
 def load_model_values(
-    pressures_dir: Path, reference_file: Path | None = None
+    pressures_dir: Path, reference_file: Path | None = None,
+    include_molecular_crystals: bool = False,
 ) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, dict[str, np.ndarray]]]:
     model_values: dict[str, dict[str, np.ndarray]] = {}
     reference_values: dict[str, dict[str, np.ndarray]] = {}
@@ -206,9 +208,10 @@ def load_model_values(
             matched_reference = resolve_model_reference_pressure_file(
                 pressures_dir, model_file, reference_file, (DEFAULT_REFERENCE_FILE,)
             )
-            model_df = load_pressure_per_frame_csv(model_file)
+            model_df = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
             reference_df = load_pressure_per_frame_csv(
-                matched_reference, deduplicate_reference=True
+                matched_reference, deduplicate_reference=True,
+                include_molecular_crystals=include_molecular_crystals,
             )
         except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")
@@ -233,8 +236,9 @@ def collect_histogram_panels(
     reference_file: Path | None,
     bins: int,
     expected_models: Iterable[str],
+    include_molecular_crystals: bool = False,
 ) -> list[tuple[str, str, dict[str, np.ndarray], dict[str, np.ndarray], dict[str, float], np.ndarray]]:
-    model_values, reference_values = load_model_values(pressures_dir, reference_file)
+    model_values, reference_values = load_model_values(pressures_dir, reference_file, include_molecular_crystals=include_molecular_crystals)
     panels = []
     for system_type, ordered_systems in SYSTEMS.items():
         system_scores: dict[str, dict[str, float]] = {}
@@ -396,11 +400,13 @@ def plot_combined(
     ranking_df: pd.DataFrame,
     bins: int,
     output: Path,
+    include_molecular_crystals: bool = False,
 ) -> None:
     overall_errors = extract_overall_errors(ranking_df)
     expected_models = overall_errors["model"].drop_duplicates().tolist()
     panels = collect_histogram_panels(
-        pressures_dir, reference_file, bins, expected_models
+        pressures_dir, reference_file, bins, expected_models,
+        include_molecular_crystals=include_molecular_crystals,
     )
     if len(panels) > 4:
         panels = panels[:4]
@@ -568,6 +574,7 @@ def main() -> None:
         default=DEFAULT_OUTPUT_FILE,
         help="Output plot file path.",
     )
+    add_molecular_crystal_option(parser)
     args = parser.parse_args()
 
     if not args.pressures_dir.is_dir():
@@ -579,7 +586,7 @@ def main() -> None:
 
     reference_file = Path(args.reference_file) if args.reference_file else None
     ranking_df = pd.read_csv(args.ranking_file)
-    plot_combined(args.pressures_dir, reference_file, ranking_df, args.bins, args.output_file)
+    plot_combined(args.pressures_dir, reference_file, ranking_df, args.bins, args.output_file, include_molecular_crystals=args.include_molecular_crystals)
 
 
 if __name__ == "__main__":

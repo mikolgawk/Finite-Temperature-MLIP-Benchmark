@@ -32,6 +32,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from md_success import torchsim_md_succeeded
+from system_filters import (
+    DEFAULT_EXCLUDED_SYSTEM_TYPES,
+    add_molecular_crystal_option,
+    excluded_system_types,
+)
 
 
 # ============================================================
@@ -219,7 +224,7 @@ SYSTEMS = {
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
-def aggregate_by_system_type(detailed_results: dict[str, list[dict]], excluded_system_types: set[str] | None = None) -> pd.DataFrame:
+def aggregate_by_system_type(detailed_results: dict[str, list[dict]], excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES)) -> pd.DataFrame:
     """Aggregate per-system RDF errors into per-system-type means, per model."""
     results: dict[str, dict[str, float]] = {}
 
@@ -314,7 +319,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="show discovered inputs without loading trajectories or computing RDFs",
     )
-    return parser.parse_args()
+    add_molecular_crystal_option(parser)
+    args = parser.parse_args()
+    args.excluded_system_types = excluded_system_types(args)
+    return args
 
 
 def process_source(args: argparse.Namespace, source: str) -> None:

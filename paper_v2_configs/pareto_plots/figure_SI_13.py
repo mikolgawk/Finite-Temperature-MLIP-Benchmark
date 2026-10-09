@@ -45,6 +45,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option
 
 try:
 	from adjustText import adjust_text
@@ -265,9 +266,9 @@ def compute_combined_error(df: pd.DataFrame) -> pd.Series:
 	return pd.Series(combined_error, index=df.index)
 
 
-def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
+def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
 	"""Return model-level mean MD step timings from repository timing CSVs."""
-	return load_repo_timings(timings_dir)
+	return load_repo_timings(timings_dir, include_molecular_crystals)
 
 
 def load_and_merge(
@@ -280,6 +281,7 @@ def load_and_merge(
 	vdos_metrics_file: Path | None = None,
 	pressure_backend: str | None = None,
 	pressure_mode: str | None = None,
+	include_molecular_crystals: bool = False,
 ) -> pd.DataFrame:
 	merged = load_average_inputs(
 		timings_dir=timings_dir,
@@ -291,6 +293,7 @@ def load_and_merge(
 		clip_pressure_error=clip_pressure_error,
 		pressure_backend=pressure_backend,
 		pressure_mode=pressure_mode,
+		include_molecular_crystals=include_molecular_crystals,
 	)
 	merged["Combined Error [%]"] = compute_combined_error(merged)
 	return merged
@@ -548,6 +551,7 @@ def main() -> None:
 		help="Output CSV containing merged RDF, VDOS, pressure, and combined errors.",
 	)
 
+	add_molecular_crystal_option(parser)
 	args = parser.parse_args()
 	default_timings, default_rdf, default_vdos, default_pressure_mode = source_input_paths(
 		args.source
@@ -569,6 +573,7 @@ def main() -> None:
 		clip_pressure_error=not args.no_pressure_clip,
 		pressure_backend=args.pressure_backend or source_pressure_backend(args.source),
 		pressure_mode=args.pressure_mode or default_pressure_mode,
+		include_molecular_crystals=args.include_molecular_crystals,
 	)
 
 	output_csv = Path(args.output_csv)

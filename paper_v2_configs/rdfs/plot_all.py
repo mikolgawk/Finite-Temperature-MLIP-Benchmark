@@ -25,6 +25,8 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from system_filters import add_molecular_crystal_option
 SOURCES = (
     "mlip-trajs-ase",
     "mlip-trajs-torchsim-eager",
@@ -46,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-figure-si-14", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
+    add_molecular_crystal_option(parser)
     return parser.parse_args()
 
 
@@ -72,6 +75,8 @@ def main() -> None:
     ]
     for source in dict.fromkeys(sources):
         command.extend(("--source", source))
+    if args.include_molecular_crystals:
+        command.append("--include-molecular-crystals")
     if args.timings_dir:
         command.extend(("--timings-dir", str(args.timings_dir.resolve())))
     if args.skip_figure_si_14:

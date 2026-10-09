@@ -12,7 +12,7 @@ def trajectory_key(path):
 
 
 class RmseResults:
-    def __init__(self, output, files, *, force=False):
+    def __init__(self, output, files, *, force=False, exclude_trajectory=None):
         self.output = output
         self.failure_file = output.with_suffix('.failures.json')
         self.rows = []
@@ -32,9 +32,17 @@ class RmseResults:
                 ):
                     raise ValueError(f'Expected a list of failures with file paths in {self.failure_file}')
 
+        selection_changed = False
+        if exclude_trajectory is not None:
+            rows = [row for row in self.rows if not exclude_trajectory(row['trajectory'])]
+            failures = [failure for failure in previous_failures
+                        if not exclude_trajectory(failure['file'])]
+            selection_changed = len(rows) != len(self.rows) or len(failures) != len(previous_failures)
+            self.rows, previous_failures = rows, failures
+
         if force or not output.exists():
             self.files = list(files)
-        elif self.failure_file.exists():
+        elif previous_failures:
             failed = {trajectory_key(failure['file']) for failure in previous_failures}
             self.files = [path for path in files if trajectory_key(path) in failed]
         else:
@@ -48,6 +56,9 @@ class RmseResults:
         # Checkpoints must also remember trajectories not yet attempted if interrupted.
         self.failures.extend({'file': str(path), 'error': 'Evaluation not completed'}
                              for path in self.files)
+        if selection_changed:
+            self._write_failures(self.failures)
+            self._write_rows()
 
     def record(self, path, row, failures):
         """Merge one attempt, replacing its partial row and old failure records."""
@@ -67,6 +78,10 @@ class RmseResults:
             checkpoint_failures = [*self.failures,
                                    {'file': str(path), 'error': 'Result checkpoint not completed'}]
         self._write_failures(checkpoint_failures)
+        self._write_rows()
+        self._write_failures(self.failures)
+
+    def _write_rows(self):
         if self.rows:
             temporary = self.output.with_suffix('.csv.tmp')
             with temporary.open('w', newline='') as handle:
@@ -76,7 +91,6 @@ class RmseResults:
             temporary.replace(self.output)
         else:
             self.output.unlink(missing_ok=True)
-        self._write_failures(self.failures)
 
     def _write_failures(self, failures):
         if failures:

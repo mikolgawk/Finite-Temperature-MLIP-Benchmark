@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from md_success import torchsim_md_succeeded
+from system_filters import add_molecular_crystal_option, include_system
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rmse_results import RmseResults
 
@@ -38,6 +39,7 @@ def early_cli(script):
     parser.add_argument('--force', action='store_true', help='Recompute existing results.')
     parser.add_argument('--no-progress', action='store_true', help='Disable trajectory and frame progress bars.')
     parser.add_argument('--debug', action='store_true')
+    add_molecular_crystal_option(parser)
     _ARGS = parser.parse_args()
     if _ARGS.max_frames is not None and _ARGS.max_frames < 1:
         parser.error('--max-frames must be positive')
@@ -136,10 +138,18 @@ def run_rmse(model_name, model, engine='torchsim', *, state_dtype=None,
     files = [path for path in files
              if path.parent.name.split('_')[0] not in skip_systems
              and torchsim_md_succeeded(args.md_dir / path.parent.name / f'nvt_{model_name}.h5')]
-    print(f'{model_name}: {len(files)} reference trajectories with completed TorchSim MD')
+    files = [path for path in files if include_system(
+        path.parent.name, getattr(args, 'include_molecular_crystals', False)
+    )]
+    print(f'{model_name}: {len(files)} selected reference trajectories with completed TorchSim MD')
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f'rmse-results-all_{model_name}.csv'
-    results = RmseResults(output, files, force=args.force)
+    results = RmseResults(
+        output, files, force=args.force,
+        exclude_trajectory=lambda path: not include_system(
+            path, getattr(args, 'include_molecular_crystals', False)
+        ),
+    )
     files = results.files
     if not files:
         print(f'{output}: no pending eligible trajectories; use --force to recompute.')

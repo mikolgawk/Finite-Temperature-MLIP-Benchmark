@@ -34,6 +34,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from system_filters import add_molecular_crystal_option, include_system
 
 try:
 	from adjustText import adjust_text
@@ -302,12 +303,12 @@ def compute_combined_error(df: pd.DataFrame) -> pd.Series:
 	) / 3.0
 
 
-def load_model_avg_timings(timings_dir: Path) -> pd.DataFrame:
+def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
 	"""Return mean step time for every model with valid timing CSVs."""
 	if not timings_dir.is_dir():
 		raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 	model_timings: dict[str, list[float]] = {}
-	all_systems = [d for d in timings_dir.iterdir() if d.is_dir()]
+	all_systems = [d for d in timings_dir.iterdir() if d.is_dir() and include_system(d.name, include_molecular_crystals)]
 	for system_dir in sorted(all_systems):
 		for csv_path in sorted(system_dir.glob("md_timing_*.csv")):
 			model_name = metric_model_key(csv_path.stem.removeprefix("md_timing_"))
@@ -396,8 +397,9 @@ def load_and_merge(
 	vdos_metrics_file: Path | None = None,
 	pressure_backend: str | None = None,
 	pressure_mode: str | None = None,
+	include_molecular_crystals: bool = False,
 ) -> pd.DataFrame:
-	timings_df = load_model_avg_timings(timings_dir)
+	timings_df = load_model_avg_timings(timings_dir, include_molecular_crystals)
 	if combined_metrics_file is not None:
 		combined_df = pd.read_csv(combined_metrics_file)
 	else:
@@ -793,6 +795,7 @@ def main() -> None:
 		help="Output CSV containing merged RDF, VDOS, pressure, and average-error metrics.",
 	)
 
+	add_molecular_crystal_option(parser)
 	args = parser.parse_args()
 	sources = args.source or [DEFAULT_SOURCE]
 	if len(sources) > 1 and any(
@@ -823,6 +826,7 @@ def main() -> None:
 				pressure_backend=args.pressure_backend or source_pressure_backend(source),
 				pressure_mode=args.pressure_mode or default_pressure_mode,
 				dataset_label="accelerated" if source.endswith("-accelerated") else "eager",
+				include_molecular_crystals=args.include_molecular_crystals,
 			)
 		)
 	merged = pd.concat(merged_frames, ignore_index=True)
