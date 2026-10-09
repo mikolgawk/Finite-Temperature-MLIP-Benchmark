@@ -31,6 +31,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option, include_system
+from subplot_filters import display_error_percent
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -396,6 +397,25 @@ def tier_mean_rdf_error(tier_models, model_means: dict[str, float]) -> float:
     return float(np.nanmean(errors))
 
 
+def pick_best_worst_models(
+    system: str, tier_models, system_errors: dict[str, float], rdf_dir: str
+) -> tuple[str | None, str | None]:
+    """Select curves without changing the scores used in metric averages."""
+    scored_models = []
+    for model in tier_models:
+        model = normalize_model_name(model)
+        rdf_error = system_errors.get(model, np.nan)
+        if not display_error_percent(rdf_error):
+            continue
+        if resolve_saved_rdf_path(system, model, rdf_dir) is None:
+            continue
+        scored_models.append((model, rdf_error))
+    if not scored_models:
+        return None, None
+    scored_models.sort(key=lambda item: item[1])
+    return scored_models[0][0], scored_models[-1][0]
+
+
 def mean_system_rdf_error(system: str, rdf_csv_dir: Path, rdf_dir: str) -> float:
     system_errors = find_model_system_errors(system, rdf_csv_dir)
     errors = []
@@ -614,25 +634,6 @@ def plot_combined(
         model_means = find_model_error_means(system_list, rdf_csv_dir)
         system_errors = find_model_system_errors(system, rdf_csv_dir)
 
-        def pick_best_worst(models_in_tier):
-            scored_models = []
-            for model in models_in_tier:
-                model = normalize_model_name(model)
-                rdf_error = system_errors.get(model, np.nan)
-                if np.isnan(rdf_error):
-                    continue
-                if resolve_saved_rdf_path(system, model, rdf_dir) is None:
-                    continue
-                scored_models.append((model, rdf_error))
-
-            if not scored_models:
-                return None, None
-
-            scored_models.sort(key=lambda item: item[1])
-            best_model = scored_models[0][0]
-            worst_model = scored_models[-1][0]
-            return best_model, worst_model
-
         ref_data = load_saved_rdf(system, None, rdf_dir)
         if ref_data is None:
             for tier_idx in range(tier_count):
@@ -650,7 +651,9 @@ def plot_combined(
                 rdf_ax.text(0.02, 0.95, panel_labels[idx], transform=rdf_ax.transAxes, ha="left", va="top", fontsize=FONT_SIZE)
 
             mean_rdf_error = tier_mean_rdf_error(tier_models, model_means)
-            best_model, worst_model = pick_best_worst(tier_models)
+            best_model, worst_model = pick_best_worst_models(
+                system, tier_models, system_errors, rdf_dir
+            )
             rdf_ax.plot(r_ref, g_ref, color="black", linewidth=2.0, label="Reference")
 
             if best_model:

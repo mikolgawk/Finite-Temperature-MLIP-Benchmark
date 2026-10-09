@@ -37,6 +37,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option, filter_molecular_crystals
+from subplot_filters import display_error_percent
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -333,6 +334,11 @@ def pick_best_worst_models_for_tier(
         .sort_values(["vdos_error_percent", "mlip_model"])
         .reset_index(drop=True)
     )
+    model_means = model_means[
+        model_means["vdos_error_percent"].map(display_error_percent)
+    ]
+    if model_means.empty:
+        return None, None
     best_model = str(model_means.iloc[0]["mlip_model"])
     worst_model = str(model_means.iloc[-1]["mlip_model"])
     return best_model, worst_model
@@ -348,6 +354,9 @@ def pick_model_row(
         (subset["system"].astype(str) == system)
         & (subset["mlip_model"].astype(str) == model)
     ]
+    if rows.empty:
+        return None
+    rows = rows[rows["vdos_error_percent"].map(display_error_percent)]
     if rows.empty:
         return None
     return rows.sort_values("vdos_error_percent", ascending=prefer_low_error).iloc[0]

@@ -30,7 +30,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
-from system_filters import add_molecular_crystal_option, filter_molecular_crystals
+from system_filters import add_molecular_crystal_option, filter_pressure_systems
 
 
 FONT_SIZE = 8
@@ -77,7 +77,6 @@ SYSTEMS = {
         "bulkPt3Co_300K_J.Kioseoglou_VASP",
     ],
     "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
-    "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
@@ -160,7 +159,7 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate: bool = False, inclu
             df = df.drop_duplicates(subset=["trajectory_file", "frame_index"], keep="first")
         else:
             df = df.drop_duplicates(subset=["trajectory_file", "pressure_GPa"], keep="first")
-    return filter_molecular_crystals(df, include_molecular_crystals)
+    return filter_pressure_systems(df, include_molecular_crystals)
 
 
 def legacy_reference_files() -> tuple[Path, ...]:

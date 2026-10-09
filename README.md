@@ -49,6 +49,13 @@ naphthalene, pentacene, picene, and tetracene. Pass
 `--include-molecular-crystals` to the relevant analysis command to include them.
 Standalone RDF and VDOS commands use the same default. The remaining workload
 contains 14 systems before any metric-specific exclusions or failed MD runs.
+Pressure evaluation, aggregation, and plots always exclude the Pt(111) + 24 H2O
+metal-water interface, including rows in previously saved pressure results.
+The small RDF, pressure, and VDOS panels omit model curves with 100% error.
+Those models still contribute to metric computations, averages, and worst-system
+selection.
+The pressure panels include every available system type, including hydrogen;
+their layout adds rows as needed.
 
 To generate all four metric sets for only one model, pass its exact model name
 (the part after `nvt_` in its trajectory filenames):
@@ -102,6 +109,9 @@ uv run --script paper_v2_configs/vdos/plot_all.py
 uv run --script paper_v2_configs/pressures/plot_all.py
 uv run --script paper_v2_configs/pareto_plots/plot_all.py
 ```
+
+The VDOS plotting entry point includes Figure 6 and its SI companion, saving the
+two 3×3 correlation figures under `vdos/plots/<source>/`.
 
 To plot only the accelerated TorchSim results, use:
 

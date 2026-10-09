@@ -95,6 +95,18 @@ def main() -> None:
                  "--output-file", str(source_plots / "plot_vdos_panel_combined.pdf")],
             ),
             (
+                "Figure 6 and its SI companion",
+                [
+                    sys.executable, "-u", str(HERE / "figure_6.py"), *common,
+                    "--vdos-model-means-file", str(source_results / MODEL_MEANS),
+                    "--pressure-file", str(pressure_file.resolve()),
+                    "--f1-file", str(args.f1_file.resolve()),
+                    "--ksrme-file", str(args.ksrme_file.resolve()),
+                    "--output-file", str(source_plots / "plot_rdf_pressure_vdos_correlations_outlier_labels_3x3.pdf"),
+                    "--si-output-file", str(source_plots / "plot_SI_rdf_pressure_vdos_correlations_all_labels_3x3.pdf"),
+                ],
+            ),
+            (
                 "Figures SI 7, 8, and 9",
                 [
                     sys.executable, "-u", str(HERE / "figure_SI_7_8_9.py"), *common,

@@ -64,6 +64,8 @@ class PressureEvaluatorTests(unittest.TestCase):
             pd.DataFrame([
                 {"system": "hydrogen", "frame_index": 0, "pressure_GPa": 1.0},
                 {"system": "copper", "frame_index": 0, "pressure_GPa": 2.0},
+                {"system": "Pt111w24H2O_380K_Heenen_VASP", "frame_index": 0,
+                 "pressure_GPa": 100.0},
             ]).to_csv(output, index=False)
 
             evaluator._write_csv_records(

@@ -45,7 +45,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
-from system_filters import add_molecular_crystal_option
+from system_filters import add_molecular_crystal_option, filter_pressure_systems
 
 try:
 	from adjustText import adjust_text
@@ -135,6 +135,7 @@ def _prepare_pressure_df(
 	pressure_scale_gpa: float,
 	clip_pressure_error: bool,
 ) -> pd.DataFrame:
+	pressure_df = filter_pressure_systems(pressure_df, include_molecular_crystals=True)
 	model_col = _pick_first_existing(set(pressure_df.columns), ["model", "mlip_model", "calculator"])
 	if model_col is None:
 		raise ValueError("Pressure metrics file must contain one of: model, mlip_model, calculator.")

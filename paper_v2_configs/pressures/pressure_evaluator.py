@@ -11,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from md_success import torchsim_md_succeeded
 from system_filters import (
     add_molecular_crystal_option,
-    include_system,
+    include_pressure_system,
     is_molecular_crystal,
-    filter_molecular_crystals,
+    filter_pressure_systems,
 )
 
 
@@ -178,11 +178,11 @@ def _write_csv_records(path: Path, records, replace_systems: set[str], include_m
     """Write records, replacing selected systems in an existing CSV when requested."""
     import pandas as pd
 
-    new = pd.DataFrame(records)
+    new = filter_pressure_systems(pd.DataFrame(records), include_molecular_crystals)
     if new.empty:
         return
     if replace_systems and path.exists():
-        old = filter_molecular_crystals(pd.read_csv(path), include_molecular_crystals)
+        old = filter_pressure_systems(pd.read_csv(path), include_molecular_crystals)
         if "system" not in old.columns or "system" not in new.columns:
             raise ValueError(f"cannot merge {path}: missing system column")
         old = old.loc[~old["system"].isin(replace_systems)]
@@ -213,7 +213,7 @@ def _run(model_name: str, predict, engine: str) -> None:
     paths = _trajectory_paths(args.traj_dir, trajectory_model)
     if _BACKEND == "torchsim":
         paths = [path for path in paths if torchsim_md_succeeded(path)]
-    paths = [path for path in paths if include_system(
+    paths = [path for path in paths if include_pressure_system(
         path.parent.name, getattr(args, "include_molecular_crystals", False)
     )]
     if not paths:
@@ -267,7 +267,7 @@ def _run(model_name: str, predict, engine: str) -> None:
             failure
             for failure in previous_failures
             if _failure_system(failure) not in requested_systems
-            and include_system(_failure_system(failure), getattr(args, "include_molecular_crystals", False))
+            and include_pressure_system(_failure_system(failure), getattr(args, "include_molecular_crystals", False))
         ]
 
     progress_enabled = not args.no_progress
@@ -293,8 +293,6 @@ def _run(model_name: str, predict, engine: str) -> None:
     full_rows, rows, reference_rows, summaries, failures = [], [], [], [], []
     for path in path_iterator:
         system = path.parent.name
-        if system.startswith("Pt111w24H2O_"):
-            continue
         try:
             meta = metadata[system]
             if (

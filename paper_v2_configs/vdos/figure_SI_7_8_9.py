@@ -40,6 +40,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from correlation_labels import inward_label_offset, position_model_labels
+from system_filters import filter_pressure_systems
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -280,6 +281,7 @@ def standardize_pressure(
     backend: str | None = None,
     mode: str | None = None,
 ) -> pd.DataFrame:
+    df_pressure_raw = filter_pressure_systems(df_pressure_raw, include_molecular_crystals=True)
     for column, value in (("backend", backend), ("mode", mode)):
         if value is not None and column in df_pressure_raw.columns:
             df_pressure_raw = df_pressure_raw.loc[

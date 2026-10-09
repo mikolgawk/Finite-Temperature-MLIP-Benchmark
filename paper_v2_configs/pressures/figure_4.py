@@ -23,7 +23,10 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from get_model_pressure_errors import resolve_model_reference_pressure_file
+from get_model_pressure_errors import (
+    pressure_histogram_similarity,
+    resolve_model_reference_pressure_file,
+)
 
 import sys
 
@@ -31,7 +34,8 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
-from system_filters import add_molecular_crystal_option, filter_molecular_crystals
+from system_filters import add_molecular_crystal_option, filter_pressure_systems
+from subplot_filters import display_error_percent
 
 
 FONT_SIZE = 10
@@ -80,7 +84,6 @@ SYSTEMS = {
     ],
     "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
 
-    "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
     "Hydrogen": ["H_1050K_Rupp_QE"],
 
 }
@@ -154,24 +157,46 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = Fa
         else:
             df = df.drop_duplicates(subset=["trajectory_file", "pressure_GPa"], keep="first")
 
-    return filter_molecular_crystals(df, include_molecular_crystals)
+    return filter_pressure_systems(df, include_molecular_crystals)
 
 
 def choose_best_worst_from_scores(
     models: list[str],
     model_scores: dict[str, float],
+    visible_models: set[str] | None = None,
 ) -> tuple[str | None, str | None, dict[str, float]]:
     scores = {
         model: score
         for model, score in model_scores.items()
         if model in models and np.isfinite(score)
     }
-    if not scores:
+    visible_scores = {
+        model: score for model, score in scores.items()
+        if visible_models is None or model in visible_models
+    }
+    if not visible_scores:
         return None, None, scores
 
-    best = min(scores, key=scores.get)
-    worst = max(scores, key=scores.get)
+    best = min(visible_scores, key=visible_scores.get)
+    worst = max(visible_scores, key=visible_scores.get)
     return best, worst, scores
+
+
+def visible_pressure_models(
+    references_by_model: dict[str, np.ndarray],
+    values_by_model: dict[str, np.ndarray],
+    bins: int,
+) -> set[str]:
+    """Use histogram percentages to filter curves in the pressure-MAE panel."""
+    visible_models = set()
+    for model, values in values_by_model.items():
+        reference_values = references_by_model.get(model)
+        if reference_values is None:
+            continue
+        score = pressure_histogram_similarity(reference_values, values, bins)
+        if score and display_error_percent(score["pressure_error_percent"]):
+            visible_models.add(model)
+    return visible_models
 
 
 def make_bin_edges(reference_values: np.ndarray, candidate_arrays: list[np.ndarray], bins: int) -> np.ndarray:
@@ -621,15 +646,11 @@ def plot_combined(
         include_molecular_crystals=include_molecular_crystals,
     )
 
-    if len(available_panels) > 4:
-        print(f"[INFO] Using first 4 histogram panels for 2x2 layout (out of {len(available_panels)} available).")
-        available_panels = available_panels[:4]
-
     n_panels = len(available_panels)
     n_hist_cols = 2
     n_hist_rows = int(np.ceil(n_panels / n_hist_cols))
 
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * 3.55))
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.25 + 1.15 * n_hist_rows)))
     outer_gs = gridspec.GridSpec(
         nrows=n_hist_rows + 2,
         ncols=n_hist_cols,
@@ -652,6 +673,13 @@ def plot_combined(
         model_scores,
         bin_edges,
     ) in enumerate(available_panels):
+        visible_models = visible_pressure_models(references_by_model, values_by_model, bins)
+        bin_edges = make_bin_edges(
+            next(iter(references_by_model.values())),
+            [array for model in visible_models
+             for array in (references_by_model[model], values_by_model[model])],
+            bins,
+        )
         row = idx // n_hist_cols + 2
         col = idx % n_hist_cols
         hist_grid_row = idx // n_hist_cols
@@ -700,13 +728,22 @@ def plot_combined(
                     fontsize=FONT_SIZE,
                 )
 
-            best_model, worst_model, scores = choose_best_worst_from_scores(tier_models, model_scores)
+            best_model, worst_model, scores = choose_best_worst_from_scores(
+                tier_models, model_scores, visible_models=visible_models
+            )
             tier_mean_error = mean_finite(scores.values())
 
-            for model, label, style in (
+            reference_choices = (
                 (best_model, "Reference (best)", "-"),
                 (worst_model, "Reference (worst)", "--"),
-            ):
+            )
+            if best_model is None:
+                reference_model = next(
+                    (model for model in tier_models if model in references_by_model),
+                    next(iter(references_by_model), None),
+                )
+                reference_choices = ((reference_model, "Reference", "-"),)
+            for model, label, style in reference_choices:
                 if model is None or model not in references_by_model:
                     continue
                 if model == best_model and style == "--":

@@ -36,6 +36,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option
+from subplot_filters import display_error_percent
 
 
 FONT_SIZE = 10
@@ -81,7 +82,6 @@ SYSTEMS = {
         "bulkLiMgAlZnSn_600K_J_Schmidt_VASP",
     ],
     "Molecular crystals": ["anthracene_293K_Sharma_S", "naphthalene_295K_Sharma_S", "pentacene_295K_Sharma_S", "picene_295K_Sharma_S", "tetracene_295K_Sharma_S"],
-    "Metal-water interfaces": ["Pt111w24H2O_380K_Heenen_VASP"],
     "Hydrogen": ["H_1050K_Rupp_QE"],
 }
 
@@ -184,9 +184,16 @@ def choose_best_worst(
         for model, score in model_scores.items()
         if model in tier_models and np.isfinite(score)
     }
-    if not scores:
+    visible_scores = {
+        model: score for model, score in scores.items() if display_error_percent(score)
+    }
+    if not visible_scores:
         return None, None, scores
-    return min(scores, key=scores.get), max(scores, key=scores.get), scores
+    return (
+        min(visible_scores, key=visible_scores.get),
+        max(visible_scores, key=visible_scores.get),
+        scores,
+    )
 
 
 def load_model_values(
@@ -408,12 +415,9 @@ def plot_combined(
         pressures_dir, reference_file, bins, expected_models,
         include_molecular_crystals=include_molecular_crystals,
     )
-    if len(panels) > 4:
-        panels = panels[:4]
-
     n_hist_cols = 2
     n_hist_rows = int(np.ceil(len(panels) / n_hist_cols))
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * 3.55))
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.25 + 1.15 * n_hist_rows)))
     outer_gs = gridspec.GridSpec(
         nrows=n_hist_rows + 2,
         ncols=n_hist_cols,
@@ -428,6 +432,16 @@ def plot_combined(
     draw_overall_pressure_error_plot(overall_ax, ranking_df, panel_labels[0])
 
     for idx, (system_type, system, references_by_model, values_by_model, model_scores, edges) in enumerate(panels):
+        visible_models = {
+            model for model in values_by_model
+            if display_error_percent(model_scores.get(model, np.nan))
+        }
+        edges = make_bin_edges(
+            next(iter(references_by_model.values())),
+            [array for model in visible_models
+             for array in (references_by_model[model], values_by_model[model])],
+            bins,
+        )
         row = idx // n_hist_cols + 2
         col = idx % n_hist_cols
         bottom_row = idx // n_hist_cols == n_hist_rows - 1
@@ -458,10 +472,17 @@ def plot_combined(
                 )
 
             best, worst, scores = choose_best_worst(tier_models, model_scores)
-            for model, label, style in (
+            reference_choices = (
                 (best, "Reference (best)", "-"),
                 (worst, "Reference (worst)", "--"),
-            ):
+            )
+            if best is None:
+                reference_model = next(
+                    (model for model in tier_models if model in references_by_model),
+                    next(iter(references_by_model), None),
+                )
+                reference_choices = ((reference_model, "Reference", "-"),)
+            for model, label, style in reference_choices:
                 if model is None or model not in references_by_model:
                     continue
                 if model == best and style == "--":

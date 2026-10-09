@@ -18,7 +18,7 @@ from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
     excluded_system_types,
-    filter_molecular_crystals,
+    filter_pressure_systems,
 )
 
 DEFAULT_PRESSURES_DIR = SCRIPT_DIR / "results"
@@ -192,7 +192,7 @@ def load_pressure_per_frame_csv(csv_path: Path, deduplicate_reference: bool = Fa
 
     df["system"] = df["trajectory_file"].apply(structure_from_trajectory_file)
     df["system_type"] = df["system"].map(infer_system_type)
-    df = filter_molecular_crystals(df, include_molecular_crystals)
+    df = filter_pressure_systems(df, include_molecular_crystals)
 
     if deduplicate_reference:
         if "frame_index" in df.columns:
@@ -407,6 +407,7 @@ def add_failed_system_penalties(
     bins: int,
 ) -> pd.DataFrame:
     """Add 100% pressure-error rows for failed TorchSim MD pairs."""
+    pair_df = filter_pressure_systems(pair_df, include_molecular_crystals=True)
     if "torchsim" not in source:
         return pair_df
 
@@ -471,7 +472,7 @@ def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataF
     if pressure_comparison_file is None or not pressure_comparison_file.is_file():
         return None
 
-    df = pd.read_csv(pressure_comparison_file)
+    df = filter_pressure_systems(pd.read_csv(pressure_comparison_file), include_molecular_crystals=True)
     if "model" not in df.columns:
         return None
 
@@ -513,6 +514,7 @@ def build_pressure_mae_from_trajectory_summaries(
         pressures_dir.rglob(f"*{TRAJECTORY_SUMMARY_SUFFIX}")
     ):
         summary = pd.read_csv(summary_file)
+        summary = filter_pressure_systems(summary, include_molecular_crystals=True)
         if "absolute_mean_error_GPa" not in summary.columns:
             continue
         if excluded_system_types and "system" in summary:
@@ -594,6 +596,9 @@ def write_metric_outputs(
     model_system_type_mean_output_file: Path,
     pressure_comparison_file: Path | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    pair_df = filter_pressure_systems(pair_df, include_molecular_crystals=True)
+    if pair_df.empty:
+        raise RuntimeError("No pressure rows remain after system exclusions.")
     pair_output_file.parent.mkdir(parents=True, exist_ok=True)
     pair_df.to_csv(pair_output_file, index=False)
 

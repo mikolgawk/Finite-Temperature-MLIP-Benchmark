@@ -34,7 +34,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
-from system_filters import add_molecular_crystal_option, include_system
+from system_filters import add_molecular_crystal_option, include_system, filter_pressure_systems
 
 try:
 	from adjustText import adjust_text
@@ -168,6 +168,7 @@ def _prepare_pressure_df(
 	backend: str | None = None,
 	mode: str | None = None,
 ) -> pd.DataFrame:
+	pressure_df = filter_pressure_systems(pressure_df, include_molecular_crystals=True)
 	if backend is not None and "backend" in pressure_df.columns:
 		pressure_df = pressure_df.loc[
 			pressure_df["backend"].astype(str).str.lower() == backend.lower()

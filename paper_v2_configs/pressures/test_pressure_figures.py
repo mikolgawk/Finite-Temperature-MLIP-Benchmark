@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -17,9 +20,55 @@ from get_model_pressure_errors import resolve_model_reference_pressure_file
 
 
 SYSTEM = "bulkAu_1500K_Kapil"
+INTERFACE = "Pt111w24H2O_380K_Heenen_VASP"
 
 
 class PressureFiguresTest(unittest.TestCase):
+    def test_hydrogen_is_kept_as_the_fifth_pressure_panel(self) -> None:
+        categories = [
+            ("Pure metals", SYSTEM),
+            ("Perovskites", "CsSnI3_500K_Ivor_VASP"),
+            ("Metal dichalcogenides", "TiSe2_400K_Ivor_VASP"),
+            ("Metal alloys", "bulkPt3Co_300K_J.Kioseoglou_VASP"),
+            ("Hydrogen", "H_1050K_Rupp_QE"),
+        ]
+        values = np.array([0.1, 0.2, 0.3, 0.4])
+        panels = [
+            (kind, system, {"mace-mp-0": values}, {"mace-mp-0": values},
+             {"mace-mp-0": 0.0}, np.linspace(0.1, 0.4, 6))
+            for kind, system in categories
+        ]
+        ranking = pd.DataFrame({"model": ["mace-mp-0"], "error_GPa": [0.0],
+                                "final_mean_pressure_error_percent": [0.0]})
+        for module, overview in (
+            (figure_4, "draw_overall_pressure_mae_plot"),
+            (figure_SI_6, "draw_overall_pressure_error_plot"),
+        ):
+            with self.subTest(figure=module.__name__), tempfile.TemporaryDirectory() as directory:
+                figures = []
+                create_figure = module.plt.figure
+
+                def capture_figure(*args, **kwargs):
+                    fig = create_figure(*args, **kwargs)
+                    figures.append(fig)
+                    return fig
+
+                output = Path(directory) / "unused.pdf"
+                with (
+                    patch.object(module, "collect_histogram_panels", return_value=panels),
+                    patch.object(module, overview),
+                    patch.object(module.plt, "figure", side_effect=capture_figure),
+                    patch.object(module.plt, "savefig"),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    module.plot_combined(Path(directory), None, ranking, 5, output)
+                fig = figures[0]
+                titles = [ax.get_title().split("\n")[0]
+                          for ax in fig.axes if ax.get_title()]
+                self.assertEqual(titles, [kind for kind, _ in categories])
+                self.assertGreater(fig.get_size_inches()[1], 3.53 * 3.55)
+                self.assertFalse(output.exists())
+
     def test_each_model_uses_its_own_reference(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -27,9 +76,10 @@ class PressureFiguresTest(unittest.TestCase):
             for model, value in (("chgnet", 0.0), ("mace-mp-0", 10.0)):
                 prediction = root / f"{model}_same-simulation-length_pressure_per_frame.csv"
                 rows = pd.DataFrame({
-                    "trajectory_file": [f"/sample/{SYSTEM}/traj.h5"] * 4,
-                    "frame_index": range(4),
-                    "pressure_GPa": [value, value + 0.1, value, value + 0.1],
+                    "trajectory_file": [f"/sample/{system}/traj.h5"
+                                        for system in (SYSTEM, INTERFACE) for _ in range(4)],
+                    "frame_index": list(range(4)) * 2,
+                    "pressure_GPa": [value, value + 0.1, value, value + 0.1] * 2,
                 })
                 rows.to_csv(prediction, index=False)
                 rows.to_csv(root / "references" / f"{model}.csv", index=False)
@@ -38,7 +88,9 @@ class PressureFiguresTest(unittest.TestCase):
                     root / "references" / f"{model}.csv",
                 )
 
-            mae_panel = figure_4.collect_histogram_panels(root, None, 5)[0]
+            mae_panels = figure_4.collect_histogram_panels(root, None, 5)
+            self.assertEqual([panel[1] for panel in mae_panels], [SYSTEM])
+            mae_panel = mae_panels[0]
             self.assertEqual(mae_panel[1], SYSTEM)
             self.assertAlmostEqual(mae_panel[4]["chgnet"], 0.0)
             self.assertAlmostEqual(mae_panel[4]["mace-mp-0"], 0.0)
@@ -47,13 +99,21 @@ class PressureFiguresTest(unittest.TestCase):
                 np.mean(mae_panel[2]["mace-mp-0"]),
             )
 
-            error_panel = figure_SI_6.collect_histogram_panels(
+            error_panels = figure_SI_6.collect_histogram_panels(
                 root, None, 5, ["chgnet", "mace-mp-0"]
-            )[0]
+            )
+            self.assertEqual([panel[1] for panel in error_panels], [SYSTEM])
+            error_panel = error_panels[0]
             self.assertAlmostEqual(error_panel[4]["chgnet"], 0.0)
             self.assertAlmostEqual(error_panel[4]["mace-mp-0"], 0.0)
 
             violin = figure_SI_4.build_pressure_dataframe(root, None)
+            self.assertEqual(len(violin), 16)
+            self.assertEqual(
+                set(figure_SI_4.load_pressure_per_frame_csv(
+                    root / "references/chgnet.csv", include_molecular_crystals=True
+                ).structure), {SYSTEM},
+            )
             reference_means = violin[violin["kind"] == "reference"].groupby("model")[
                 "pressure_GPa"
             ].mean()
@@ -84,6 +144,11 @@ class PressureFiguresTest(unittest.TestCase):
             (system_dir / "md_timing_empty.csv").touch()
             pd.DataFrame({"seconds_per_step": [0.01], "n_steps": [0]}).to_csv(
                 system_dir / "md_timing_invalid.csv", index=False
+            )
+            interface_dir = Path(directory) / INTERFACE
+            interface_dir.mkdir()
+            pd.DataFrame({"seconds_per_step": [99.0], "n_steps": [100]}).to_csv(
+                interface_dir / "md_timing_model0.csv", index=False
             )
             timings = figure_SI_15.load_model_avg_timings(Path(directory))
             self.assertEqual(len(timings), 16)

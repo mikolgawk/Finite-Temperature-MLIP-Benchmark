@@ -13,7 +13,9 @@ from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import write
 import pressure_pipeline as pipeline
 from get_model_pressure_errors import (
+    add_failed_system_penalties,
     build_pair_rows,
+    build_pressure_mae_from_trajectory_summaries,
     compute_pressure_metric,
     resolve_reference_pressure_file,
     write_metric_outputs,
@@ -91,6 +93,9 @@ class PressurePipelineTests(unittest.TestCase):
 
     def test_complete_pipeline_and_matched_reference_rescoring(self):
         self.hdf(n=4)
+        interface = self.root / "mlip/Pt111w24H2O_380K_Heenen_VASP/nvt_test.h5"
+        interface.parent.mkdir()
+        interface.touch()  # Exclude it before reading frames or looking up metadata.
         metadata = self.root / "metadata.json"
         metadata.write_text(json.dumps({self.structure: self.meta}))
         ref_path = self.root / "ref" / self.structure / "traj.extxyz"
@@ -104,7 +109,7 @@ class PressurePipelineTests(unittest.TestCase):
         output = self.root / "out"
         args = Namespace(metadata=metadata, output_dir=output, reference_file=None,
                          traj_dir=[self.root/"mlip"], prefix=None, model=None,
-                         include_interfaces=False, ref_dir=self.root/"ref", reference_first_step=0,
+                         ref_dir=self.root/"ref", reference_first_step=0,
                          bins=8, no_plots=False)
         pairs = pipeline.run_pipeline(args)
         self.assertEqual(pairs.n_mlip_frames.iloc[0], 3)
@@ -121,6 +126,41 @@ class PressurePipelineTests(unittest.TestCase):
         pd.concat([ref,tail]).to_csv(full_ref,index=False)
         score = build_pair_rows(output, full_ref, pipeline.SUFFIX, 8)
         self.assertAlmostEqual(score.pressure_similarity.iloc[0], 1)
+
+    def test_old_interface_rows_do_not_affect_metrics_or_failure_penalties(self):
+        pairs = pd.DataFrame({
+            "system": [self.structure, self.structure, "Pt111w24H2O_380K_Heenen_VASP"],
+            "system_type": ["pure metals", "pure metals", "metal-water interfaces"],
+            "mlip_model": ["test", "other", "test"],
+            "pressure_similarity": [0.8, 0.6, 0.0], "bins": [8] * 3,
+        })
+        penalized = add_failed_system_penalties(
+            pairs, self.root, "mlip-trajs-torchsim-eager", None, set(), 8
+        )
+        self.assertEqual(set(penalized.system), {self.structure})
+        self.assertEqual(len(penalized), 2)
+        system_means, model_means, type_means = write_metric_outputs(
+            pairs, self.root / "pairs.csv", self.root / "systems.csv",
+            self.root / "models.csv", self.root / "types.csv", None,
+        )
+        self.assertEqual(set(pd.read_csv(self.root / "pairs.csv").system), {self.structure})
+        self.assertEqual(set(system_means.system), {self.structure})
+        self.assertEqual(set(type_means.system_type), {"pure metals"})
+        self.assertAlmostEqual(model_means.set_index("model").loc["test",
+                              "final_mean_pressure_similarity"], 0.8)
+
+    def test_pressure_mae_filters_interface_in_old_summaries(self):
+        pd.DataFrame({
+            "trajectory_file": [f"/data/{self.structure}/nvt_test.h5",
+                                "/data/Pt111w24H2O_380K_Heenen_VASP/nvt_test.h5"],
+            "absolute_mean_error_GPa": [2.0, 1000.0],
+        }).to_csv(self.root / "test_same-simulation-length_pressure_trajectory_summary.csv",
+                  index=False)
+        for excluded in (None, set()):
+            comparison = build_pressure_mae_from_trajectory_summaries(
+                self.root, excluded_system_types=excluded
+            )
+            self.assertEqual(comparison.error_GPa.tolist(), [2.0])
 
     def test_nested_evaluator_outputs_use_sibling_references_and_keep_mode(self):
         results = self.root / "results"

@@ -589,7 +589,8 @@ vdos/        Fourier-transform the Hann-windowed velocity autocorrelation
 pareto_plots/ Combine accuracy/similarity metrics with MD timings and scaling.
 ```
 
-The pressure stage excludes Pt(111) + 24 H2O, and CuAu cannot contribute a
+Pressure evaluation, aggregation, and plots always exclude Pt(111) + 24 H2O,
+including previously saved results. CuAu cannot contribute a
 reference pressure because its AIMD trajectory has no stress values.
 
 <!-- ## V1 historical MD

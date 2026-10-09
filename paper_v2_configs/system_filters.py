@@ -13,6 +13,10 @@ MOLECULAR_CRYSTALS = frozenset(
     }
 )
 DEFAULT_EXCLUDED_SYSTEM_TYPES = ("molecular crystals",)
+SYSTEM_COLUMNS = (
+    "system", "System", "structure", "system_type", "sys_type",
+    "trajectory", "trajectory_file",
+)
 
 
 def is_molecular_crystal(system) -> bool:
@@ -41,6 +45,27 @@ def include_system(system, include_molecular_crystals: bool = False) -> bool:
     return include_molecular_crystals or not is_molecular_crystal(system)
 
 
+def is_metal_water_interface(system) -> bool:
+    """Recognize the Pt/water benchmark by system name, type, or trajectory path."""
+    value = str(system).strip().lower().replace(chr(92), "/")
+    if value == "metal-water interfaces":
+        return True
+    if "pt111w24h2o" not in value:
+        return False
+    path = Path(value)
+    name = path.parent.name if path.suffix in {
+        ".extxyz", ".xyz", ".h5", ".hdf5", ".traj", ".csv",
+    } else path.name
+    return name.split("_", 1)[0] == "pt111w24h2o"
+
+
+def include_pressure_system(system, include_molecular_crystals: bool = False) -> bool:
+    """Pressure always excludes Pt/water, even when crystals are included."""
+    return not is_metal_water_interface(system) and include_system(
+        system, include_molecular_crystals
+    )
+
+
 def add_molecular_crystal_option(parser) -> None:
     parser.add_argument(
         "--include-molecular-crystals",
@@ -65,15 +90,17 @@ def filter_molecular_crystals(frame, include_molecular_crystals: bool = False):
     if include_molecular_crystals:
         return frame.copy()
     keep = frame.index.to_series().map(lambda _: True).astype(bool)
-    for column in (
-        "system",
-        "System",
-        "structure",
-        "system_type",
-        "sys_type",
-        "trajectory",
-        "trajectory_file",
-    ):
+    for column in SYSTEM_COLUMNS:
         if column in frame:
             keep &= ~frame[column].map(is_molecular_crystal)
+    return frame.loc[keep].copy()
+
+
+def filter_pressure_systems(frame, include_molecular_crystals: bool = False):
+    """Apply pressure exclusions to current and previously saved detailed tables."""
+    frame = filter_molecular_crystals(frame, include_molecular_crystals)
+    keep = frame.index.to_series().map(lambda _: True).astype(bool)
+    for column in SYSTEM_COLUMNS:
+        if column in frame:
+            keep &= ~frame[column].map(is_metal_water_interface)
     return frame.loc[keep].copy()

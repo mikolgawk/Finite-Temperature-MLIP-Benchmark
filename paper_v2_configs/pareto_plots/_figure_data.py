@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import pandas as pd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = SCRIPT_DIR.parent
+sys.path.insert(0, str(CONFIG_DIR))
+from system_filters import filter_pressure_systems
 
 SOURCES = (
     "mlip-trajs-ase",
@@ -140,7 +143,7 @@ def load_pressure(
     mode: str | None = None,
 ) -> pd.DataFrame:
     """Load pressure errors, optionally selecting generated provenance columns."""
-    df = pd.read_csv(path)
+    df = filter_pressure_systems(pd.read_csv(path), include_molecular_crystals=True)
     for column, value in (("backend", backend), ("mode", mode)):
         if value is not None and column in df.columns:
             df = df.loc[df[column].astype(str).str.lower() == value.lower()].copy()

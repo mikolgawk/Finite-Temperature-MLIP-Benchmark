@@ -18,13 +18,18 @@ import pandas as pd
 from ase import Atoms
 from ase.io import write
 
-from system_filters import filter_molecular_crystals, is_molecular_crystal
+from system_filters import (
+    filter_molecular_crystals, is_molecular_crystal,
+    filter_pressure_systems, include_pressure_system, include_system,
+    is_metal_water_interface,
+)
 
 
 HERE = Path(__file__).resolve().parent
 SOURCE = "mlip-trajs-torchsim-eager"
 METAL = "bulkCu_1000K_Kapil"
 CRYSTAL = "naphthalene_295K_Sharma_S"
+INTERFACE = "Pt111w24H2O_380K_Heenen_VASP"
 
 
 def load_module(relative):
@@ -37,6 +42,41 @@ def load_module(relative):
 
 
 class SystemFilterTests(unittest.TestCase):
+    def test_pressure_exclusion_is_specific_to_the_interface(self):
+        for value in ("Pt111w24H2O", INTERFACE, f"/data/{INTERFACE}/nvt_model.h5",
+                      "Metal-water interfaces"):
+            self.assertTrue(is_metal_water_interface(value))
+            self.assertFalse(include_pressure_system(value, True))
+        alloy = "bulkPt3Co_300K_J.Kioseoglou_VASP"
+        self.assertTrue(include_pressure_system(alloy))
+        self.assertTrue(include_system(INTERFACE))
+        frame = pd.DataFrame({"system": [METAL, alloy, INTERFACE, CRYSTAL]})
+        self.assertEqual(filter_pressure_systems(frame).system.tolist(), [METAL, alloy])
+        self.assertEqual(filter_pressure_systems(frame, True).system.tolist(),
+                         [METAL, alloy, CRYSTAL])
+        for column, value in (("system_type", "Metal-water interfaces"),
+                              ("trajectory_file", f"/ref/{INTERFACE}/traj.extxyz")):
+            self.assertTrue(filter_pressure_systems(pd.DataFrame({column: [value]})).empty)
+        self.assertEqual(len(frame), 4)
+        self.assertTrue(filter_pressure_systems(frame.iloc[:0]).empty)
+
+    def test_pressure_correlations_filter_old_detailed_tables(self):
+        frame = pd.DataFrame({"model": ["mace-mp-0"] * 2,
+                              "system": [METAL, INTERFACE],
+                              "pressure_error_percent": [20.0, 100.0]})
+        with tempfile.TemporaryDirectory() as tmp:
+            csv = Path(tmp) / "pressure.csv"
+            frame.to_csv(csv, index=False)
+            tables = load_module("pareto_plots/_figure_data.py")
+            self.assertEqual(tables.load_pressure(csv).pressure_error_percent.tolist(), [20.0])
+        correlations = load_module("vdos/figure_SI_7_8_9.py")
+        self.assertEqual(correlations.standardize_pressure(frame).pressure_error_percent.tolist(),
+                         [20.0])
+        for script in ("pareto_plots/figure_7.py", "pareto_plots/figure_SI_13.py"):
+            figure = load_module(script)
+            prepared = figure._prepare_pressure_df(frame, 10.0, True)
+            self.assertEqual(prepared["Pressure Error [%]"].tolist(), [20.0])
+
     def test_names_paths_and_saved_tables(self):
         for name in ("anthracene", "naphthalene", "pentacene", "picene", "tetracene"):
             self.assertTrue(is_molecular_crystal(name))
@@ -181,11 +221,11 @@ class SystemFilterTests(unittest.TestCase):
                 {
                     "trajectory_file": [
                         f"/ref/{s}/traj.extxyz"
-                        for s in (METAL, CRYSTAL)
+                        for s in (METAL, CRYSTAL, INTERFACE)
                         for _ in range(3)
                     ],
-                    "frame_index": [0, 1, 2] * 2,
-                    "pressure_GPa": [1.0, 2.0, 3.0] * 2,
+                    "frame_index": [0, 1, 2] * 3,
+                    "pressure_GPa": [1.0, 2.0, 3.0] * 3,
                 }
             )
             frames.to_csv(
@@ -240,6 +280,13 @@ class SystemFilterTests(unittest.TestCase):
     def test_pressure_evaluation_defaults_and_cached_system_selection(self):
         evaluator = load_module("pressures/pressure_evaluator.py")
         with self.trajectories() as (root, _):
+            # An excluded interface must never need valid frames or reference metadata.
+            interface_folder = root / "data" / SOURCE / INTERFACE
+            interface_folder.mkdir()
+            (interface_folder / "nvt_mace-mp-0.h5").touch()
+            (interface_folder / "md_timing_mace-mp-0.csv").write_text(
+                f"calculator,system,n_steps\nmace-mp-0,{INTERFACE},7\n"
+            )
             # CuAu has no reference stress and should not invalidate the cache.
             skipped = "bulkCuAu_500K-Artrith_VASP"
             folder = root / "data" / SOURCE / skipped
