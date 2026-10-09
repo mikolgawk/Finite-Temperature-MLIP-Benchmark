@@ -33,6 +33,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from correlation_labels import position_model_labels
 
 
 FONT_SIZE = 6
@@ -123,17 +124,11 @@ def plot_scatter(merged: pd.DataFrame, output_plot: Path) -> None:
             return tier_colors["tier_4"]
         return "#757575"
 
-    try:
-        from adjustText import adjust_text
-    except Exception:
-        adjust_text = None
-
     fig, ax = plt.subplots(figsize=(3.53 * 1.5, 3.53 * 1.5))
 
     colors = [model_color(m) for m in merged["model"].to_numpy()]
     ax.scatter(x, y, c=colors, edgecolor="k", linewidth=0.4, s=40)
 
-    label_texts = []
     for xi, yi, model in zip(x, y, merged["model"]):
         txt = ax.annotate(
             display_name(model),
@@ -146,10 +141,7 @@ def plot_scatter(merged: pd.DataFrame, output_plot: Path) -> None:
             va='bottom',
             bbox=dict(boxstyle='round,pad=0.08', facecolor='white', edgecolor='none', alpha=0.55),
         )
-        label_texts.append(txt)
-
-    if adjust_text is not None and label_texts:
-        adjust_text(label_texts, ax=ax, x=x, y=y, only_move={'points': 'xy', 'text': 'xy'})
+        txt._model_point_label = True
 
     if len(merged) >= 2:
         try:
@@ -183,6 +175,7 @@ def plot_scatter(merged: pd.DataFrame, output_plot: Path) -> None:
 
     output_plot.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
+    position_model_labels(fig, [ax])
     fig.savefig(output_plot)
     plt.close(fig)
 

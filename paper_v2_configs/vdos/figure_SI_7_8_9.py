@@ -2,7 +2,6 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "adjustText>=1.3",
 #   "matplotlib>=3.9",
 #   "numpy>=1.26",
 #   "pandas>=2.2",
@@ -40,11 +39,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
-
-try:
-    from adjustText import adjust_text
-except Exception:
-    adjust_text = None
+from correlation_labels import inward_label_offset, position_model_labels
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -350,73 +345,6 @@ def model_color(model: str, tier_colors: dict[str, tuple[float, float, float]]) 
     if model in TIER_4_MODELS:
         return tier_colors["tier_4"]
     return "#757575"
-
-
-def inward_label_offset(
-    ax: plt.Axes,
-    x_value: float,
-) -> tuple[tuple[int, int], str, str]:
-    x_min, x_max = ax.get_xlim()
-
-    x_fraction = 0.5
-    if x_max > x_min:
-        x_fraction = (x_value - x_min) / (x_max - x_min)
-
-    x_offset = 3
-    horizontal_alignment = "left"
-    if x_fraction >= 0.65:
-        x_offset = -3
-        horizontal_alignment = "right"
-    elif x_fraction <= 0.35:
-        x_offset = 12
-
-    return (x_offset, 3), horizontal_alignment, "bottom"
-
-
-def keep_model_labels_inside_axes(fig: plt.Figure, axes: np.ndarray) -> None:
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    for ax in axes.ravel():
-        axis_bbox = ax.get_window_extent(renderer)
-        label_texts = [
-            text for text in ax.texts if getattr(text, "_keep_inside_axes", False)
-        ]
-        for _ in range(3):
-            moved_any = False
-            for text in label_texts:
-                text_bbox = text.get_window_extent(renderer)
-                dx_pixels = 0.0
-                dy_pixels = 0.0
-                padding = 1.0
-
-                if text_bbox.x0 < axis_bbox.x0 + padding:
-                    dx_pixels = axis_bbox.x0 + padding - text_bbox.x0
-                elif text_bbox.x1 > axis_bbox.x1 - padding:
-                    dx_pixels = axis_bbox.x1 - padding - text_bbox.x1
-
-                if text_bbox.y0 < axis_bbox.y0 + padding:
-                    dy_pixels = axis_bbox.y0 + padding - text_bbox.y0
-                elif text_bbox.y1 > axis_bbox.y1 - padding:
-                    dy_pixels = axis_bbox.y1 - padding - text_bbox.y1
-
-                if dx_pixels == 0.0 and dy_pixels == 0.0:
-                    continue
-
-                x_offset, y_offset = text.get_position()
-                points_per_pixel = 72.0 / fig.dpi
-                text.set_position(
-                    (
-                        x_offset + dx_pixels * points_per_pixel,
-                        y_offset + dy_pixels * points_per_pixel,
-                    )
-                )
-                moved_any = True
-
-            if not moved_any:
-                break
-            fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
-            axis_bbox = ax.get_window_extent(renderer)
 
 
 def standardize_force_rmse(df_means_raw: pd.DataFrame) -> pd.DataFrame:
@@ -766,7 +694,6 @@ def plot_single_error_figure(
         ax.scatter(x, y, c=colors, edgecolor="k", linewidth=0.4, s=40)
         ax.margins(x=0.08, y=0.12)
 
-        label_texts = []
         for xi, yi, model in zip(x, y, sub["calculator"].to_numpy()):
             xytext, horizontal_alignment, vertical_alignment = inward_label_offset(
                 ax, xi
@@ -788,37 +715,7 @@ def plot_single_error_figure(
                     "alpha": 0.55,
                 },
             )
-            txt._keep_inside_axes = True
-            label_texts.append(txt)
-
-        if adjust_text is not None and label_texts:
-            adjust_kwargs = {
-                "texts": label_texts,
-                "ax": ax,
-                "x": x,
-                "y": y,
-                "avoid_self": True,
-                "only_move": {"points": "xy", "text": "xy"},
-                "force_text": (1.2, 1.4),
-                "force_points": (0.8, 1.0),
-                "expand_points": (1.3, 1.4),
-                "expand_text": (1.2, 1.3),
-                "lim": 400,
-                "arrowprops": {
-                    "arrowstyle": "-",
-                    "color": "0.5",
-                    "lw": 0.4,
-                    "alpha": 0.45,
-                },
-                "ensure_inside_axes": True,
-                "expand_axes": False,
-            }
-            try:
-                adjust_text(**adjust_kwargs)
-            except TypeError:
-                adjust_kwargs.pop("ensure_inside_axes")
-                adjust_kwargs.pop("expand_axes")
-                adjust_text(**adjust_kwargs)
+            txt._model_point_label = True
 
         try:
             if np.nanstd(x) > 0.0:
@@ -848,9 +745,9 @@ def plot_single_error_figure(
     add_tier_legend(fig, tier_colors)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    keep_model_labels_inside_axes(fig, axes)
+    position_model_labels(fig, axes.ravel())
     fig.tight_layout(rect=[0, 0, 1, 0.90])
-    keep_model_labels_inside_axes(fig, axes)
+    position_model_labels(fig, axes.ravel())
     fig.savefig(output_path)
     print(f"Saved {output_path}")
     plt.close(fig)
