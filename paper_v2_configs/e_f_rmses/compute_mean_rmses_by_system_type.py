@@ -75,8 +75,19 @@ def list_rmse_csv_files(data_dir: Path) -> list[Path]:
         for legacy_file in sorted((data_dir.parent / legacy_name).glob('rmse-results-all_*.csv')):
             if not (data_dir / current_name / legacy_file.name).is_file():
                 csv_files.append(legacy_file)
-    csv_files.extend(sorted((data_dir.parent / 'e-f-predictions-ase').rglob('rmse-results-all_*.csv')))
-    return sorted(csv_files)
+    for backend_directory in ('e-f-predictions-torchsim', 'e-f-predictions-ase'):
+        csv_files.extend(sorted(
+            (data_dir.parent / backend_directory).rglob('rmse-results-all_*.csv')
+        ))
+
+    # Prefer the default root when another layout contains the same source/model.
+    # Identical model names from different execution sources remain separate.
+    preferred_files = {}
+    for csv_file in csv_files:
+        preferred_files.setdefault(
+            (csv_source(csv_file), extract_model_name(csv_file)), csv_file
+        )
+    return sorted(preferred_files.values())
 
 
 def extract_model_name(csv_path: Path) -> str:

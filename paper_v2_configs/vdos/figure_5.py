@@ -367,21 +367,6 @@ def pick_reference_row(subset: pd.DataFrame, system: str) -> pd.Series | None:
     return rows.sort_values("vdos_error_percent").iloc[0]
 
 
-def full_penalty_models(
-    subset: pd.DataFrame, tier_models: list[str]
-) -> list[str]:
-    """Return tier models assigned the explicit 100% no-data penalty."""
-    tier_subset = subset[subset["mlip_model"].isin(tier_models)].copy()
-    if tier_subset.empty:
-        return []
-    errors = tier_subset.groupby("mlip_model")["vdos_error_percent"].mean()
-    return sorted(
-        str(model)
-        for model, error in errors.items()
-        if np.isfinite(error) and np.isclose(float(error), 100.0)
-    )
-
-
 def error_to_percent(series: pd.Series) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce")
     if values.dropna().empty:
@@ -750,8 +735,7 @@ def load_normalized_pairs(path: Path, include_molecular_crystals: bool = False) 
     out["mlip_model"] = out["mlip_model"].map(canonicalize_model_name)
     out = out.dropna(subset=["mlip_model"])
     out = out[out["mlip_model"].isin(ALLOWED_MODELS)].copy()
-    # Keep explicit 100% penalty rows even though they intentionally have no
-    # spectrum paths. The panel legend reports them without drawing a curve.
+    # Keep explicit 100% penalty rows for scoring and representative-system selection.
     out = out.dropna(subset=["vdos_error_percent"])
     out["mlip_file"] = out["mlip_file"].fillna("").astype(str)
     out["ref_file"] = out["ref_file"].fillna("").astype(str)
@@ -906,7 +890,6 @@ def plot_combined(
             best_model, worst_model = pick_best_worst_models_for_tier(
                 representative_subset, tier_models
             )
-            plotted_models: set[str] = set()
 
             ax.plot(
                 x_ref,
@@ -938,7 +921,6 @@ def plot_combined(
                             alpha=0.9,
                             linestyle="-",
                         )
-                        plotted_models.add(best_model)
                     except Exception:
                         pass
 
@@ -963,7 +945,6 @@ def plot_combined(
                             linestyle="--",
                             alpha=0.9,
                         )
-                        plotted_models.add(worst_model)
                     except Exception:
                         pass
 
@@ -987,13 +968,6 @@ def plot_combined(
                 ax.tick_params(labelbottom=False)
 
             handles, labels = ax.get_legend_handles_labels()
-            for model in full_penalty_models(representative_subset, tier_models):
-                if model in plotted_models:
-                    continue
-                handles.append(
-                    Line2D([], [], color=tier_color, linestyle=":", linewidth=1.4)
-                )
-                labels.append(f"{display_name(model)} (100.0%; no VDOS data)")
             if np.isfinite(tier_mean_error):
                 handles = handles + [
                     Line2D([], [], color="none", linestyle="none", linewidth=0)

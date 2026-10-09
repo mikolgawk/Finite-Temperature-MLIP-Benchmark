@@ -18,6 +18,41 @@ from metric_sources import SOURCE_DATASETS
 
 
 class SourceOutputTests(unittest.TestCase):
+    def test_rmse_discovers_backend_specific_torchsim_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = {}
+            for value, mode in enumerate(('md_eager', 'md_accelerated'), 1):
+                directory = root / 'e-f-predictions-torchsim' / mode
+                directory.mkdir(parents=True)
+                pd.DataFrame({
+                    'system': ['bulkCu'],
+                    'trajectory': ['/ref/bulkCu_300K/traj.extxyz'],
+                    'energy_rmse': [value], 'force_rmse': [value * 10],
+                }).to_csv(directory / 'rmse-results-all_shared.csv', index=False)
+                source = ('mlip-trajs-torchsim-eager' if mode == 'md_eager'
+                          else 'mlip-trajs-torchsim-accelerated')
+                expected[source] = value
+            with patch.object(rmse, 'torchsim_md_succeeded', return_value=True):
+                data = rmse.load_all_data(root / 'e-f-predictions', sources=set(expected))
+            self.assertEqual(data.set_index('source')['energy_rmse'].to_dict(), expected)
+            self.assertEqual(len(data), 2)
+
+    def test_rmse_prefers_default_layout_without_merging_same_named_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            canonical = root / 'e-f-predictions/md_eager/rmse-results-all_shared.csv'
+            alternate = root / 'e-f-predictions-torchsim/md_eager/rmse-results-all_shared.csv'
+            legacy = root / 'md/rmse-results-all_shared.csv'
+            ase = root / 'e-f-predictions-ase/md_eager/rmse-results-all_shared.csv'
+            for path in (canonical, alternate, legacy, ase):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            self.assertEqual(
+                set(rmse.list_rmse_csv_files(root / 'e-f-predictions')),
+                {canonical, ase},
+            )
+
     def test_rmse_means_are_separate_for_all_four_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -385,19 +385,6 @@ def format_model_label(model_name: str, system_errors: dict[str, float]) -> str:
     return f"{name}{suffix}"
 
 
-def full_penalty_models(
-    tier_models: list[str], system_errors: dict[str, float]
-) -> list[str]:
-    """Return tier models assigned the explicit 100% no-data penalty."""
-    penalized = []
-    for model in tier_models:
-        model = normalize_model_name(model)
-        error = system_errors.get(model, np.nan)
-        if np.isfinite(error) and np.isclose(float(error), 100.0):
-            penalized.append(model)
-    return penalized
-
-
 def tier_mean_rdf_error(tier_models, model_means: dict[str, float]) -> float:
     errors = []
     for model in tier_models:
@@ -664,7 +651,6 @@ def plot_combined(
 
             mean_rdf_error = tier_mean_rdf_error(tier_models, model_means)
             best_model, worst_model = pick_best_worst(tier_models)
-            plotted_models: set[str] = set()
             rdf_ax.plot(r_ref, g_ref, color="black", linewidth=2.0, label="Reference")
 
             if best_model:
@@ -679,7 +665,6 @@ def plot_combined(
                         linestyle="-",
                         label=format_model_label(best_model, system_errors),
                     )
-                    plotted_models.add(best_model)
 
             if worst_model and worst_model != best_model:
                 worst_data = load_saved_rdf(system, worst_model, rdf_dir)
@@ -693,7 +678,6 @@ def plot_combined(
                         linestyle="--",
                         label=format_model_label(worst_model, system_errors),
                     )
-                    plotted_models.add(worst_model)
 
             rdf_ax.set_xlim(0, None)
             if is_right_col:
@@ -712,13 +696,6 @@ def plot_combined(
             rdf_ax.grid()
 
             handles, labels = rdf_ax.get_legend_handles_labels()
-            for model in full_penalty_models(tier_models, system_errors):
-                if model in plotted_models:
-                    continue
-                handles.append(
-                    Line2D([], [], color=tier_color, linestyle=":", linewidth=1.4)
-                )
-                labels.append(f"{display_name(model)} (100.0%; no RDF data)")
             if np.isfinite(mean_rdf_error):
                 mean_handle = Line2D([], [], color="none", linestyle="none")
                 handles.append(mean_handle)

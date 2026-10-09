@@ -458,7 +458,6 @@ def plot_combined(
                 )
 
             best, worst, scores = choose_best_worst(tier_models, model_scores)
-            plotted_models: set[str] = set()
             for model, label, style in (
                 (best, "Reference (best)", "-"),
                 (worst, "Reference (worst)", "--"),
@@ -483,7 +482,6 @@ def plot_combined(
                     linewidth=1.5,
                     label=format_model_label(best, scores.get(best), prefix),
                 )
-                plotted_models.add(best)
             if worst is not None and worst != best and worst in values_by_model:
                 ax.hist(
                     values_by_model[worst],
@@ -495,7 +493,6 @@ def plot_combined(
                     linestyle="--",
                     label=format_model_label(worst, scores.get(worst), "Worst"),
                 )
-                plotted_models.add(worst)
 
             if col == n_hist_cols - 1:
                 ax.set_ylabel(tier_label, labelpad=2)
@@ -507,21 +504,6 @@ def plot_combined(
                 ax.tick_params(labelbottom=False)
 
             handles, labels = ax.get_legend_handles_labels()
-            for model in tier_models:
-                error = scores.get(model, np.nan)
-                if (
-                    model in plotted_models
-                    or model in values_by_model
-                    or not np.isfinite(error)
-                    or not np.isclose(float(error), 100.0)
-                ):
-                    continue
-                handles.append(
-                    Line2D([], [], color=tier_color, linestyle=":", linewidth=1.4)
-                )
-                labels.append(
-                    f"{display_name(model)} (100.0%; no pressure data)"
-                )
             if handles:
                 handles.append(Line2D([], [], color="none", linestyle="none", linewidth=0))
                 labels.append(f"{tier_label} mean error: {format_error_value(mean_finite(scores.values()))}")

@@ -75,6 +75,10 @@ even when model names are identical. Existing raw RMSE and pressure input layout
 are still supported. Older aggregate CSVs at the results root are no longer used
 by the plotting entry points.
 
+RMSE aggregation also discovers evaluations under
+`paper_v2_configs/e_f_rmses/data/e-f-predictions-torchsim/`, including its
+`md_eager/` and `md_accelerated/` subdirectories.
+
 To generate only eager energy/force and pressure metrics:
 
 ```bash
