@@ -418,12 +418,12 @@ def plot_combined(
         pressures_dir, reference_file, bins, expected_models,
         include_molecular_crystals=include_molecular_crystals,
     )
-    n_hist_cols = 2
+    n_hist_cols = 3
     n_hist_rows = int(np.ceil(len(panels) / n_hist_cols))
     fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.25 + 1.15 * n_hist_rows)))
     outer_gs = gridspec.GridSpec(
         nrows=n_hist_rows + 2,
-        ncols=n_hist_cols,
+        ncols=n_hist_cols * 2,
         figure=fig,
         height_ratios=[0.78, 0.22] + [1.15] * n_hist_rows,
         hspace=0.48,
@@ -447,15 +447,19 @@ def plot_combined(
         )
         row = idx // n_hist_cols + 2
         col = idx % n_hist_cols
-        bottom_row = idx // n_hist_cols == n_hist_rows - 1
+        hist_grid_row = idx // n_hist_cols
+        bottom_row = hist_grid_row == n_hist_rows - 1
+        panels_in_row = min(n_hist_cols, len(panels) - hist_grid_row * n_hist_cols)
+        start_col = n_hist_cols - panels_in_row + col * 2
+        panel_spec = outer_gs[row, start_col:start_col + 2]
         sub_gs = gridspec.GridSpecFromSubplotSpec(
             nrows=len(TIER_DEFS),
             ncols=1,
-            subplot_spec=outer_gs[row, col],
+            subplot_spec=panel_spec,
             hspace=0.05,
         )
 
-        panel_ax = fig.add_subplot(outer_gs[row, col], frame_on=False)
+        panel_ax = fig.add_subplot(panel_spec, frame_on=False)
         panel_ax.tick_params(labelcolor="none", top=False, bottom=False, left=False, right=False)
         panel_ax.grid(False)
         panel_ax.set_ylabel("Density" if col == 0 else "", labelpad=8)
@@ -518,7 +522,7 @@ def plot_combined(
                     label=format_model_label(worst, scores.get(worst), "Worst"),
                 )
 
-            if col == n_hist_cols - 1:
+            if col == panels_in_row - 1:
                 ax.set_ylabel(tier_label, labelpad=2)
                 ax.yaxis.set_label_position("right")
             else:

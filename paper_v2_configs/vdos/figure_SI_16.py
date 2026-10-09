@@ -2,7 +2,6 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#   "adjustText>=1.3",
 #   "matplotlib>=3.9",
 #   "numpy>=1.26",
 #   "pandas>=2.2",
@@ -32,13 +31,10 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from correlation_labels import inward_label_offset, position_model_labels
+from pareto_plot_style import FIGURE_SIZE, MODEL_LABEL_STYLE, apply_pareto_style
 from md_success import registered_md_failure_reason
 from system_filters import add_molecular_crystal_option, include_system
-
-try:
-    from adjustText import adjust_text
-except Exception:
-    adjust_text = None
 
 FONT_SIZE = 6
 
@@ -74,47 +70,6 @@ def normalize_model_name(name: str) -> str:
 
 def display_name(model: str) -> str:
     return display_model_name(model)
-
-
-def add_spread_labels(ax, x_vals, y_vals, labels) -> None:
-    """Place labels with deterministic vertical separation without adjustText."""
-    ax.figure.canvas.draw()
-    points = ax.transData.transform(np.column_stack([x_vals, y_vals]))
-    axes_box = ax.get_window_extent()
-    gap = FONT_SIZE * ax.figure.dpi / 72.0 * 1.55
-    lower = axes_box.y0 + gap / 2
-    upper = axes_box.y1 - gap / 2
-
-    order = np.argsort(points[:, 1])
-    placed_y = points[:, 1].copy()
-    for previous, current in zip(order[:-1], order[1:]):
-        placed_y[current] = max(placed_y[current], placed_y[previous] + gap)
-    if placed_y[order[-1]] > upper:
-        placed_y[order] -= placed_y[order[-1]] - upper
-    for current, following in zip(order[-2::-1], order[:0:-1]):
-        placed_y[current] = min(placed_y[current], placed_y[following] - gap)
-    if placed_y[order[0]] < lower:
-        placed_y[order] += lower - placed_y[order[0]]
-
-    inverse = ax.transData.inverted()
-    midpoint = (axes_box.x0 + axes_box.x1) / 2
-    for (point_x, point_y), label_y, label in zip(points, placed_y, labels):
-        align_left = point_x < midpoint
-        label_x = point_x + 4 if align_left else point_x - 4
-        text_x, text_y = inverse.transform((label_x, label_y))
-        ax.annotate(
-            label,
-            xy=inverse.transform((point_x, point_y)),
-            xytext=(text_x, text_y),
-            textcoords="data",
-            fontsize=FONT_SIZE,
-            alpha=0.9,
-            ha="left" if align_left else "right",
-            va="center",
-            bbox=dict(boxstyle="round,pad=0.08", facecolor="white", edgecolor="none", alpha=0.75),
-            arrowprops=dict(arrowstyle="-", color="0.55", lw=0.4, alpha=0.6),
-            zorder=5,
-        )
 
 
 TIER_1 = ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]
@@ -352,7 +307,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
     pareto_df = df[pareto_mask].copy().sort_values("mean_time_per_step_ms")
     pareto_df["tier"] = pareto_df["model"].map(model_tier)
 
-    fig, ax = plt.subplots(figsize=(3.53 * 1.5, 3.53 * 1.5))
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE)
 
     for tier_name in ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Other"]:
         tier_df = all_df[all_df["tier"] == tier_name]
@@ -389,80 +344,25 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
         zorder=3,
     )
 
-    ax.set_xlim(right=590)
-
-    # Keep labels and their leader-line targets in data coordinates so adjustText
-    # cannot send labels outside the axes or make arrows converge spuriously.
-    label_texts = []
     x_vals = all_df["mean_time_per_step_ms"].to_numpy()
     y_vals = all_df["VDOS Error [%]"].to_numpy()
-    for xi, yi, m in zip(x_vals, y_vals, all_df["model"].values):
-        txt = ax.text(
-            xi,
-            yi,
-            display_name(str(m)),
-            fontsize=FONT_SIZE,
-            alpha=0.9,
-            ha="center",
-            va="center",
-            bbox=dict(
-                boxstyle="round,pad=0.08",
-                facecolor="white",
-                edgecolor="none",
-                alpha=0.7,
-            ),
-            zorder=5,
+    apply_pareto_style(ax, x_vals, y_vals, ylabel="VDOS error [%]")
+    for xi, yi, model in zip(x_vals, y_vals, all_df["model"]):
+        offset, horizontal, vertical = inward_label_offset(ax, float(xi))
+        label = ax.annotate(
+            display_name(str(model)),
+            xy=(xi, yi),
+            xytext=offset,
+            textcoords="offset points",
+            ha=horizontal,
+            va=vertical,
+            **MODEL_LABEL_STYLE,
         )
-        label_texts.append(txt)
-
-    ax.margins(x=0.08, y=0.08)
-    if adjust_text is None:
-        for txt in label_texts:
-            txt.remove()
-        add_spread_labels(
-            ax, x_vals, y_vals, [display_name(str(m)) for m in all_df["model"]]
-        )
-    elif label_texts:
-        try:
-            adjust_text(
-                label_texts,
-                ax=ax,
-                x=x_vals,
-                y=y_vals,
-                target_x=x_vals,
-                target_y=y_vals,
-                avoid_self=True,
-                prevent_crossings=True,
-                ensure_inside_axes=True,
-                expand_axes=True,
-                force_text=(0.8, 1.2),
-                force_static=(0.4, 0.7),
-                force_pull=(0.015, 0.025),
-                force_explode=(0.7, 1.0),
-                expand=(1.35, 1.55),
-                max_move=(60, 60),
-                min_arrow_len=10,
-                iter_lim=3000,
-                arrowprops=dict(
-                    arrowstyle="-",
-                    color="0.55",
-                    lw=0.45,
-                    alpha=0.65,
-                    shrinkA=4,
-                    shrinkB=3,
-                ),
-            )
-        except Exception:
-            pass
-
-    ax.set_xlabel("Mean time per step [ms]")
-    ax.set_ylabel("VDOS error [%]")
-    # ax.set_title("Pareto Front: VDOS Error vs Force Eval Time")
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=True)
+        label._model_point_label = True
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
+    position_model_labels(fig, [ax], max_offset_points=6, max_distance_points=6)
     fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 

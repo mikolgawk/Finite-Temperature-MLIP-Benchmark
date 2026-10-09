@@ -426,7 +426,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 
 	fig.tight_layout()
-	position_model_labels(fig, [ax])
+	position_model_labels(fig, [ax], max_offset_points=6, max_distance_points=6)
 	fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
 	plt.close(fig)
 

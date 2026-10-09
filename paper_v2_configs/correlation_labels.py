@@ -1,4 +1,4 @@
-"""Place correlation-plot model names beside their points without connectors."""
+"""Place model names beside plotted points without connectors."""
 
 from collections.abc import Iterable
 
@@ -27,8 +27,13 @@ def inward_label_offset(
 
 def position_model_labels(
     fig: plt.Figure, axes: Iterable[plt.Axes], *, max_offset_points: int = 3,
+    max_distance_points: float | None = None,
 ) -> None:
-    """Choose nearby label positions without drawing lines or moving labels away."""
+    """Choose nearby labels, optionally bounding their distance from the dot.
+
+    ``max_distance_points`` measures the gap from the dot to the nearest text
+    edge, including when labels sit above or beside their dot.
+    """
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
 
@@ -61,8 +66,11 @@ def position_model_labels(
                     )
                 )
 
-        for _ in range(3):
-            for text in label_texts:
+        passes = 6 if max_distance_points is not None else 3
+        for pass_index in range(passes):
+            texts = (label_texts[::-1] if max_distance_points is not None
+                     and pass_index % 2 else label_texts)
+            for text in texts:
                 preferred = inward_label_offset(ax, float(text.xy[0]))
                 candidates = [preferred, ((preferred[0][0], -3), preferred[1], "top")]
                 candidates.extend(
@@ -86,6 +94,15 @@ def position_model_labels(
                             ((0, -distance), "center", "top"),
                         ]
                     )
+                if max_distance_points is not None:
+                    candidates.extend(
+                        [
+                            ((3, 0), "left", "center"),
+                            ((-3, 0), "right", "center"),
+                            ((0, 5), "center", "bottom"),
+                            ((0, -5), "center", "top"),
+                        ]
+                    )
                 other_boxes = fixed_boxes + [
                     other.get_window_extent(renderer)
                     for other in label_texts
@@ -99,6 +116,13 @@ def position_model_labels(
                     text.set_horizontalalignment(horizontal)
                     text.set_verticalalignment(vertical)
                     box = text.get_window_extent(renderer)
+                    if max_distance_points is not None:
+                        point_x, point_y = ax.transData.transform(text.xy)
+                        dx = max(box.x0 - point_x, point_x - box.x1, 0.0)
+                        dy = max(box.y0 - point_y, point_y - box.y1, 0.0)
+                        distance = (dx * dx + dy * dy) ** 0.5 * 72 / fig.dpi
+                        if distance > max_distance_points:
+                            continue
                     score = (
                         max(0.0, box.width * box.height - overlap_area(box, axis_bbox)),
                         sum(overlap_area(box, other) for other in other_boxes),

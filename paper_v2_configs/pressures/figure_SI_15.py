@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Plot Pareto front for pressure error vs force evaluation time per atom.
+"""Plot Pareto front for pressure error vs mean MD step time.
 
 Objective:
 - minimize pressure error
-- minimize mean force evaluation time per atom [ms]
+- minimize mean MD time per step [ms]
 
 The script supports pressure score CSVs from either:
 1) pressure similarity outputs (percent-based columns), or
@@ -27,6 +27,8 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from correlation_labels import inward_label_offset, position_model_labels
+from pareto_plot_style import FIGURE_SIZE, MODEL_LABEL_STYLE, apply_pareto_style
 from md_success import registered_md_failure_reason
 from system_filters import add_molecular_crystal_option, include_pressure_system, filter_pressure_systems
 
@@ -242,17 +244,16 @@ def model_tier(model_name: str) -> str:
 
 def plot_pareto(df: pd.DataFrame, y_axis_label: str, output_file: Path) -> None:
     all_df = df.copy()
+    if "dataset" not in all_df.columns:
+        all_df["dataset"] = "dataset"
     all_df["tier"] = all_df["model"].map(model_tier)
     y_values = all_df["pressure_error"].to_numpy()
-    y_min = float(np.min(y_values))
-    y_max = float(np.max(y_values))
-    y_padding = max((y_max - y_min) * 0.05, 1e-6)
 
-    datasets = all_df.get("dataset", pd.Series("dataset", index=all_df.index)).unique()
+    datasets = all_df["dataset"].unique()
     fig, axes = plt.subplots(
         1,
         len(datasets),
-        figsize=(3.53 * 1.5 * len(datasets), 3.53 * 1.5),
+        figsize=(FIGURE_SIZE[0] * len(datasets), FIGURE_SIZE[1]),
         sharey=True,
         squeeze=False,
     )
@@ -297,26 +298,26 @@ def plot_pareto(df: pd.DataFrame, y_axis_label: str, output_file: Path) -> None:
             zorder=3,
         )
 
+        apply_pareto_style(ax, dataset_df["mean_time_ms_per_step"].to_numpy(), y_values)
         for _, row in dataset_df.iterrows():
-            ax.annotate(
+            offset, horizontal, vertical = inward_label_offset(ax, float(row["mean_time_ms_per_step"]))
+            label = ax.annotate(
                 display_name(row["model"]),
                 (row["mean_time_ms_per_step"], row["pressure_error"]),
-                xytext=(3, 3),
+                xytext=offset,
                 textcoords="offset points",
-                fontsize=FONT_SIZE,
+                ha=horizontal,
+                va=vertical,
+                **MODEL_LABEL_STYLE,
             )
-
-        ax.set_xlabel("Mean time per step [ms]")
-        ax.grid(True, linestyle="--", alpha=0.4)
-        ax.set_xlim(right=1050)
-        ax.set_ylim(y_min - y_padding, y_max + y_padding)
-        ax.legend(loc="best", frameon=True)
+            label._model_point_label = True
 
     axes[0].set_ylabel(y_axis_label)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
+    fig.tight_layout()
+    position_model_labels(fig, axes, max_offset_points=6, max_distance_points=6)
+    fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
     print(f"Saved: {output_file}")
@@ -326,7 +327,7 @@ def plot_pareto(df: pd.DataFrame, y_axis_label: str, output_file: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Plot Pareto front of pressure error vs force evaluation time per atom."
+        description="Plot Pareto front of pressure error vs mean MD step time."
     )
     parser.add_argument(
         "--timings-dir",

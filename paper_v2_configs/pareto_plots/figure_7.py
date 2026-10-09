@@ -668,7 +668,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 	axes[0].set_ylabel(r"$\bar{E}_{RPV}$ [%]")
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 	fig.tight_layout()
-	position_model_labels(fig, axes)
+	position_model_labels(fig, axes, max_offset_points=6, max_distance_points=6)
 	fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
 	plt.close(fig)
 
