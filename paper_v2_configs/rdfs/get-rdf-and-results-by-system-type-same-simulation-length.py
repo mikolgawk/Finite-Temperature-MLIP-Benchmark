@@ -30,7 +30,11 @@ from ase.io import iread
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
+from md_success import (
+    discover_torchsim_md_trajectories,
+    registered_md_failure_reason,
+    torchsim_md_succeeded,
+)
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -469,7 +473,11 @@ def process_source(args: argparse.Namespace, source: str) -> None:
 
             mlip_path = system_models.get(model)
             if mlip_path is None:
-                print("    [PENALTY] Trajectory missing; assigning 100% RDF error")
+                reason = (
+                    registered_md_failure_reason(trajectory_dir / system / f"nvt_{model}.h5")
+                    if torchsim_source else None
+                ) or "Trajectory missing or incomplete"
+                print(f"    [PENALTY] {reason}; assigning 100% RDF error")
                 record_error(model, system)
                 continue
 

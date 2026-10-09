@@ -26,6 +26,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from md_success import registered_md_failure_reason
 from system_filters import add_molecular_crystal_option, include_system
 
 
@@ -82,6 +83,10 @@ def read_timing_files(
 
 	for csv_path in paths:
 		if not include_system(csv_path.parent.name, include_molecular_crystals):
+			continue
+		reason = registered_md_failure_reason(csv_path)
+		if reason:
+			skipped.append(f"{csv_path}: audited failed MD ({reason})")
 			continue
 		try:
 			df = pd.read_csv(csv_path)

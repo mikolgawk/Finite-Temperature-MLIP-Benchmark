@@ -1,7 +1,29 @@
-"""Identify model/system pairs with a completed TorchSim MD run."""
+"""Identify completed TorchSim MD runs, excluding audited physical failures."""
 
 import csv
+from functools import lru_cache
 from pathlib import Path
+
+
+FAILED_MD_RUNS_FILE = Path(__file__).with_name("failed_md_runs.csv")
+
+
+@lru_cache(maxsize=1)
+def load_failed_md_runs() -> dict[tuple[str, str, str], str]:
+    """Load audited failures keyed by exact source, system, and raw model name."""
+    with FAILED_MD_RUNS_FILE.open(newline="") as handle:
+        return {
+            (row["source"], row["system"], row["model"]): row["failure_reason"]
+            for row in csv.DictReader(handle)
+        }
+
+
+def registered_md_failure_reason(trajectory: Path) -> str | None:
+    """Look up a trajectory or timing file without mixing trajectory sources."""
+    sources = {source for source, _, _ in load_failed_md_runs()}
+    source = next((part for part in reversed(trajectory.parts) if part in sources), None)
+    model = trajectory.stem.removeprefix("nvt_").removeprefix("md_timing_")
+    return load_failed_md_runs().get((source, trajectory.parent.name, model))
 
 
 def discover_torchsim_md_trajectories(source_dir: Path) -> dict[str, dict[str, Path]]:
@@ -23,8 +45,11 @@ def torchsim_md_succeeded(trajectory: Path) -> bool:
 
     TorchSim MD runners leave an empty timing CSV when a system fails. A partial
     HDF5 file may also survive a failed run, so its presence alone is insufficient.
+    Audited physical failures remain failed even when their timing CSV is complete.
     """
     if not trajectory.is_file() or not trajectory.name.startswith("nvt_"):
+        return False
+    if registered_md_failure_reason(trajectory) is not None:
         return False
     model = trajectory.stem.removeprefix("nvt_")
     timing = trajectory.with_name(f"md_timing_{model}.csv")

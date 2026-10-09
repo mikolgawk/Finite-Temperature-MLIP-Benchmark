@@ -32,6 +32,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from md_success import registered_md_failure_reason
 from system_filters import add_molecular_crystal_option, include_system
 
 try:
@@ -183,6 +184,8 @@ def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool =
     all_systems = [d for d in timings_dir.iterdir() if d.is_dir() and include_system(d.name, include_molecular_crystals)]
     for system_dir in sorted(all_systems):
         for csv_path in sorted(system_dir.glob("md_timing_*.csv")):
+            if registered_md_failure_reason(csv_path):
+                continue
             model_name = normalize_model_name(csv_path.stem.removeprefix("md_timing_"))
             try:
                 df = pd.read_csv(csv_path)

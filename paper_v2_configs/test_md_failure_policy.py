@@ -15,7 +15,12 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
+from md_success import (
+    discover_torchsim_md_trajectories,
+    load_failed_md_runs,
+    registered_md_failure_reason,
+    torchsim_md_succeeded,
+)
 from test_system_filters import load_module
 
 
@@ -26,7 +31,7 @@ INTERFACE = "Pt111w24H2O_380K_Heenen_VASP"
 CRYSTAL = "naphthalene_295K_Sharma_S"
 NO_STRESS = "bulkCuAu_500K-Artrith_VASP"
 NEQUIP = "nequip-oam-l-force-only"
-MACE = "mace-mpa-0"
+MACE = "mace-mp-0"
 FAILED_MODEL = "never-completes"
 
 
@@ -116,6 +121,106 @@ class MdFailurePolicyTest(unittest.TestCase):
                 f"calculator,system,n_steps\nother,{METAL},100\n"
             )
             self.assertFalse(torchsim_md_succeeded(path))
+
+    def test_audited_failures_override_completed_records_and_are_scoped(self):
+        registry = load_failed_md_runs()
+        expected = {
+            (SOURCES[0], HYDROGEN, "mace-mh-omat"),
+            (SOURCES[0], HYDROGEN, "mace-mpa-0"),
+            (SOURCES[0], INTERFACE, "eSEN-30M-OAM-force-only"),
+            (SOURCES[1], HYDROGEN, "grace-mp"),
+            (SOURCES[1], HYDROGEN, "mace-mh-omat-compile"),
+            (SOURCES[1], HYDROGEN, "mace-mpa-0-compile"),
+        }
+        self.assertEqual(set(registry), expected)
+        for source, system, model in expected:
+            other_source = SOURCES[1] if source == SOURCES[0] else SOURCES[0]
+            for run_source, run_system, should_succeed in (
+                (source, system, False),
+                (other_source, system, True),
+                ("mlip-trajs-ase", system, True),
+                (source, METAL, True),
+            ):
+                with self.subTest(source=run_source, system=run_system, model=model):
+                    folder = self.data / run_source / run_system
+                    folder.mkdir(parents=True, exist_ok=True)
+                    path = folder / f"nvt_{model}.h5"
+                    with h5py.File(path, "w"):
+                        pass
+                    path.with_name(f"md_timing_{model}.csv").write_text(
+                        f"calculator,system,n_steps\n{model},{run_system},100\n"
+                    )
+                    self.assertEqual(torchsim_md_succeeded(path), should_succeed)
+                    reason = registered_md_failure_reason(path)
+                    self.assertEqual(reason, None if should_succeed else registry[source, system, model])
+                    self.assertEqual(registered_md_failure_reason(
+                        path.with_name(f"md_timing_{model}.csv")
+                    ), reason)
+                    self.assertIn(model, discover_torchsim_md_trajectories(self.data / run_source)[run_system])
+
+    def test_timing_and_pareto_loaders_exclude_audited_completed_runs(self):
+        loaders = [load_module(path).load_model_avg_timings for path in (
+            "rdfs/figure_SI_14.py", "vdos/figure_SI_16.py",
+            "pressures/figure_SI_15.py", "pareto_plots/figure_7.py",
+        )]
+        timings = load_module("pareto_plots/plot-model-timings.py")
+        for source in SOURCES:
+            folder = self.root / "timing-audit" / source
+            registered = [(system, model) for entry_source, system, model in load_failed_md_runs()
+                          if entry_source == source]
+            for system, model in registered:
+                for run_system, seconds in ((system, 10.0), (METAL, 0.1)):
+                    target = folder / run_system
+                    target.mkdir(parents=True, exist_ok=True)
+                    (target / f"md_timing_{model}.csv").write_text(
+                        "calculator,system,n_steps,elapsed_seconds,seconds_per_step\n"
+                        f"{model},{run_system},100,{seconds * 100},{seconds}\n"
+                    )
+            for loader in loaders:
+                with self.subTest(source=source, loader=loader.__module__):
+                    frame = loader(folder)
+                    self.assertEqual(len(frame), len(registered))
+                    column = next(name for name in frame if name.startswith("mean_time"))
+                    np.testing.assert_allclose(frame[column], 100.0)
+            frame, skipped = timings.read_timing_files(folder)
+            self.assertEqual(set(frame.system), {METAL})
+            self.assertEqual(len(frame), len(registered))
+            self.assertEqual(len(skipped), len(registered))
+            self.assertTrue(all("audited failed MD" in reason for reason in skipped))
+
+    def test_registered_completed_failures_exclude_cached_dimensional_errors(self):
+        rmse = load_module("e_f_rmses/compute_mean_rmses_by_system_type.py")
+        for source in SOURCES:
+            with self.subTest(source=source):
+                trajectory = self.data / source / HYDROGEN / f"nvt_{MACE}.h5"
+                self.assertTrue(torchsim_md_succeeded(trajectory))
+                folder = self.pressure_inputs(source)
+                summary_path = folder / f"{MACE}_same-simulation-length_pressure_trajectory_summary.csv"
+                summary = pd.read_csv(summary_path)
+                summary.loc[summary.system == HYDROGEN, "absolute_mean_error_GPa"] = 1e10
+                summary.to_csv(summary_path, index=False)
+                predictions = self.root / "cached-rmse" / source
+                predictions.mkdir(parents=True)
+                pd.DataFrame({
+                    "system": ["bulkCu", "H"],
+                    "trajectory": [f"/old-machine/{system}/traj.extxyz" for system in (METAL, HYDROGEN)],
+                    "energy_rmse": [1.0, 1e6], "force_rmse": [2.0, 1e6],
+                }).to_csv(predictions / f"rmse-results-all_{MACE}.csv", index=False)
+                reason = "Unphysical temperature blow-up during completed MD"
+                failures = {**load_failed_md_runs(), (source, HYDROGEN, MACE): reason}
+                with patch("md_success.load_failed_md_runs", return_value=failures):
+                    self.assertFalse(torchsim_md_succeeded(trajectory))
+                    models, pairs, _ = self.compute_pressure(source, folder)
+                    h = pairs[(pairs.system == HYDROGEN) & (pairs.mlip_model == MACE)].iloc[0]
+                    self.assertEqual(h.pressure_error_percent, 100.0)
+                    self.assertEqual(h.failure_reason, reason)
+                    model = models.set_index("model").loc[MACE]
+                    self.assertEqual(model.pressure_error_percent, 50.0)
+                    self.assertEqual(model.pressure_mae_GPa, 1.0)
+                    frame = rmse.load_all_data(predictions, md_data_dir=self.data)
+                    self.assertEqual(frame.system.tolist(), ["bulkCu"])
+                    self.assertEqual(frame.energy_rmse.mean(), 1.0)
+                    self.assertEqual(frame.force_rmse.mean(), 2.0)
 
     def test_pressure_overrides_partial_scores_and_rebuilds_cached_mae(self):
         for source in SOURCES:
@@ -215,6 +320,18 @@ class MdFailurePolicyTest(unittest.TestCase):
             rmse.load_all_data(folder, md_data_dir=self.data)
 
     def test_rdf_and_vdos_penalize_failed_jobs_even_with_saved_curves(self):
+        self.check_rdf_and_vdos_penalties()
+
+    def test_rdf_and_vdos_penalize_registered_completed_jobs_with_saved_curves(self):
+        failures = {
+            **load_failed_md_runs(),
+            **{(source, HYDROGEN, MACE): "Unphysical temperature blow-up during completed MD"
+               for source in SOURCES},
+        }
+        with patch("md_success.load_failed_md_runs", return_value=failures):
+            self.check_rdf_and_vdos_penalties(mace_hydrogen_failed=True)
+
+    def check_rdf_and_vdos_penalties(self, mace_hydrogen_failed=False):
         rdf = load_module("rdfs/get-rdf-and-results-by-system-type-same-simulation-length.py")
         vdos = load_module("vdos/get_normalized_VDOS.py")
         curve = (np.array([0.0, 1.0, 2.0]), np.array([0.2, 0.7, 0.1]))
@@ -223,6 +340,8 @@ class MdFailurePolicyTest(unittest.TestCase):
                 output = self.root / "rdf-output"
                 saved = output / source / "rdf_same_simulation_length_saved" / "mlip" / NEQUIP / f"{HYDROGEN}.csv"
                 rdf.save_rdf_csv(*curve, saved)
+                if mace_hydrogen_failed:
+                    rdf.save_rdf_csv(*curve, saved.parent.parent / MACE / saved.name)
                 args = SimpleNamespace(results_dir=output, systems=None, models=None,
                                        excluded_system_types=["molecular crystals"], dry_run=False)
                 with (
@@ -238,11 +357,13 @@ class MdFailurePolicyTest(unittest.TestCase):
                 scores = pd.read_csv(output / source / "rdf_similarity_scores_same_simulation_length.csv").set_index("Calculator")
                 self.assertEqual(scores.loc[NEQUIP, "Mean RDF Error [%]"], 25.0)
                 self.assertEqual(scores.loc[FAILED_MODEL, "Mean RDF Error [%]"], 100.0)
-                self.assertEqual(scores.loc[MACE, "Mean RDF Error [%]"], 0.0)
+                self.assertEqual(scores.loc[MACE, "Mean RDF Error [%]"], 25.0 if mace_hydrogen_failed else 0.0)
 
                 output = self.root / "vdos-output"
                 saved = output / source / vdos.SPECTRA_DIR / "mlip" / NEQUIP / f"{HYDROGEN}.csv"
                 vdos.save_spectrum(saved, curve)
+                if mace_hydrogen_failed:
+                    vdos.save_spectrum(saved.parent.parent / MACE / saved.name, curve)
                 args = SimpleNamespace(results_dir=output, systems=None, models=None,
                                        excluded_system_types=["molecular crystals"], dry_run=False,
                                        numerical_mlip_velocities=False, pad_factor=1, chunk_size=4,
@@ -256,10 +377,14 @@ class MdFailurePolicyTest(unittest.TestCase):
                 pairs = pd.read_csv(output / source / vdos.PAIR_OUTPUT)
                 self.assertEqual(pairs.loc[(pairs.model == NEQUIP) & (pairs.system == HYDROGEN),
                                           "vdos_error_percent"].tolist(), [100.0])
+                if mace_hydrogen_failed:
+                    hydrogen = pairs[(pairs.model == MACE) & (pairs.system == HYDROGEN)].iloc[0]
+                    self.assertEqual(hydrogen.vdos_error_percent, 100.0)
+                    self.assertIn("Unphysical temperature", hydrogen.failure_reason)
                 scores = pd.read_csv(output / source / vdos.MODEL_OUTPUT).set_index("model")
                 self.assertEqual(scores.loc[NEQUIP, "vdos_error_percent"], 25.0)
                 self.assertEqual(scores.loc[FAILED_MODEL, "vdos_error_percent"], 100.0)
-                self.assertEqual(scores.loc[MACE, "vdos_error_percent"], 0.0)
+                self.assertEqual(scores.loc[MACE, "vdos_error_percent"], 25.0 if mace_hydrogen_failed else 0.0)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,11 @@ EXCLUDED_MODELS = {"pet-mad"}
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 from metric_sources import SOURCES, SOURCE_DATASETS, pressure_input_dir
-from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
+from md_success import (
+    discover_torchsim_md_trajectories,
+    load_failed_md_runs,
+    torchsim_md_succeeded,
+)
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -510,6 +514,11 @@ def add_failed_system_penalties(
         for system, model in zip(pair_df["system"], pair_df["mlip_model"])
     }
     backend, mode = SOURCE_DATASETS[source]
+    registered_failures = {
+        (system, canonical_pressure_model_name(model)): reason
+        for (entry_source, system, model), reason in load_failed_md_runs().items()
+        if entry_source == source
+    }
     penalties = []
     for system in sorted(systems):
         for model in sorted(discovered_models):
@@ -538,7 +547,7 @@ def add_failed_system_penalties(
                     "bins": int(bins),
                     "reference_file": "",
                     "model_file": "",
-                    "failure_reason": (
+                    "failure_reason": registered_failures.get((system, model_name)) or (
                         "pressure evaluation missing or invalid"
                         if status.get((system, model_name), False)
                         else "MLIP MD trajectory missing or incomplete"

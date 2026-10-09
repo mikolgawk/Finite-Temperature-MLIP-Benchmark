@@ -1,0 +1,7 @@
+source,system,model,failure_reason,target_temperature_K,peak_temperature_K,first_unphysical_step
+mlip-trajs-torchsim-eager,H_1050K_Rupp_QE,mace-mh-omat,Unphysical temperature blow-up during completed MD,1050,269681068.026709,66
+mlip-trajs-torchsim-eager,H_1050K_Rupp_QE,mace-mpa-0,Unphysical temperature blow-up during completed MD,1050,641757038.6675317,63
+mlip-trajs-torchsim-eager,Pt111w24H2O_380K_Heenen_VASP,eSEN-30M-OAM-force-only,Non-finite velocities from step 268 and positions from step 269 during completed MD,380,3439.6837030897495,268
+mlip-trajs-torchsim-accelerated,H_1050K_Rupp_QE,grace-mp,Unphysical temperature blow-up during completed MD,1050,2.078837633849629e19,5
+mlip-trajs-torchsim-accelerated,H_1050K_Rupp_QE,mace-mh-omat-compile,Unphysical temperature blow-up during completed MD,1050,1495906853.4392002,66
+mlip-trajs-torchsim-accelerated,H_1050K_Rupp_QE,mace-mpa-0-compile,Unphysical temperature blow-up during completed MD,1050,2441056.3995807758,63

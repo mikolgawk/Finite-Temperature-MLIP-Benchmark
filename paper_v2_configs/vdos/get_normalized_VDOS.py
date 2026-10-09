@@ -31,7 +31,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from md_success import discover_torchsim_md_trajectories, torchsim_md_succeeded
+from md_success import (
+    discover_torchsim_md_trajectories,
+    registered_md_failure_reason,
+    torchsim_md_succeeded,
+)
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -585,7 +589,10 @@ def process_source(
             print(f"  Model: {model}")
             mlip_path = models.get(model)
             if mlip_path is None:
-                reason = "MLIP trajectory missing"
+                reason = (
+                    registered_md_failure_reason(trajectory_dir / system / f"nvt_{model}.h5")
+                    if torchsim_source else None
+                ) or "MLIP trajectory missing or incomplete"
                 print(f"    [PENALTY] {reason}; assigning 100% VDOS error")
                 rows.append(
                     penalty_row(
