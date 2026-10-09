@@ -346,7 +346,7 @@ def main() -> None:
     parser.add_argument("--reference-file", default=None)
     parser.add_argument(
         "--output-file",
-        default="plots/plot_pressure_violin_distributions.pdf",
+        default="plots/figure_SI_4.pdf",
     )
     add_molecular_crystal_option(parser)
     args = parser.parse_args()

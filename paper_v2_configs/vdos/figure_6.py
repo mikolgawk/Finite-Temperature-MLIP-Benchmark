@@ -14,6 +14,9 @@ The main output keeps the correlation panels clean by labeling only models that
 are far from the fitted trend or from the central point cloud. A larger SI
 output with every model labeled is written by default for readers who want to
 identify all points.
+
+Use --exclude-hydrogen-force-rmse to exclude hydrogen only from the force RMSE
+means and save separate outputs with a _no_hydrogen_force_rmse suffix.
 """
 
 from __future__ import annotations
@@ -28,14 +31,15 @@ import numpy as np
 import pandas as pd
 
 from figure_SI_7_8_9 import (
-    DEFAULT_PRESSURE_FILE,
     DEFAULT_SCORE_DIR,
     DEFAULT_SOURCE,
     FONT_SIZE,
     LEGEND_FONT_SIZE,
-    SCRIPT_DIR,
     SOURCES,
+    add_force_rmse_exclusion_option,
+    correlation_output_path,
     display_name,
+    force_rmse_axis_label,
     load_joined_data,
     model_color,
     palette,
@@ -160,6 +164,7 @@ def plot_correlation_panel(
     threshold: float,
     max_labels: int,
     label_font_size: int,
+    correlation_at_top_right: bool = False,
 ) -> list[str]:
     sub = sub.copy()
     sub["x_value"] = sub[x_col].astype(float)
@@ -188,7 +193,13 @@ def plot_correlation_panel(
     try:
         if np.nanstd(x) > 0.0 and np.nanstd(y) > 0.0:
             r = np.corrcoef(x, y)[0, 1]
-            ax.text(0.02, 0.80, f"r = {r:.2f}", transform=ax.transAxes, va="bottom", fontsize=FONT_SIZE)
+            ax.text(
+                0.98 if correlation_at_top_right else 0.02,
+                0.985 if correlation_at_top_right else 0.80,
+                f"r = {r:.2f}", transform=ax.transAxes,
+                va="top" if correlation_at_top_right else "bottom",
+                ha="right" if correlation_at_top_right else "left", fontsize=FONT_SIZE,
+            )
     except Exception:
         pass
 
@@ -252,6 +263,7 @@ def render_figure(
     max_labels: int,
     figsize: tuple[float, float],
     label_font_size: int,
+    exclude_hydrogen_force_rmse: bool = False,
 ) -> dict[str, list[str]]:
     tier_colors = {
         "tier_1": palette[2],
@@ -263,14 +275,17 @@ def render_figure(
     fig, axes = plt.subplots(
         len(Y_METRICS),
         3,
-        figsize=figsize,
+        figsize=(figsize[0] * 1.3, figsize[1]) if exclude_hydrogen_force_rmse else figsize,
         sharex="col",
         sharey="row",
+        gridspec_kw={"width_ratios": [1.5, 1, 1]} if exclude_hydrogen_force_rmse else None,
     )
     label_summary: dict[str, list[str]] = {}
 
     for row_idx, (y_col, y_label) in enumerate(Y_METRICS):
         for col_idx, (x_col, x_label) in enumerate(X_METRICS):
+            if x_col == "force_rmse" and exclude_hydrogen_force_rmse:
+                x_label = force_rmse_axis_label(True)
             ax = axes[row_idx, col_idx]
             is_bottom_row = row_idx == len(Y_METRICS) - 1
             is_left_col = col_idx == 0
@@ -309,14 +324,16 @@ def render_figure(
                 threshold=threshold,
                 max_labels=max_labels,
                 label_font_size=label_font_size,
+                correlation_at_top_right=exclude_hydrogen_force_rmse,
             )
 
     add_tier_legend(fig, tier_colors)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    position_model_labels(fig, axes.ravel())
+    label_offset = 18 if exclude_hydrogen_force_rmse else 3
+    position_model_labels(fig, axes.ravel(), max_offset_points=label_offset)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
-    position_model_labels(fig, axes.ravel())
+    position_model_labels(fig, axes.ravel(), max_offset_points=label_offset)
     plt.savefig(output_path)
     plt.show()
     plt.close(fig)
@@ -344,10 +361,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Override the source-specific RMSE result directory with a directory "
-            "of rmse-results-all_*.csv files or a model-summary CSV."
+            "Override the source-specific RMSE input with per-system/model-summary "
+            "CSV or a directory of rmse-results-all_*.csv files. Hydrogen exclusion "
+            "requires per-system rows (default: rmse_per_system.csv)."
         ),
     )
+    add_force_rmse_exclusion_option(parser)
     parser.add_argument(
         "--rdf-file",
         type=Path,
@@ -357,7 +376,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pressure-file",
         type=Path,
-        default=DEFAULT_PRESSURE_FILE,
+        default=None,
         help="Generated CSV with model-level pressure histogram metrics.",
     )
     parser.add_argument(
@@ -391,18 +410,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-file",
         type=Path,
-        default=SCRIPT_DIR
-        / "plots"
-        / "plot_rdf_pressure_vdos_correlations_outlier_labels_3x3.pdf",
+        default=None,
         help="Clean main output path with only outlier labels.",
     )
     parser.add_argument(
         "--si-output-file",
-        default=str(
-            SCRIPT_DIR
-            / "plots"
-            / "plot_SI_rdf_pressure_vdos_correlations_all_labels_3x3.pdf"
-        ),
+        default=None,
         help="Larger SI output path with every model labeled. Use an empty string to skip.",
     )
     parser.add_argument(
@@ -431,7 +444,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the models labeled in each main-figure panel.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.output_file is None:
+        args.output_file = correlation_output_path("figure_6", args.exclude_hydrogen_force_rmse)
+    if args.si_output_file is None:
+        args.si_output_file = str(correlation_output_path(
+            "figure_6_all_labels", args.exclude_hydrogen_force_rmse,
+        ))
+    return args
 
 
 def main() -> None:
@@ -446,6 +466,7 @@ def main() -> None:
         max_labels=args.max_labels_per_panel,
         figsize=MAIN_FIGSIZE,
         label_font_size=OUTLIER_LABEL_FONT_SIZE,
+        exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
     )
 
     if args.si_output_file:
@@ -458,6 +479,7 @@ def main() -> None:
             max_labels=args.max_labels_per_panel,
             figsize=si_figsize,
             label_font_size=SI_LABEL_FONT_SIZE,
+            exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
         )
 
     if args.show_outlier_summary:

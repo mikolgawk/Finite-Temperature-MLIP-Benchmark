@@ -363,7 +363,7 @@ for index, count in enumerate(get_tier_counts(force_models), start=1):
 axes[0].text(0, 1.02, '(a)', transform=axes[0].transAxes, ha='left', va='bottom', fontsize=FONT_SIZE)
 axes[1].text(0, 1.02, '(b)', transform=axes[1].transAxes, ha='left', va='bottom', fontsize=FONT_SIZE)
 
-plot_path = plots_dir / 'plot_e_f_rmses_no_molecular_crystals.pdf'
+plot_path = plots_dir / 'figure_SI_4.pdf'
 plt.savefig(plot_path)
 print(f"Plot saved as {plot_path}")
 print(

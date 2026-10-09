@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pressure-mode", default=None, help="Default: inferred from --source.")
     parser.add_argument("--output-csv", type=Path, default=SCRIPT_DIR / "results/vdos_pressure_merged_same_length.csv")
     parser.add_argument("--output-json", type=Path, default=SCRIPT_DIR / "results/vdos_pressure_correlation_same_length.json")
-    parser.add_argument("--output-plot", type=Path, default=SCRIPT_DIR / "plots/correlation_SI_vdos_pressure_same_length.pdf")
+    parser.add_argument("--output-plot", type=Path, default=SCRIPT_DIR / "plots/figure_SI_11.pdf")
     return parser.parse_args()
 
 

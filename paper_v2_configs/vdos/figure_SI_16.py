@@ -162,7 +162,7 @@ SOURCES = (
     "mlip-trajs-ase-accelerated",
     "mlip-trajs-torchsim-accelerated",
 )
-DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_SI_pareto_vdos_time_same_length.pdf"
+DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "figure_SI_16.pdf"
 
 
 def source_input_paths(source: str) -> tuple[Path, Path]:

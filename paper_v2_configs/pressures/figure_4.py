@@ -727,7 +727,7 @@ def main() -> None:
     parser.add_argument("--bins", type=int, default=80, help="Number of histogram bins.")
     parser.add_argument(
         "--output-file",
-        default="plots/plot_pressure_panel_combined_pressure_mae.pdf",
+        default="plots/figure_4.pdf",
         help="Output plot file path.",
     )
     add_molecular_crystal_option(parser)

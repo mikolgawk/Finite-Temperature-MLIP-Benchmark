@@ -44,7 +44,7 @@ BASE_DIR = Path(__file__).resolve().parent
 from _plot_inputs import plot_args, read_metric_csv
 RESULTS_DIR, PLOTS_DIR = plot_args()
 INPUT_CSV = RESULTS_DIR / 'mean_metrics_by_system_type_and_model.csv'
-OUTPUT_PDF = PLOTS_DIR / 'plot_SI_force_rmse_by_system_type.pdf'
+OUTPUT_PDF = PLOTS_DIR / 'figure_SI_3.pdf'
 
 SYSTEM_TYPE_ORDER = [
     'pure metals',

@@ -148,7 +148,7 @@ TIER_COLORS = {
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_TIMINGS_DIR = SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-eager"
 DEFAULT_RDF_SCORES_FILE = SCRIPT_DIR / "results" / "rdf_similarity_scores_same_simulation_length.csv"
-DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_SI_pareto_rdf_time_same_length.pdf"
+DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "figure_SI_14.pdf"
 
 
 def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:

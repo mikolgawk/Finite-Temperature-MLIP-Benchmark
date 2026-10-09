@@ -9,7 +9,7 @@
 #   "seaborn>=0.13",
 # ]
 # ///
-"""Create every VDOS plot from existing, source-specific metric tables."""
+"""Create VDOS plots, including correlations with and without hydrogen force RMSE."""
 
 from __future__ import annotations
 
@@ -32,6 +32,18 @@ SOURCES = (
     "mlip-trajs-torchsim-accelerated",
 )
 MODEL_MEANS = "vdos_model_mean_ev_normalized_same_simulation_length.csv"
+NO_HYDROGEN_FORCE_SUFFIX = "_no_hydrogen_force_rmse"
+
+
+def without_hydrogen_force_rmse(command: list[str]) -> list[str]:
+    """Reuse correlation inputs and give the extra plots distinct output paths."""
+    variant = command.copy()
+    for index, argument in enumerate(variant[:-1]):
+        if argument.endswith("output-file"):
+            output = Path(variant[index + 1])
+            variant[index + 1] = str(output.with_stem(output.stem + NO_HYDROGEN_FORCE_SUFFIX))
+    variant.append("--exclude-hydrogen-force-rmse")
+    return variant
 
 
 def parse_args() -> argparse.Namespace:
@@ -85,14 +97,14 @@ def main() -> None:
                 [
                     sys.executable, "-u", str(HERE / "plot_vdos_results.py"),
                     "--model-means-file", str(source_results / MODEL_MEANS),
-                    "--output-file", str(source_plots / "plot_vdos_model_errors.pdf"),
+                    "--output-file", str(source_plots / "plot_vdos_results.pdf"),
                     "--title", f"Matched-length VDOS error: {source}",
                 ],
             ),
             (
                 "Figure 5",
                 [sys.executable, "-u", str(HERE / "figure_5.py"), *common,
-                 "--output-file", str(source_plots / "plot_vdos_panel_combined.pdf")],
+                 "--output-file", str(source_plots / "figure_5.pdf")],
             ),
             (
                 "Figure 6 and its SI companion",
@@ -102,28 +114,35 @@ def main() -> None:
                     "--pressure-file", str(pressure_file.resolve()),
                     "--f1-file", str(args.f1_file.resolve()),
                     "--ksrme-file", str(args.ksrme_file.resolve()),
-                    "--output-file", str(source_plots / "plot_rdf_pressure_vdos_correlations_outlier_labels_3x3.pdf"),
-                    "--si-output-file", str(source_plots / "plot_SI_rdf_pressure_vdos_correlations_all_labels_3x3.pdf"),
+                    "--output-file", str(source_plots / "figure_6.pdf"),
+                    "--si-output-file", str(source_plots / "figure_6_all_labels.pdf"),
                 ],
             ),
             (
                 "Figures SI 7, 8, and 9",
                 [
                     sys.executable, "-u", str(HERE / "figure_SI_7_8_9.py"), *common,
+                    "--vdos-model-means-file", str(source_results / MODEL_MEANS),
                     "--pressure-file", str(pressure_file.resolve()),
                     "--f1-file", str(args.f1_file.resolve()),
                     "--ksrme-file", str(args.ksrme_file.resolve()),
-                    "--rdf-output-file", str(source_plots / "plot_rdf_correlations_1x3.pdf"),
-                    "--pressure-output-file", str(source_plots / "plot_pressure_histogram_correlations_1x3_same_length.pdf"),
-                    "--vdos-output-file", str(source_plots / "plot_vdos_correlations_1x3_same_length.pdf"),
+                    "--rdf-output-file", str(source_plots / "figure_SI_7_8_9_rdf.pdf"),
+                    "--pressure-output-file", str(source_plots / "figure_SI_7_8_9_pressure.pdf"),
+                    "--vdos-output-file", str(source_plots / "figure_SI_7_8_9_vdos.pdf"),
                 ],
             ),
             (
                 "Figure SI 16",
                 [sys.executable, "-u", str(HERE / "figure_SI_16.py"), *common,
-                 "--output-file", str(source_plots / "plot_SI_pareto_vdos_time_same_length.pdf")],
+                 "--output-file", str(source_plots / "figure_SI_16.pdf")],
             ),
         ]
+        correlation_stages = [
+            (label + " without hydrogen force RMSE", without_hydrogen_force_rmse(command))
+            for label, command in stages
+            if Path(command[2]).name in {"figure_6.py", "figure_SI_7_8_9.py"}
+        ]
+        stages.extend(correlation_stages)
         for label, command in stages:
             if args.include_molecular_crystals and Path(command[2]).name in {'figure_5.py', 'figure_SI_16.py'}:
                 command.append("--include-molecular-crystals")

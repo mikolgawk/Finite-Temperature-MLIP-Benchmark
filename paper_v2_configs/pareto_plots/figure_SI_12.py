@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-plot",
         type=Path,
-        default=SCRIPT_DIR / "plots/correlation_SI_rdf_vdos_same_length.pdf",
+        default=SCRIPT_DIR / "plots/figure_SI_12.pdf",
         help="Path to save correlation scatter plot.",
     )
     parser.add_argument(

@@ -23,7 +23,7 @@ from model_display_names import display_model_name
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_INPUT = SCRIPT_DIR / "results" / "vdos_model_mean_ev_normalized_same_simulation_length.csv"
-DEFAULT_OUTPUT = SCRIPT_DIR / "plots" / "plot_vdos_model_errors.pdf"
+DEFAULT_OUTPUT = SCRIPT_DIR / "plots" / "plot_vdos_results.pdf"
 
 
 def parse_args() -> argparse.Namespace:

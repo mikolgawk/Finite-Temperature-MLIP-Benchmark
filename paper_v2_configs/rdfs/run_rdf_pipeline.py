@@ -252,7 +252,7 @@ def main() -> None:
                 f"Create figure 3 ({source})",
                 figure_3_command(
                     source_results,
-                    source_plots / "plot_rdf_panel_combined.pdf",
+                    source_plots / "fig_3.pdf",
                 ) + (["--include-molecular-crystals"] if args.include_molecular_crystals else []),
                 dry_run=args.dry_run,
             )
@@ -274,7 +274,7 @@ def main() -> None:
                 figure_si_14_command(
                     source_results,
                     timings_dir,
-                    source_plots / "plot_SI_pareto_rdf_time_same_length.pdf",
+                    source_plots / "figure_SI_14.pdf",
                 ) + (["--include-molecular-crystals"] if args.include_molecular_crystals else []),
                 dry_run=args.dry_run,
             )

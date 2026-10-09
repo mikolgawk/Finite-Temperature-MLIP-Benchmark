@@ -156,7 +156,7 @@ def plot_command(source: str, results_dir: Path, plots_dir: Path) -> list[str]:
         "--model-means-file",
         str(results_dir / source / MODEL_OUTPUT),
         "--output-file",
-        str(plots_dir / source / "plot_vdos_model_errors.pdf"),
+        str(plots_dir / source / "plot_vdos_results.pdf"),
         "--title",
         f"Matched-length VDOS error: {source}",
     ]

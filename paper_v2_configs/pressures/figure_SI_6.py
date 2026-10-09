@@ -63,7 +63,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_PRESSURES_DIR = SCRIPT_DIR.parent / "data" / "results" / "same-simulation-length"
 DEFAULT_REFERENCE_FILE = DEFAULT_PRESSURES_DIR / "reference_pressure_per_frame_same_simulation_length.csv"
 DEFAULT_RANKING_FILE = DEFAULT_PRESSURES_DIR / "model_pressure_error_metric.csv"
-DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_pressure_panel_combined_pressure_errors.pdf"
+DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "figure_SI_6.pdf"
 PER_FRAME_SUFFIX = "_same-simulation-length_pressure_per_frame.csv"
 
 palette = sns.color_palette("deep")

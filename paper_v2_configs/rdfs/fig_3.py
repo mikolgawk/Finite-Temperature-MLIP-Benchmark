@@ -149,7 +149,7 @@ DEFAULT_RDF_MEANS_FILE = DEFAULT_RDF_CSV_DIR / "rdf_similarity_scores_same_simul
 DEFAULT_REF_BASE = DATA_DIR / "ref-trajs"
 DEFAULT_MLIP_BASE = DATA_DIR / "mlip-trajs-20fs-tau"
 DEFAULT_RDF_SAVE_DIR = DEFAULT_RDF_CSV_DIR / "rdf_same_simulation_length_saved"
-DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "plot_rdf_panel_combined.pdf"
+DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "plots" / "fig_3.pdf"
 def load_rdf_csv(path: str):
     if not os.path.exists(path):
         return None

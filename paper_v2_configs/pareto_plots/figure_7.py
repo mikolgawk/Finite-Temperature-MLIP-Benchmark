@@ -131,7 +131,7 @@ DEFAULT_PRESSURE_METRICS_FILE = (
 DEFAULT_OUTPUT_FILE = (
 	SCRIPT_DIR
 	/ "plots"
-	/ "plot_pareto_combined_vdos_rdf_pressure_average_error_same_length.pdf"
+	/ "figure_7.pdf"
 )
 
 DEFAULT_OUTPUT_CSV = (

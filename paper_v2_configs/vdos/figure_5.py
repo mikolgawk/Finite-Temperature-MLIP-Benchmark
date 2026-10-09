@@ -1028,7 +1028,7 @@ def main() -> None:
     parser.add_argument(
         "--output-file",
         type=Path,
-        default=SCRIPT_DIR / "plots" / "plot_vdos_panel_combined.pdf",
+        default=SCRIPT_DIR / "plots" / "figure_5.pdf",
         help="Output plot file path.",
     )
     add_molecular_crystal_option(parser)

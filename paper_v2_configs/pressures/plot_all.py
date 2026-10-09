@@ -133,25 +133,25 @@ def main() -> None:
                 "Figure 4",
                 [sys.executable, "-u", str(HERE / "figure_4.py"), *base,
                  "--ranking-file", str(selected_mae), "--bins", str(args.bins),
-                 "--output-file", str(output_dir / "plot_pressure_panel_combined_pressure_mae.pdf")],
+                 "--output-file", str(output_dir / "figure_4.pdf")],
             ),
             (
                 "Figure SI 4",
                 [sys.executable, "-u", str(HERE / "figure_SI_4.py"), *base,
-                 "--output-file", str(output_dir / "plot_pressure_violin_distributions.pdf")],
+                 "--output-file", str(output_dir / "figure_SI_4.pdf")],
             ),
             (
                 "Figure SI 6",
                 [sys.executable, "-u", str(HERE / "figure_SI_6.py"), *base,
                  "--ranking-file", str(selected_error), "--bins", str(args.bins),
-                 "--output-file", str(output_dir / "plot_pressure_panel_combined_pressure_errors.pdf")],
+                 "--output-file", str(output_dir / "figure_SI_6.pdf")],
             ),
             (
                 "Figure SI 15",
                 [sys.executable, "-u", str(HERE / "figure_SI_15.py"),
                  "--timings-dir", str(CONFIG_DIR / "data" / source),
                  "--pressure-scores-file", str(selected_error),
-                 "--output-file", str(output_dir / "plot_SI_pareto_pressure_time_same_length.pdf")],
+                 "--output-file", str(output_dir / "figure_SI_15.pdf")],
             ),
             ]
             for label, command in stages:

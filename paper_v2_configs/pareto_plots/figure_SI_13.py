@@ -101,7 +101,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_PRESSURE_METRICS_FILE = DEFAULT_PRESSURE_FILE
 
 DEFAULT_OUTPUT_FILE = (
-	SCRIPT_DIR / "plots" / "plot_pareto_combined_vdos_rdf_pressure_same_length.pdf"
+	SCRIPT_DIR / "plots" / "figure_SI_13.pdf"
 )
 
 DEFAULT_OUTPUT_CSV = (

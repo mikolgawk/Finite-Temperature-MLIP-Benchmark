@@ -25,7 +25,9 @@ def inward_label_offset(
     return (x_offset, 3), horizontal_alignment, "bottom"
 
 
-def position_model_labels(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
+def position_model_labels(
+    fig: plt.Figure, axes: Iterable[plt.Axes], *, max_offset_points: int = 3,
+) -> None:
     """Choose nearby label positions without drawing lines or moving labels away."""
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -73,11 +75,24 @@ def position_model_labels(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
                         ((0, -3), "center", "top"),
                     ]
                 )
+                for distance in range(6, max_offset_points + 1, 3):
+                    candidates.extend(
+                        [
+                            ((3, distance), "left", "bottom"),
+                            ((3, -distance), "left", "top"),
+                            ((-3, distance), "right", "bottom"),
+                            ((-3, -distance), "right", "top"),
+                            ((0, distance), "center", "bottom"),
+                            ((0, -distance), "center", "top"),
+                        ]
+                    )
                 other_boxes = fixed_boxes + [
                     other.get_window_extent(renderer)
                     for other in label_texts
                     if other is not text
                 ]
+                if max_offset_points > 3:
+                    other_boxes = [box.padded(2 * fig.dpi / 72) for box in other_boxes]
                 best_position, best_score = candidates[0], (float("inf"), float("inf"))
                 for offset, horizontal, vertical in candidates:
                     text.set_position(offset)

@@ -84,7 +84,7 @@ DEFAULT_PRESSURE_SCORES_FILE = Path(
     "../data/results/same-simulation-length/model_pressure_error_metric.csv"
 )
 DEFAULT_OUTPUT_FILE = Path(
-    "plots/plot_SI_pareto_pressure_time_same_length.pdf"
+    "plots/figure_SI_15.pdf"
 )
 
 

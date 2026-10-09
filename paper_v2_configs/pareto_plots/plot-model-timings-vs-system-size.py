@@ -34,16 +34,16 @@ DEFAULT_ACCELERATED_TIMINGS_DIR = (
 	SCRIPT_DIR.parent / "data" / "mlip-trajs-torchsim-accelerated"
 )
 DEFAULT_EAGER_OUTPUT_PNG = (
-	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_eager.png"
+	SCRIPT_DIR / "plots" / "plot-model-timings-vs-system-size_eager.png"
 )
 DEFAULT_EAGER_OUTPUT_PDF = (
-	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_eager.pdf"
+	SCRIPT_DIR / "plots" / "plot-model-timings-vs-system-size_eager.pdf"
 )
 DEFAULT_ACCELERATED_OUTPUT_PNG = (
-	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_accelerated.png"
+	SCRIPT_DIR / "plots" / "plot-model-timings-vs-system-size_accelerated.png"
 )
 DEFAULT_ACCELERATED_OUTPUT_PDF = (
-	SCRIPT_DIR / "plots" / "model_timings_vs_system_size_accelerated.pdf"
+	SCRIPT_DIR / "plots" / "plot-model-timings-vs-system-size_accelerated.pdf"
 )
 DEFAULT_RESULTS_CSV = (
 	SCRIPT_DIR / "results" / "model_timings_vs_system_size_observations.csv"
