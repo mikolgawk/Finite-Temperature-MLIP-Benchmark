@@ -14,7 +14,9 @@ EXCLUDED_MODELS = {"pet-mad"}
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
-from metric_sources import SOURCES, SOURCE_DATASETS, pressure_input_dir
+from metric_sources import (
+    SOURCES, SOURCE_DATASETS, pressure_input_dir, cohort_model_files, model_trajectory_source,
+)
 from md_success import (
     discover_torchsim_md_trajectories,
     load_failed_md_runs,
@@ -151,7 +153,7 @@ def structure_from_trajectory_file(path_like: str) -> str:
 
 
 def parse_model_name(file_path: Path, suffix: str) -> str:
-    return normalize_model_name(file_path.name.removesuffix(suffix))
+    return canonical_pressure_model_name(file_path.name.removesuffix(suffix))
 
 
 def resolve_reference_pressure_file(
@@ -219,10 +221,10 @@ def resolve_model_reference_pressure_file(
     else:
         raise ValueError(f"Unrecognized model pressure CSV name: {model_file.name}")
     name = name.removesuffix("_same-simulation-length")
-    matched = pressures_dir / "references" / f"{name}.csv"
+    matched = model_file.parent / "references" / f"{name}.csv"
     if matched.is_file():
         return matched
-    if any((pressures_dir / "references").glob("*.csv")):
+    if any((model_file.parent / "references").glob("*.csv")):
         raise FileNotFoundError(
             f"No model-matched reference pressure CSV for {model_file.name}: {matched}"
         )
@@ -345,7 +347,9 @@ def build_pair_rows(
         if fallback_ref_df.empty:
             raise RuntimeError(f"No usable reference rows in {reference_file}")
 
-    model_files = sorted(pressures_dir.rglob(f"*{model_file_suffix}"))
+    model_files = cohort_model_files(pressures_dir, f"*{model_file_suffix}",
+                                     lambda path: parse_model_name(path, model_file_suffix),
+                                     recursive=True)
     model_files = [p for p in model_files if not p.name.startswith("reference_")]
     if models is not None:
         normalized_models = {
@@ -380,8 +384,11 @@ def build_pair_rows(
         if model_name.lower() in excluded_models_lower:
             continue
 
-        relative_parent = model_file.parent.relative_to(pressures_dir).parts
-        if len(relative_parent) >= 2:
+        file_source = pressure_source(model_file)
+        relative_parent = model_file.parent.parts[len(pressures_dir.parts):]
+        if file_source is not None:
+            backend, mode = SOURCE_DATASETS[file_source]
+        elif len(relative_parent) >= 2:
             backend, mode = relative_parent[-2:]
         elif relative_parent:
             backend, mode = "", relative_parent[-1]
@@ -482,7 +489,9 @@ def add_failed_system_penalties(
     discovered_models = set(pair_df["mlip_model"].astype(str)) | {model for _, model in status}
     discovered_models.update(
         canonical_pressure_model_name(parse_model_name(path, DEFAULT_MODEL_FILE_SUFFIX))
-        for path in pressures_dir.rglob(f"*{DEFAULT_MODEL_FILE_SUFFIX}")
+        for path in cohort_model_files(pressures_dir, f"*{DEFAULT_MODEL_FILE_SUFFIX}",
+                                       lambda path: parse_model_name(path, DEFAULT_MODEL_FILE_SUFFIX),
+                                       recursive=True)
         if not path.name.startswith("reference_")
     )
     if models is not None:
@@ -517,7 +526,7 @@ def add_failed_system_penalties(
     registered_failures = {
         (system, canonical_pressure_model_name(model)): reason
         for (entry_source, system, model), reason in load_failed_md_runs().items()
-        if entry_source == source
+        if entry_source == model_trajectory_source(source, model)
     }
     penalties = []
     for system in sorted(systems):
@@ -584,7 +593,7 @@ def load_pressure_mae_columns(pressure_comparison_file: Path | None) -> pd.DataF
         return None
 
     out = df[keep_cols].copy()
-    out["model"] = out["model"].map(normalize_model_name)
+    out["model"] = out["model"].map(canonical_pressure_model_name)
     out = out.rename(columns=rename_cols)
     return out
 
@@ -604,8 +613,9 @@ def build_pressure_mae_from_trajectory_summaries(
     )
     rows: list[pd.DataFrame] = []
     source_status = {}
-    for summary_file in sorted(
-        pressures_dir.rglob(f"*{TRAJECTORY_SUMMARY_SUFFIX}")
+    for summary_file in cohort_model_files(
+        pressures_dir, f"*{TRAJECTORY_SUMMARY_SUFFIX}",
+        lambda path: path.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX), recursive=True,
     ):
         summary = pd.read_csv(summary_file)
         summary = filter_pressure_systems(summary, include_molecular_crystals=True)
@@ -622,7 +632,7 @@ def build_pressure_mae_from_trajectory_summaries(
             if summary.empty:
                 continue
 
-        model = normalize_model_name(
+        model = canonical_pressure_model_name(
             summary_file.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX)
         )
         if (
@@ -654,12 +664,16 @@ def build_pressure_mae_from_trajectory_summaries(
     result = pd.concat(rows, ignore_index=True).dropna(subset=["error_GPa"])
     if result.empty:
         return None
-    return (
+    result = (
         result.groupby("model", as_index=False)["error_GPa"]
         .mean()
         .sort_values("error_GPa")
         .reset_index(drop=True)
     )
+    if source is not None:
+        result["trajectory_source"] = result["model"].map(
+            lambda model: model_trajectory_source(source, model))
+    return result
 
 
 def ensure_pressure_comparison_file(
@@ -715,7 +729,7 @@ def write_metric_outputs(
     pair_output_file.parent.mkdir(parents=True, exist_ok=True)
     pair_df.to_csv(pair_output_file, index=False)
 
-    provenance = [column for column in ("backend", "mode") if column in pair_df]
+    provenance = [column for column in ("backend", "mode", "trajectory_source") if column in pair_df]
     system_model_keys = [*provenance, "system", "mlip_model"]
     model_keys = [*provenance, "mlip_model"]
     model_system_type_keys = [*provenance, "mlip_model", "system_type"]
@@ -830,6 +844,8 @@ def compute_pressure_metric(
     if source is not None:
         pair_df['backend'], pair_df['mode'] = SOURCE_DATASETS[source]
         pair_df['source'] = source
+        pair_df['trajectory_source'] = pair_df['mlip_model'].map(
+            lambda model: model_trajectory_source(source, model))
     if excluded_system_types:
         excluded = {value.strip().lower() for value in excluded_system_types}
         pair_df = pair_df[
@@ -971,12 +987,14 @@ def main() -> None:
 
     inputs = args.pressures_dir.resolve()
     selected = args.sources or [source for source in SOURCES
-        if any(pressure_input_dir(inputs, source).glob(f'*{args.model_file_suffix}'))]
+        if cohort_model_files(pressure_input_dir(inputs, source), f'*{args.model_file_suffix}',
+                              lambda path: parse_model_name(path, args.model_file_suffix))]
     if args.models and not args.sources:
         requested_models = {canonical_pressure_model_name(model) for model in args.models}
         selected = [source for source in selected if any(
             canonical_pressure_model_name(parse_model_name(csv_file, args.model_file_suffix)) in requested_models
-            for csv_file in pressure_input_dir(inputs, source).glob(f'*{args.model_file_suffix}')
+            for csv_file in cohort_model_files(pressure_input_dir(inputs, source), f'*{args.model_file_suffix}',
+                                                lambda path: parse_model_name(path, args.model_file_suffix))
         )]
     # A flat custom input directory must be explicitly assigned to a source.
     if not selected:

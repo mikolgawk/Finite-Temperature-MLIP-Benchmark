@@ -35,6 +35,7 @@ from md_success import (
     registered_md_failure_reason,
     torchsim_md_succeeded,
 )
+from metric_sources import cohort_model_path, model_trajectory_source
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -428,7 +429,8 @@ def process_source(args: argparse.Namespace, source: str) -> None:
         model_results = results[model]
         assert isinstance(model_results, list)
         model_results.append(error)
-        detailed_results[model].append({"System": system, "RDF_Error": error})
+        detailed_results[model].append({"System": system, "RDF_Error": error,
+                                       "trajectory_source": model_trajectory_source(source, model)})
 
     mlip_only_systems = sorted(set(mlip_trajectories) - set(reference_trajectories))
     for system in mlip_only_systems:
@@ -474,7 +476,8 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             mlip_path = system_models.get(model)
             if mlip_path is None:
                 reason = (
-                    registered_md_failure_reason(trajectory_dir / system / f"nvt_{model}.h5")
+                    registered_md_failure_reason(cohort_model_path(
+                        trajectory_dir / system / f"nvt_{model}.h5", model))
                     if torchsim_source else None
                 ) or "Trajectory missing or incomplete"
                 print(f"    [PENALTY] {reason}; assigning 100% RDF error")
@@ -534,9 +537,9 @@ def process_source(args: argparse.Namespace, source: str) -> None:
 
     with open(results_dir / "rdf_similarity_scores_same_simulation_length.csv", "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Calculator", "Mean RDF Error [%]"])
+        writer.writerow(["Calculator", "Mean RDF Error [%]", "trajectory_source"])
         for model, error in results.items():
-            writer.writerow([model, f"{error:.3f}"])
+            writer.writerow([model, f"{error:.3f}", model_trajectory_source(source, model)])
 
     for model in model_names:
         with open(
@@ -544,7 +547,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             "w",
             newline="",
         ) as f:
-            writer = csv.DictWriter(f, fieldnames=["System", "RDF_Error"])
+            writer = csv.DictWriter(f, fieldnames=["System", "RDF_Error", "trajectory_source"])
             writer.writeheader()
             writer.writerows(detailed_results[model])
 

@@ -18,7 +18,9 @@ import figure_5 as vdos
 import figure_4 as pressure_mae
 import figure_SI_6 as pressure
 from get_model_pressure_errors import write_metric_outputs
-from subplot_filters import display_error_percent
+from subplot_filters import (
+    display_error_percent, display_full_error_legend, format_subplot_error_percent,
+)
 
 
 MODELS = ["mace-mp-0", "chgnet", "grace-mp"]
@@ -28,8 +30,51 @@ SYSTEM = "bulkAu_1500K_Kapil"
 class SubplotFilterTests(unittest.TestCase):
     def test_full_error_tolerance_does_not_hide_nearby_valid_scores(self):
         self.assertTrue(display_error_percent(99.999))
+        self.assertEqual(format_subplot_error_percent(99.999), "<100.0%")
+        self.assertEqual(format_subplot_error_percent(100.0), "100.0%")
         for error in (100.0, 100.0 - 1e-10, np.nan, np.inf):
             self.assertFalse(display_error_percent(error))
+        for error in (100.0, 100.0 - 1e-10):
+            self.assertTrue(display_full_error_legend(error, has_data=True))
+            self.assertFalse(display_full_error_legend(error, has_data=False))
+        for error in (99.999, np.nan, np.inf, 101.0):
+            self.assertFalse(display_full_error_legend(error, has_data=True))
+
+    def test_rdf_full_error_legend_rejects_failed_md_with_stale_curves(self):
+        source = "mlip-trajs-torchsim-eager"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rdf_dir = root / "results" / source / "saved"
+            for model in MODELS:
+                curve = rdf_dir / "mlip" / model / f"{SYSTEM}.csv"
+                curve.parent.mkdir(parents=True)
+                curve.write_text("r,g\n0,1\n1,1\n")
+                trajectory = root / "data" / source / SYSTEM / f"nvt_{model}.h5"
+                trajectory.parent.mkdir(parents=True, exist_ok=True)
+                trajectory.touch()
+                trajectory.with_name(f"md_timing_{model}.csv").write_text(
+                    f"calculator,system,n_steps\n{model},{SYSTEM},10\n"
+                    if model == MODELS[0] else ""
+                )
+            with patch.object(rdf, "DATA_DIR", root / "data"):
+                self.assertEqual(rdf.full_error_models_for_legend(
+                    SYSTEM, MODELS, dict.fromkeys(MODELS, 100.0), str(rdf_dir)
+                ), [MODELS[0]])
+
+    def test_vdos_full_error_legend_rejects_missing_data_and_failure_markers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spectrum = Path(directory) / "spectrum.csv"
+            spectrum.write_text("wavenumber,intensity\n0,1\n1,1\n")
+            rows = pd.DataFrame({
+                "mlip_model": MODELS,
+                "vdos_error_percent": [100.0] * 3,
+                "mlip_file": [str(spectrum), str(spectrum), ""],
+                "ref_file": [str(spectrum)] * 3,
+                "failure_reason": ["", "Failed MD", ""],
+            })
+            original = rows.copy(deep=True)
+            self.assertEqual(vdos.full_error_models_for_legend(rows, MODELS), [MODELS[0]])
+            pd.testing.assert_frame_equal(rows, original)
 
     def test_rdf_selects_valid_curves_and_keeps_full_error_in_means(self):
         scores = dict(zip(MODELS, (20.0, 80.0, 100.0)))
@@ -91,6 +136,8 @@ class SubplotFilterTests(unittest.TestCase):
         references["empty"] = reference
         visible = pressure_mae.visible_pressure_models(references, values, 10)
         self.assertEqual(visible, set(MODELS[:2]))
+        self.assertEqual(pressure_mae.full_error_pressure_models(references, values, 10),
+                         {MODELS[2]})
         scores = dict(zip(MODELS, (0.0, 100.0, 1000.0)))
         best, worst, tier_scores = pressure_mae.choose_best_worst_from_scores(
             MODELS, scores, visible_models=visible

@@ -12,16 +12,19 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES
 
+FONT_SIZE = 12
+PANEL_HEIGHT = 3.53 * 1.2
+
 plt.rcParams.update({
     'lines.markersize': 4,
     'lines.linewidth': 1.5,
-    'font.size': 8,
-    'axes.labelsize': 8,
-    'axes.titlesize': 8,
-    'xtick.labelsize': 8,
-    'ytick.labelsize': 8,
-    'legend.fontsize': 8,
-    'figure.titlesize': 8,
+    'font.size': FONT_SIZE,
+    'axes.labelsize': FONT_SIZE,
+    'axes.titlesize': FONT_SIZE,
+    'xtick.labelsize': FONT_SIZE,
+    'ytick.labelsize': FONT_SIZE,
+    'legend.fontsize': FONT_SIZE,
+    'figure.titlesize': FONT_SIZE,
     'axes.grid': True,
     'grid.linewidth': 0.5,
     'grid.alpha': 1.0,
@@ -44,7 +47,7 @@ BASE_DIR = Path(__file__).resolve().parent
 from _plot_inputs import plot_args, read_metric_csv
 RESULTS_DIR, PLOTS_DIR = plot_args()
 INPUT_CSV = RESULTS_DIR / 'mean_metrics_by_system_type_and_model.csv'
-OUTPUT_PDF = PLOTS_DIR / 'figure_SI_2.pdf'
+OUTPUT_PDF = PLOTS_DIR / 'figure_SI_1.pdf'
 
 SYSTEM_TYPE_ORDER = [
     'pure metals',
@@ -76,13 +79,15 @@ def annotate_median(ax, x_center, y_value, y_text, fmt="{:.3f}", color="black"):
         textcoords="data",
         ha="center",
         va="bottom",
-        fontsize=8,
+        fontsize=FONT_SIZE,
         fontweight="bold",
         color=color,
         zorder=10,
         annotation_clip=False,
         arrowprops=dict(
             arrowstyle="-",
+            connectionstyle="arc3,rad=0",
+            relpos=(0.5, 0.0),
             color=color,
             linewidth=0.7,
             alpha=0.8,
@@ -101,7 +106,8 @@ def tier_label_y(y_max):
 
 
 def median_value_label_y(y_max):
-    return y_max * 1.04
+    # Leave more space below the 12-point tier headings, above the tallest bar.
+    return y_max * 1.01
 
 
 def main() -> None:
@@ -132,7 +138,7 @@ def main() -> None:
         raise ValueError(f'No system types with finite RMSE data in {INPUT_CSV}')
     ncols = min(3, n_panels)
     nrows = (n_panels + ncols - 1) // ncols
-    fig = plt.figure(figsize=(3.53 * ncols, 3.53 * nrows), layout='constrained')
+    fig = plt.figure(figsize=(3.53 * ncols, PANEL_HEIGHT * nrows), layout='constrained')
     gs = fig.add_gridspec(nrows, ncols * 2)
     axes_flat = []
     for idx in range(n_panels):
@@ -143,7 +149,18 @@ def main() -> None:
     for idx, system_type in enumerate(system_types_to_plot):
         ax = axes_flat[idx]
         subset = df[df['system_type'] == system_type].copy()
-        ax.text(0.02, 0.99, f'({chr(97 + idx)})', transform=ax.transAxes, ha='left', va='top')
+        # Keep panel labels outside the axes, clear of the centered system titles.
+        ax.annotate(
+            f'({chr(97 + idx)})',
+            xy=(0, 1),
+            xycoords='axes fraction',
+            xytext=(-6, 6),
+            textcoords='offset points',
+            ha='right',
+            va='bottom',
+            fontsize=FONT_SIZE,
+            annotation_clip=False,
+        )
 
         selected_rows: list[pd.Series] = []
         selected_labels: list[str] = []
@@ -199,7 +216,7 @@ def main() -> None:
         show_ylabel = (idx % ncols == 0)
         ax.set_ylabel('Energy RMSE [eV/atom]' if show_ylabel else '')
         ax.set_xticks(x)
-        ax.set_xticklabels(selected_labels, rotation=45, ha='right', fontsize=8)
+        ax.set_xticklabels(selected_labels, rotation=45, ha='right', fontsize=FONT_SIZE)
         ax.grid(axis='y')
         y_max = float(selected_df['energy_rmse'].max())
         ax.set_ylim(0, y_max * 1.25)
@@ -234,7 +251,7 @@ def main() -> None:
                 tier_label_y(y_max),
                 tier_name,
                 ha='center',
-                fontsize=8,
+                fontsize=FONT_SIZE,
                 color=tier_color,
             )
 

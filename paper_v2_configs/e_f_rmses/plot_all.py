@@ -40,9 +40,9 @@ def main() -> None:
     args = parse_args()
     stages = (
         ("Figure 2", HERE / "figure_2.py"),
-        ("Figure SI 2", HERE / "figure_SI_2.py"),
-        ("Figure SI 3", HERE / "figure_SI_3.py"),
-        ("Figure SI 4", HERE / "figure_SI_4.py"),
+        ("Figure SI 1", HERE / "figure_SI_2.py"),
+        ("Figure SI 2", HERE / "figure_SI_3.py"),
+        ("Figure SI 3", HERE / "figure_SI_4.py"),
     )
     env = os.environ.copy()
     env.setdefault("MPLBACKEND", "Agg")

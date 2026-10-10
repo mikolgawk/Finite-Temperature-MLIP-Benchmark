@@ -34,8 +34,9 @@ import sys
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from system_filters import add_molecular_crystal_option, filter_pressure_systems
+from metric_sources import cohort_model_files
 
 
 FONT_SIZE = 8
@@ -114,7 +115,7 @@ REF_COLOR = "#888888"
 
 def normalize_model_name(name: str) -> str:
     name = re.sub(r"_same-simulation-length$", "", str(name))
-    return name.strip().lower()
+    return normalize_display_key(name)
 
 
 def display_name(model: str) -> str:
@@ -177,7 +178,8 @@ def legacy_reference_files() -> tuple[Path, ...]:
 
 def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None, include_molecular_crystals: bool = False) -> pd.DataFrame:
     """Return per-frame model and model-matched reference pressure values."""
-    model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
+    model_files = cohort_model_files(pressures_dir, f"*{PER_FRAME_SUFFIX}",
+                                     lambda path: normalize_model_name(path.name.removesuffix(PER_FRAME_SUFFIX)))
     model_files = [f for f in model_files if not f.name.startswith("reference_")]
     parts: list[pd.DataFrame] = []
     for model_file in model_files:

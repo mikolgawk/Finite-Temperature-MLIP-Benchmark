@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from pressure_panel_style import annotate_tier_medians
 from get_model_pressure_errors import (
     filter_completed_pressure_md_rows,
     load_pressure_per_frame_csv,
@@ -38,7 +39,11 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option
-from subplot_filters import display_error_percent
+from metric_sources import cohort_model_files
+from subplot_filters import (
+    display_error_percent, fit_subplot_legends,
+    format_subplot_error_percent,
+)
 
 
 FONT_SIZE = 10
@@ -52,7 +57,7 @@ plt.rcParams.update({
     "axes.titlesize": FONT_SIZE,
     "xtick.labelsize": FONT_SIZE,
     "ytick.labelsize": FONT_SIZE,
-    "legend.fontsize": FONT_SIZE,
+    "legend.fontsize": LEGEND_FONT_SIZE,
     "figure.titlesize": FONT_SIZE,
     "axes.grid": True,
     "grid.linewidth": 0.5,
@@ -116,7 +121,7 @@ def format_model_label(model: str, error_percent: float | None, prefix: str | No
         label = f"{prefix}: {label}"
     if error_percent is None or not np.isfinite(error_percent):
         return label
-    return f"{label} ({error_percent:.1f}%)"
+    return f"{label} ({format_subplot_error_percent(error_percent)})"
 
 
 def format_chemical_formula(formula: str) -> str:
@@ -204,7 +209,8 @@ def load_model_values(
 ) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, dict[str, np.ndarray]]]:
     model_values: dict[str, dict[str, np.ndarray]] = {}
     reference_values: dict[str, dict[str, np.ndarray]] = {}
-    model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
+    model_files = cohort_model_files(pressures_dir, f"*{PER_FRAME_SUFFIX}",
+                                     lambda path: parse_model_name(path, PER_FRAME_SUFFIX))
     model_files = [path for path in model_files if not path.name.startswith("reference_")]
     if not model_files:
         raise FileNotFoundError(f"No model per-frame CSV files found in: {pressures_dir}")
@@ -327,28 +333,6 @@ def extract_overall_errors(ranking_df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values("tier_order").reset_index(drop=True)
 
 
-def annotate_median(ax, x: float, y: float, text_y: float, color) -> None:
-    ax.annotate(
-        f"{y:.1f}%",
-        xy=(x, y),
-        xytext=(x, text_y),
-        ha="center",
-        va="bottom",
-        fontsize=FONT_SIZE,
-        fontweight="bold",
-        color=color,
-        annotation_clip=False,
-        arrowprops=dict(
-            arrowstyle="-",
-            color=color,
-            linewidth=0.7,
-            alpha=0.8,
-            shrinkA=0,
-            shrinkB=0,
-        ),
-    )
-
-
 def draw_overall_pressure_error_plot(ax, ranking_df: pd.DataFrame, panel_label: str) -> None:
     df = extract_overall_errors(ranking_df)
     if df.empty:
@@ -388,18 +372,18 @@ def draw_overall_pressure_error_plot(ax, ranking_df: pd.DataFrame, panel_label: 
         + ", ".join(f"{label}: {format_error_value(median)}" for label, _, _, _, _, median in boundaries)
     )
 
-    metric_ymax = max(float(np.max(values)), max(median for _, _, _, _, _, median in boundaries))
-    ax.set_ylim(0, metric_ymax * 1.35)
-    tier_text_y = metric_ymax * 1.28
-    median_text_y = metric_ymax * 1.08
+    ax.set_ylim(0, max(float(np.max(values)), 1.0) * 1.35)
 
     for idx, (label, _, color, first, last, median) in enumerate(boundaries):
-        center = (first + last) / 2
         if idx < len(boundaries) - 1:
             ax.axvline(last + 0.5, color="black", linestyle="--", linewidth=1.5, alpha=0.7)
-        ax.text(center, tier_text_y, label, ha="center", va="top", color=color)
         ax.hlines(median, first - 0.5, last + 0.5, colors=color, linestyles="--", linewidth=2)
-        annotate_median(ax, center, median, median_text_y, color)
+
+    annotate_tier_medians(
+        [ax], [(label, first, last + 1, median, color)
+               for label, _, color, first, last, median in boundaries],
+        maximum=float(values.max()), font_size=FONT_SIZE, format_value=format_error_value,
+    )
 
     ax.yaxis.set_major_locator(MaxNLocator(nbins=6, prune="both"))
 
@@ -420,7 +404,8 @@ def plot_combined(
     )
     n_hist_cols = 3
     n_hist_rows = int(np.ceil(len(panels) / n_hist_cols))
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.25 + 1.15 * n_hist_rows)))
+    # Use v1's canvas and spacing, retaining the centered three-column layout.
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (0.75 + 1.4 * n_hist_rows)))
     outer_gs = gridspec.GridSpec(
         nrows=n_hist_rows + 2,
         ncols=n_hist_cols * 2,
@@ -551,6 +536,7 @@ def plot_combined(
             ax.tick_params(axis="y", labelsize=FONT_SIZE, pad=1)
 
     output.parent.mkdir(parents=True, exist_ok=True)
+    fit_subplot_legends(fig, outer_gs, first_panel_row=2)
     plt.savefig(output, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     print(f"Saved combined pressure panel plot to {output}")

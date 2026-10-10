@@ -31,14 +31,20 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option, include_system
-from subplot_filters import display_error_percent
+from subplot_filters import (
+    display_error_percent, display_full_error_legend, fit_subplot_legends,
+    format_subplot_error_percent,
+)
+from md_success import torchsim_md_succeeded
+from metric_sources import SOURCES, model_trajectory_source
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR = SCRIPT_DIR.parent / "data"
 
-FONT_SIZE = 10
-LEGEND_FONT_SIZE = 6
+# Use larger text than v1 so the stacked RDF panels stay readable in the paper.
+FONT_SIZE = 12
+LEGEND_FONT_SIZE = 8
 
 plt.rcParams.update({
     "lines.markersize": 4,
@@ -382,7 +388,7 @@ def format_model_label(model_name: str, system_errors: dict[str, float]) -> str:
     rdf_error = system_errors.get(model_name, np.nan)
     suffix = ""
     if np.isfinite(rdf_error):
-        suffix = f" ({rdf_error:.1f}%)"
+        suffix = f" ({format_subplot_error_percent(rdf_error)})"
     return f"{name}{suffix}"
 
 
@@ -414,6 +420,36 @@ def pick_best_worst_models(
         return None, None
     scored_models.sort(key=lambda item: item[1])
     return scored_models[0][0], scored_models[-1][0]
+
+
+def full_error_models_for_legend(
+    system: str, tier_models, system_errors: dict[str, float], rdf_dir: str,
+) -> list[str]:
+    """Exclude failed MD and unusable cached curves from legend-only entries."""
+    source = next((part for part in Path(rdf_dir).parts if part in SOURCES), None)
+    models = []
+    for raw_model in tier_models:
+        model = normalize_model_name(raw_model)
+        if not display_full_error_legend(system_errors.get(model, np.nan), has_data=True):
+            continue
+        curve_path = resolve_saved_rdf_path(system, model, rdf_dir)
+        if curve_path is None:
+            continue
+        if source is not None and "torchsim" in source:
+            trajectory = (DATA_DIR / model_trajectory_source(source, model) / system
+                          / f"nvt_{curve_path.parent.name}.h5")
+            if not torchsim_md_succeeded(trajectory):
+                continue
+        data = load_rdf_csv(str(curve_path))
+        if data is None:
+            continue
+        radius, values = data
+        if (radius.size < 2 or not np.isfinite(radius).all()
+                or not np.isfinite(values).all()
+                or np.sum(np.diff(radius) * (values[1:] + values[:-1]) / 2) <= 0):
+            continue
+        models.append(model)
+    return models
 
 
 def mean_system_rdf_error(system: str, rdf_csv_dir: Path, rdf_dir: str) -> float:
@@ -454,7 +490,6 @@ def build_system_title(system_type: str, system_name: str) -> str:
 
 
 def draw_overall_error_plot(ax, overall_df: pd.DataFrame) -> None:
-    tier_order = TIER_1 + TIER_2 + TIER_3 + TIER_4
     tier_order_norm = TIER_1_NORM + TIER_2_NORM + TIER_3_NORM + TIER_4_NORM
     df = overall_df.copy()
     df["calculator_norm"] = df["Calculator"].map(normalize_model_name)
@@ -585,8 +620,9 @@ def plot_combined(
     system_groups = [(kind, systems) for kind, systems in SYSTEMS.items()
                      if include_system(kind, include_molecular_crystals)]
     n_panel_rows = int(np.ceil(len(system_groups) / 3))
+    # Give the stacked RDF panels room for the larger fonts and legend boxes.
     fig = plt.figure(
-        figsize=(3.53 * 3.0, 3.53 * (1.5 + 1.4 * n_panel_rows)),
+        figsize=(3.53 * 3.15, 3.53 * (0.75 + 1.65 * n_panel_rows)),
         layout="constrained",
     )
     outer_gs = gridspec.GridSpec(
@@ -595,7 +631,7 @@ def plot_combined(
         figure=fig,
         wspace=0.12,
         hspace=0.12,
-        height_ratios=[0.9] + [1.4] * n_panel_rows,
+        height_ratios=[0.9] + [1.65] * n_panel_rows,
     )
     panel_labels = ["(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)"]
 
@@ -681,6 +717,9 @@ def plot_combined(
             rdf_ax.grid()
 
             handles, labels = rdf_ax.get_legend_handles_labels()
+            for model in full_error_models_for_legend(system, tier_models, system_errors, rdf_dir):
+                handles.append(Line2D([], [], color="none", linestyle="none"))
+                labels.append(format_model_label(model, system_errors))
             if np.isfinite(mean_rdf_error):
                 mean_handle = Line2D([], [], color="none", linestyle="none")
                 handles.append(mean_handle)
@@ -704,6 +743,7 @@ def plot_combined(
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    fit_subplot_legends(fig, outer_gs, first_panel_row=1)
     plt.savefig(output_path, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     print(f"Saved combined RDF panel plot to {output_path}")

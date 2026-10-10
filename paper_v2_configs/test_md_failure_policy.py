@@ -22,6 +22,7 @@ from md_success import (
     torchsim_md_succeeded,
 )
 from test_system_filters import load_module
+from metric_sources import model_trajectory_source
 
 
 SOURCES = ("mlip-trajs-torchsim-eager", "mlip-trajs-torchsim-accelerated")
@@ -168,6 +169,11 @@ class MdFailurePolicyTest(unittest.TestCase):
             folder = self.root / "timing-audit" / source
             registered = [(system, model) for entry_source, system, model in load_failed_md_runs()
                           if entry_source == source]
+            # The accelerated paper cohort also uses the eager eSEN/EQ records.
+            expected = registered + [(system, model)
+                                    for entry_source, system, model in load_failed_md_runs()
+                                    if entry_source != source
+                                    and entry_source == model_trajectory_source(source, model)]
             for system, model in registered:
                 for run_system, seconds in ((system, 10.0), (METAL, 0.1)):
                     target = folder / run_system
@@ -179,13 +185,13 @@ class MdFailurePolicyTest(unittest.TestCase):
             for loader in loaders:
                 with self.subTest(source=source, loader=loader.__module__):
                     frame = loader(folder)
-                    self.assertEqual(len(frame), len(registered))
+                    self.assertEqual(len(frame), len(expected))
                     column = next(name for name in frame if name.startswith("mean_time"))
                     np.testing.assert_allclose(frame[column], 100.0)
             frame, skipped = timings.read_timing_files(folder)
             self.assertEqual(set(frame.system), {METAL})
-            self.assertEqual(len(frame), len(registered))
-            self.assertEqual(len(skipped), len(registered))
+            self.assertEqual(len(frame), len(expected))
+            self.assertEqual(len(skipped), len(expected))
             self.assertTrue(all("audited failed MD" in reason for reason in skipped))
 
     def test_registered_completed_failures_exclude_cached_dimensional_errors(self):

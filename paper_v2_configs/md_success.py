@@ -4,6 +4,8 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 
+from metric_sources import cohort_model_files, cohort_timing_files
+
 
 FAILED_MD_RUNS_FILE = Path(__file__).with_name("failed_md_runs.csv")
 
@@ -29,10 +31,11 @@ def registered_md_failure_reason(trajectory: Path) -> str | None:
 def discover_torchsim_md_trajectories(source_dir: Path) -> dict[str, dict[str, Path]]:
     """Include failed jobs whose only remaining output is a timing marker."""
     trajectories: dict[str, dict[str, Path]] = {}
-    for path in sorted(source_dir.glob("*/nvt_*.h5")):
+    for path in cohort_model_files(source_dir, "*/nvt_*.h5",
+                                   lambda path: path.stem.removeprefix("nvt_")):
         model = path.stem.removeprefix("nvt_")
         trajectories.setdefault(path.parent.name, {})[model] = path
-    for timing in sorted(source_dir.glob("*/md_timing_*.csv")):
+    for timing in cohort_timing_files(source_dir):
         model = timing.stem.removeprefix("md_timing_")
         trajectories.setdefault(timing.parent.name, {}).setdefault(
             model, timing.with_name(f"nvt_{model}.h5")

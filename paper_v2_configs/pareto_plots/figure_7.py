@@ -35,6 +35,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from md_success import registered_md_failure_reason
+from metric_sources import cohort_timing_files
 from system_filters import add_molecular_crystal_option, include_system, filter_pressure_systems
 from correlation_labels import inward_label_offset, position_model_labels
 
@@ -306,9 +307,12 @@ def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool =
 	if not timings_dir.is_dir():
 		raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 	model_timings: dict[str, list[float]] = {}
-	all_systems = [d for d in timings_dir.iterdir() if d.is_dir() and include_system(d.name, include_molecular_crystals)]
+	paths = cohort_timing_files(timings_dir)
+	all_systems = {path.parent for path in paths if include_system(path.parent.name, include_molecular_crystals)}
 	for system_dir in sorted(all_systems):
-		for csv_path in sorted(system_dir.glob("md_timing_*.csv")):
+		for csv_path in paths:
+			if csv_path.parent != system_dir:
+				continue
 			if registered_md_failure_reason(csv_path):
 				continue
 			model_name = metric_model_key(csv_path.stem.removeprefix("md_timing_"))

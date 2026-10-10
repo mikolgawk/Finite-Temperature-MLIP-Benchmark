@@ -36,15 +36,17 @@ from pressure_axis_breaks import (
     pressure_axes,
     pressure_tick,
 )
+from pressure_panel_style import annotate_tier_medians
 
 import sys
 
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from system_filters import add_molecular_crystal_option, filter_pressure_systems
-from subplot_filters import display_error_percent
+from metric_sources import cohort_model_files
+from subplot_filters import display_error_percent, display_full_error_legend, fit_subplot_legends
 
 
 FONT_SIZE = 10
@@ -71,7 +73,7 @@ CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES
 
 def normalize_model_name(name: str) -> str:
     name = re.sub(r"_same-simulation-length$", "", str(name))
-    return name.strip().lower()
+    return normalize_display_key(name)
 
 
 def display_name(model: str) -> str:
@@ -206,6 +208,23 @@ def visible_pressure_models(
         if score and display_error_percent(score["pressure_error_percent"]):
             visible_models.add(model)
     return visible_models
+
+
+def full_error_pressure_models(
+    references_by_model: dict[str, np.ndarray],
+    values_by_model: dict[str, np.ndarray],
+    bins: int,
+) -> set[str]:
+    """Find completed models with non-overlapping, valid pressure histograms."""
+    models = set()
+    for model, values in values_by_model.items():
+        reference = references_by_model.get(model)
+        if reference is None:
+            continue
+        score = pressure_histogram_similarity(reference, values, bins)
+        if score and display_full_error_legend(score["pressure_error_percent"], has_data=True):
+            models.add(model)
+    return models
 
 
 def make_bin_edges(reference_values: np.ndarray, candidate_arrays: list[np.ndarray], bins: int) -> np.ndarray:
@@ -347,7 +366,7 @@ def collect_histogram_panels(
     bins: int,
     include_molecular_crystals: bool = False,
 ) -> list[tuple[str, str, dict[str, np.ndarray], dict[str, np.ndarray], dict[str, float], np.ndarray]]:
-    model_files = sorted(pressures_dir.glob(f"*{PER_FRAME_SUFFIX}"))
+    model_files = cohort_model_files(pressures_dir, f"*{PER_FRAME_SUFFIX}", parse_model_name)
     model_files = [path for path in model_files if not path.name.startswith("reference_")]
     if not model_files:
         raise FileNotFoundError(f"No model per-frame files found in {pressures_dir}")
@@ -468,7 +487,7 @@ def draw_overall_pressure_mae_plot(ax, ranking_df: pd.DataFrame, panel_label: st
     if len(windows) > 1:
         fig, spec = ax.figure, ax.get_subplotspec()
         ax.remove()
-        axes = pressure_axes(fig, spec, windows, orientation="y")
+        axes = pressure_axes(fig, spec, windows, orientation="y", header=True)
     else:
         axes = [ax]
         ax.set_ylim(windows[0])
@@ -478,7 +497,7 @@ def draw_overall_pressure_mae_plot(ax, ranking_df: pd.DataFrame, panel_label: st
                        alpha=0.8, edgecolor="black", linewidth=0.5)
         segment_ax.set_xlim(-0.6, len(models) - 0.4)
         segment_ax.grid(axis="y")
-        segment_ax.grid(axis="x", visible=False)
+        segment_ax.grid(axis="x", visible=True)
         segment_ax.yaxis.set_major_locator(MaxNLocator(
             nbins=3 if segment_index == 0 else 2,
             min_n_ticks=2, prune="upper" if segment_index == 0 else "both",
@@ -494,13 +513,12 @@ def draw_overall_pressure_mae_plot(ax, ranking_df: pd.DataFrame, panel_label: st
     bottom.set_xticks(x)
     bottom.set_xticklabels([display_name(model) for model in models], rotation=45,
                            ha="right", fontsize=FONT_SIZE)
-    top.text(-0.035, 1.05, panel_label, transform=top.transAxes,
-             ha="left", va="bottom", fontsize=FONT_SIZE)
-    for label, start, end, median, color in tiers:
-        top.text((start + end - 1) / 2, 1.06,
-                 f"{label}\nMedian: {pressure_tick(median)}",
-                 transform=top.get_xaxis_transform(), ha="center", va="bottom",
-                 fontsize=FONT_SIZE - 2, color=color)
+    top.text(0.01, 0.95, panel_label, transform=top.transAxes,
+             ha="left", va="top", fontsize=FONT_SIZE)
+    annotate_tier_medians(
+        axes, tiers, maximum=float(values.max()), font_size=FONT_SIZE,
+        format_value=lambda value: f"{value:.2f}" if abs(value) < 1000 else pressure_tick(value),
+    )
     print("Pressure MAE medians -> " + ", ".join(
         f"{label}: {format_mae_value(median)}" for label, _, _, median, _ in tiers
     ))
@@ -525,12 +543,13 @@ def plot_combined(
     n_hist_cols = 3
     n_hist_rows = int(np.ceil(n_panels / n_hist_cols))
 
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.40 + 1.15 * n_hist_rows)))
+    # Use v1's canvas and spacing, retaining the centered three-column layout.
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (0.75 + 1.4 * n_hist_rows)))
     outer_gs = gridspec.GridSpec(
         nrows=n_hist_rows + 2,
         ncols=n_hist_cols * 2,
         figure=fig,
-        height_ratios=[1.05, 0.35] + [1.15] * n_hist_rows,
+        height_ratios=[0.78, 0.22] + [1.15] * n_hist_rows,
         hspace=0.48,
         wspace=0.30,
     )
@@ -664,7 +683,7 @@ def plot_combined(
 
             ax.set_xlabel("")
             for segment_ax in axes:
-                segment_ax.tick_params(axis="x", labelsize=FONT_SIZE - 2)
+                segment_ax.tick_params(axis="x", labelsize=FONT_SIZE)
                 if tier_idx != len(TIER_DEFS) - 1:
                     segment_ax.tick_params(labelbottom=False)
                     segment_ax.xaxis.get_offset_text().set_visible(False)
@@ -700,6 +719,7 @@ def plot_combined(
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    fit_subplot_legends(fig, outer_gs, first_panel_row=2)
     plt.savefig(output, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     print(f"Saved combined pressure panel plot to {output}")

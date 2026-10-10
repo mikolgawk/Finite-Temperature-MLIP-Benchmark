@@ -29,6 +29,7 @@ from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from correlation_labels import inward_label_offset, position_model_labels
 from pareto_plot_style import FIGURE_SIZE, MODEL_LABEL_STYLE, apply_pareto_style
 from md_success import registered_md_failure_reason
+from metric_sources import cohort_timing_files
 from system_filters import add_molecular_crystal_option, include_system
 
 
@@ -113,7 +114,7 @@ def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool =
         raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 
     model_timings: dict[str, list[float]] = {}
-    for csv_path in sorted(timings_dir.glob("*/md_timing_*.csv")):
+    for csv_path in cohort_timing_files(timings_dir):
         if not include_system(csv_path.parent.name, include_molecular_crystals):
             continue
         if registered_md_failure_reason(csv_path):

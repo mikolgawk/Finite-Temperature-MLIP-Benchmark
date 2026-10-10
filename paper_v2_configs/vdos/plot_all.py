@@ -9,7 +9,7 @@
 #   "seaborn>=0.13",
 # ]
 # ///
-"""Create VDOS plots, including correlations with and without hydrogen force RMSE."""
+"""Create VDOS plots, including correlations excluding hydrogen and Pt+H2O."""
 
 from __future__ import annotations
 
@@ -33,16 +33,22 @@ SOURCES = (
 )
 MODEL_MEANS = "vdos_model_mean_ev_normalized_same_simulation_length.csv"
 NO_HYDROGEN_FORCE_SUFFIX = "_no_hydrogen_force_rmse"
+NO_HYDROGEN_PT_WATER_SUFFIX = "_no_hydrogen_no_pt_water"
 
 
-def without_hydrogen_force_rmse(command: list[str]) -> list[str]:
-    """Reuse correlation inputs and give the extra plots distinct output paths."""
+def without_hydrogen_force_rmse(
+    command: list[str], *, exclude_pt_water: bool = False,
+) -> list[str]:
+    """Exclude hydrogen and optionally Pt+H2O using distinct output paths."""
     variant = command.copy()
+    suffix = NO_HYDROGEN_PT_WATER_SUFFIX if exclude_pt_water else NO_HYDROGEN_FORCE_SUFFIX
     for index, argument in enumerate(variant[:-1]):
         if argument.endswith("output-file"):
             output = Path(variant[index + 1])
-            variant[index + 1] = str(output.with_stem(output.stem + NO_HYDROGEN_FORCE_SUFFIX))
-    variant.append("--exclude-hydrogen-force-rmse")
+            variant[index + 1] = str(output.with_stem(output.stem + suffix))
+    variant.append("--exclude-hydrogen")
+    if exclude_pt_water:
+        variant.append("--exclude-pt-water")
     return variant
 
 
@@ -138,7 +144,11 @@ def main() -> None:
             ),
         ]
         correlation_stages = [
-            (label + " without hydrogen force RMSE", without_hydrogen_force_rmse(command))
+            (label + label_suffix, without_hydrogen_force_rmse(command, exclude_pt_water=exclude_pt_water))
+            for label_suffix, exclude_pt_water in (
+                (" without hydrogen", False),
+                (" without hydrogen and Pt+H2O", True),
+            )
             for label, command in stages
             if Path(command[2]).name in {"figure_6.py", "figure_SI_7_8_9.py"}
         ]

@@ -24,6 +24,71 @@ INTERFACE = "Pt111w24H2O_380K_Heenen_VASP"
 
 
 class PressureFiguresTest(unittest.TestCase):
+    def test_full_error_models_are_hidden_from_histograms_and_legends(self) -> None:
+        values = np.array([0.1, 0.2, 0.3, 0.4])
+        references = {"mace-mp-0": values, "orb-v2": values}
+        predictions = {"mace-mp-0": values, "orb-v2": values + 1000}
+        ranking = pd.DataFrame({
+            "model": ["mace-mp-0", "orb-v2", "mace-mpa-0"],
+            "error_GPa": [0.0, 1000.0, np.nan],
+            "final_mean_pressure_error_percent": [0.0, 100.0, 100.0],
+        })
+        original = ranking.copy(deep=True)
+        full_error_models = ["orb-v3-omat", "orb-v3-direct-omat", "pet-oam-xl", "pet-omat-xl"]
+        valid_models = ["mattersim-v1-5m", "esen-30m-oam"]
+        for model in full_error_models:
+            references[model] = values
+            predictions[model] = values + 1000
+        for model, offset in zip(valid_models, (0.01, 0.02)):
+            references[model] = values
+            predictions[model] = values + offset
+        for module, overview, scores in (
+            (figure_4, "draw_overall_pressure_mae_plot",
+             {"mace-mp-0": 0.0, "orb-v2": 1000.0}),
+            (figure_SI_6, "draw_overall_pressure_error_plot",
+             {"mace-mp-0": 0.0, "orb-v2": 100.0, "mace-mpa-0": 100.0}),
+        ):
+            scores.update(dict.fromkeys(full_error_models, 1000.0 if module is figure_4 else 100.0))
+            scores.update(dict.fromkeys(valid_models, 0.02))
+            panels = [("Hydrogen", "H_1050K_Rupp_QE", references, predictions,
+                       scores, np.linspace(0.1, 1000.4, 6))]
+            with self.subTest(figure=module.__name__), tempfile.TemporaryDirectory() as directory:
+                with (
+                    patch.object(module, "collect_histogram_panels", return_value=panels),
+                    patch.object(module, overview),
+                    patch.object(module.plt, "savefig"),
+                    patch.object(module.plt, "close"),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    module.plot_combined(Path(directory), None, ranking, 5,
+                                         Path(directory) / "unused.pdf")
+                    fig = module.plt.gcf()
+                legend_text = [text.get_text() for ax in fig.axes if ax.get_legend()
+                               for text in ax.get_legend().get_texts()]
+                drawn_labels = [label for ax in fig.axes
+                                for label in ax.get_legend_handles_labels()[1]]
+                self.assertFalse(any("orb-v2" in label for label in legend_text))
+                self.assertFalse(any("MACE-MPA" in label for label in legend_text))
+                self.assertFalse(any("orb-v2" in label for label in drawn_labels))
+                self.assertFalse(any("MACE-MPA" in label for label in drawn_labels))
+                full_error_labels = [label for label in legend_text
+                                     if "100.0%" in label and "mean error:" not in " ".join(label.split())]
+                self.assertEqual(full_error_labels, [])
+                if module is figure_SI_6:
+                    self.assertTrue(any("Tier 2 mean error: 100.0%" in " ".join(label.split())
+                                        for label in legend_text))
+                fig.canvas.draw()
+                renderer = fig.canvas.get_renderer()
+                for ax in fig.axes:
+                    if ax.get_legend():
+                        legend_bounds = ax.get_legend().get_window_extent(renderer)
+                        panel = ax.get_subplotspec().get_topmost_subplotspec()
+                        self.assertLess(legend_bounds.height, ax.get_window_extent(renderer).height)
+                        self.assertLess(legend_bounds.width,
+                                        panel.get_position(fig).width * fig.bbox.width)
+                module.plt.close(fig)
+        pd.testing.assert_frame_equal(ranking, original)
+
     def test_hydrogen_is_kept_as_the_fifth_pressure_panel(self) -> None:
         categories = [
             ("Pure metals", SYSTEM),

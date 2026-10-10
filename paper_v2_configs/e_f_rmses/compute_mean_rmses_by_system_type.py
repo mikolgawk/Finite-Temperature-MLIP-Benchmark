@@ -12,7 +12,7 @@ from system_filters import (
     add_molecular_crystal_option,
     excluded_system_types,
 )
-from metric_sources import SOURCES
+from metric_sources import SOURCES, model_trajectory_source
 
 
 DATA_DIR = Path(__file__).resolve().parent / 'data' / 'e-f-predictions'
@@ -124,8 +124,6 @@ def load_all_data(
     sources: set[str] | None = None,
 ) -> pd.DataFrame:
     csv_files = list_rmse_csv_files(data_dir)
-    if sources is not None:
-        csv_files = [p for p in csv_files if csv_source(p) in sources]
     if models is not None:
         csv_files = [
             csv_file
@@ -144,10 +142,15 @@ def load_all_data(
 
     md_data_dir = md_data_dir or Path(__file__).resolve().parent.parent / 'data'
     frames = []
+    target_sources = sources if sources is not None else {csv_source(path) for path in csv_files}
     for csv_file in csv_files:
-        frame = pd.read_csv(csv_file)
         model_name = extract_model_name(csv_file)
         source = csv_source(csv_file)
+        cohorts = [target for target in sorted(target_sources)
+                   if model_trajectory_source(target, model_name) == source]
+        if not cohorts:
+            continue
+        frame = pd.read_csv(csv_file)
         if 'torchsim' in source:
             if 'trajectory' not in frame.columns:
                 raise ValueError(f'Missing trajectory column in {csv_file}')
@@ -156,9 +159,13 @@ def load_all_data(
                     md_data_dir / source / Path(ref).parent.name / f'nvt_{model_name}.h5'
                 ) if isinstance(ref, str) else False
             )].copy()
-        frame['source'] = source
         frame['calculator'] = model_name
-        frames.append(frame)
+        frame['trajectory_source'] = source
+        for cohort in cohorts:
+            frames.append(frame.assign(source=cohort))
+
+    if not frames:
+        raise FileNotFoundError(f'No RMSE evaluations found for requested sources in {data_dir}')
 
     all_data = pd.concat(frames, ignore_index=True)
 
@@ -205,7 +212,7 @@ def parse_args() -> argparse.Namespace:
 def write_source_results(all_data: pd.DataFrame, results_dir: Path, excluded_system_types: set[str]) -> None:
     results_dir.mkdir(parents=True, exist_ok=True)
     all_data.to_csv(results_dir / 'rmse_per_system.csv', index=False)
-    all_data.groupby('calculator', as_index=False)[['energy_rmse', 'force_rmse']].mean().to_csv(
+    all_data.groupby(['calculator', 'trajectory_source'], as_index=False)[['energy_rmse', 'force_rmse']].mean().to_csv(
         results_dir / 'mean_metrics_by_model.csv', index=False)
     metrics = ['energy_rmse', 'force_rmse']
 

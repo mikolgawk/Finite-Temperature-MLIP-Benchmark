@@ -1,4 +1,3 @@
-import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -58,6 +57,7 @@ def is_molecular_crystal(system):
 
 # Read and aggregate data from per-model RMSE CSV files
 from _plot_inputs import plot_args, read_metric_csv
+from _plot_style import space_tier_labels
 results_dir, plots_dir = plot_args()
 all_data = read_metric_csv(results_dir / 'rmse_per_system.csv')
 all_data['calculator'] = all_data['calculator'].map(normalize_calculator_name)
@@ -87,7 +87,9 @@ plots_dir.mkdir(parents=True, exist_ok=True)
 mean_summary.to_csv(results_dir / 'mean_metrics_by_model_no_molecular_crystals.csv', index=False)
 
 # Create figure with 2 subplots
-fig, axes = plt.subplots(1, 2, figsize=(3.53 * 3, 3.53 * 1.4), layout='constrained')
+# Match the v1 canvas so the 8 pt labels keep their scale in the paper.
+fig, axes = plt.subplots(1, 2, figsize=(3.53 * 2, 3.53), layout='constrained')
+fig.get_layout_engine().set(w_pad=0.06, h_pad=0.06)
 
 
 tier_1 = [normalize_calculator_name(model) for model in ["chgnet", "mace-mp-0", "mace-mp-0-compile", "grace-mp"]]
@@ -163,6 +165,8 @@ def annotate_median(ax, x_center, y_value, y_text, color, fmt="{:.3f}"):
         annotation_clip=False,
         arrowprops=dict(
             arrowstyle="-",
+            connectionstyle="arc3,rad=0",
+            relpos=(0.5, 0.0),
             color=color,
             linewidth=0.7,
             alpha=0.8,
@@ -184,7 +188,8 @@ def median_value_label_y(y_max):
     return y_max * 1.08
 
 # Separate data for each subplot
-energy_df = df[df['calculator'] != 'EquiformerV2'].copy()
+# The supplementary overview includes EQv2 in both panels; Figure 2 omits its energy.
+energy_df = df.copy()
 force_df = df.copy()
 
 energy_models = energy_df['calculator'].values
@@ -363,7 +368,8 @@ for index, count in enumerate(get_tier_counts(force_models), start=1):
 axes[0].text(0, 1.02, '(a)', transform=axes[0].transAxes, ha='left', va='bottom', fontsize=FONT_SIZE)
 axes[1].text(0, 1.02, '(b)', transform=axes[1].transAxes, ha='left', va='bottom', fontsize=FONT_SIZE)
 
-plot_path = plots_dir / 'figure_SI_4.pdf'
+plot_path = plots_dir / 'figure_SI_3.pdf'
+space_tier_labels(fig)
 plt.savefig(plot_path)
 print(f"Plot saved as {plot_path}")
 print(

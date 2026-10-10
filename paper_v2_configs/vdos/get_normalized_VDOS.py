@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from metric_sources import cohort_model_path, model_trajectory_source
 from md_success import (
     discover_torchsim_md_trajectories,
     registered_md_failure_reason,
@@ -325,6 +326,9 @@ def spectrum_for_samples(
 
 
 def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system_types: set[str] | None = frozenset(DEFAULT_EXCLUDED_SYSTEM_TYPES)) -> None:
+    pair_df = pair_df.copy()
+    pair_df["trajectory_source"] = [model_trajectory_source(source, model)
+                                      for source, model in zip(pair_df["source"], pair_df["model"])]
     if excluded_system_types:
         excluded = {value.strip().lower() for value in excluded_system_types}
         pair_df = pair_df.loc[
@@ -334,7 +338,7 @@ def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system
     pair_df.to_csv(results_dir / PAIR_OUTPUT, index=False)
 
     system_model = (
-        pair_df.groupby(["source", "model", "system", "system_type"], as_index=False)
+        pair_df.groupby(["source", "trajectory_source", "model", "system", "system_type"], as_index=False)
         .agg(
             vdos_error_percent=("vdos_error_percent", "mean"),
             vdos_similarity_percent=("vdos_similarity_percent", "mean"),
@@ -346,7 +350,7 @@ def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system
     system_model.to_csv(results_dir / SYSTEM_MODEL_OUTPUT, index=False)
 
     model_mean = (
-        system_model.groupby(["source", "model"], as_index=False)
+        system_model.groupby(["source", "trajectory_source", "model"], as_index=False)
         .agg(
             vdos_error_percent=("vdos_error_percent", "mean"),
             vdos_similarity_percent=("vdos_similarity_percent", "mean"),
@@ -564,13 +568,16 @@ def process_source(
         ref_cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
         def reference_spectrum(n_frames: int, model: str | None) -> tuple[np.ndarray, np.ndarray]:
+            overwrite = args.overwrite or (
+                n_frames != n_ref and model_trajectory_source(source, model) != source
+            )
             if n_frames == n_ref:
                 output = spectra_dir / "reference" / f"{system}.csv"
             else:
                 assert model is not None
                 output = spectra_dir / "reference_matched" / model / f"{system}.csv"
             if n_frames in ref_cache:
-                if not output.is_file():
+                if not output.is_file() or overwrite:
                     save_spectrum(output, ref_cache[n_frames])
                 return ref_cache[n_frames]
             spectrum = spectrum_for_samples(
@@ -580,7 +587,7 @@ def process_source(
                 samples_are_velocities=False,
                 pad_factor=args.pad_factor,
                 chunk_size=args.chunk_size,
-                overwrite=args.overwrite,
+                overwrite=overwrite,
             )
             ref_cache[n_frames] = spectrum
             return spectrum
@@ -590,7 +597,8 @@ def process_source(
             mlip_path = models.get(model)
             if mlip_path is None:
                 reason = (
-                    registered_md_failure_reason(trajectory_dir / system / f"nvt_{model}.h5")
+                    registered_md_failure_reason(cohort_model_path(
+                        trajectory_dir / system / f"nvt_{model}.h5", model))
                     if torchsim_source else None
                 ) or "MLIP trajectory missing or incomplete"
                 print(f"    [PENALTY] {reason}; assigning 100% VDOS error")
@@ -631,7 +639,7 @@ def process_source(
                     samples_are_velocities=samples_are_velocities,
                     pad_factor=args.pad_factor,
                     chunk_size=args.chunk_size,
-                    overwrite=args.overwrite,
+                    overwrite=args.overwrite or model_trajectory_source(source, model) != source,
                 )
                 error, similarity = vdos_similarity(
                     ref_vdos,

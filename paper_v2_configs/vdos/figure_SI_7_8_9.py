@@ -20,9 +20,11 @@ Columns:
 2) F1 score
 3) k_SRME score
 
-Use --exclude-hydrogen-force-rmse for an additional set whose force RMSE means
-exclude hydrogen. The other metrics retain their original values; default output
-filenames gain _no_hydrogen_force_rmse so the original plots are preserved.
+Use --exclude-hydrogen for an additional set excluding hydrogen from force RMSE,
+RDF, pressure, and VDOS means. F1 and k_SRME scores keep their original values.
+The legacy --exclude-hydrogen-force-rmse option and _no_hydrogen_force_rmse
+output suffix remain supported.
+Add --exclude-pt-water to also exclude Pt+H2O from the metric averages.
 """
 
 from __future__ import annotations
@@ -46,7 +48,8 @@ from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from matbench_scores import matbench_model_key
 from correlation_labels import inward_label_offset, position_model_labels
 from md_success import torchsim_md_succeeded
-from system_filters import filter_pressure_systems, is_molecular_crystal
+from metric_sources import model_trajectory_source
+from system_filters import filter_pressure_systems, is_metal_water_interface, is_molecular_crystal
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -63,32 +66,83 @@ DEFAULT_PRESSURE_FILE = (
 )
 DEFAULT_SCORE_DIR = CONFIG_DIR / "data" / "matbench-scores"
 NO_HYDROGEN_FORCE_SUFFIX = "_no_hydrogen_force_rmse"
+NO_PT_WATER_SUFFIX = "_no_pt_water"
+NO_HYDROGEN_PT_WATER_SUFFIX = "_no_hydrogen_no_pt_water"
 SYSTEM_ID_COLUMNS = (
     "system", "System", "structure", "reference_key", "trajectory", "trajectory_file",
     "system_type", "sys_type",
 )
+SYSTEM_ROW_COLUMNS = tuple(
+    column for column in SYSTEM_ID_COLUMNS if column not in {"system_type", "sys_type"}
+)
+RDF_SYSTEM_FILE_PREFIX = "rdf_similarity_scores_same_simulation_length_"
+SYSTEM_METRIC_FILES = {
+    "pressure": "pressure_system_model_mean_similarity_same_simulation_length.csv",
+    "VDOS": "vdos_system_model_mean_ev_normalized_same_simulation_length.csv",
+}
 
 
 def add_force_rmse_exclusion_option(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--exclude-hydrogen",
         "--exclude-hydrogen-force-rmse",
+        dest="exclude_hydrogen_force_rmse",
         action="store_true",
         help=(
-            "Average force RMSE from per-system rows without hydrogen. "
-            "RDF, pressure, VDOS, F1, and k_SRME values are unchanged."
+            "Exclude hydrogen from per-system force RMSE, RDF, pressure, and VDOS "
+            "averages. F1 and k_SRME scores are unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-pt-water",
+        action="store_true",
+        help=(
+            "Exclude Pt+H2O from per-system force RMSE, RDF, and VDOS averages. "
+            "Pressure already excludes it. Combine with --exclude-hydrogen to "
+            "exclude both systems. F1 and k_SRME scores are unchanged."
         ),
     )
 
 
-def correlation_output_path(stem: str, exclude_hydrogen: bool) -> Path:
-    suffix = NO_HYDROGEN_FORCE_SUFFIX if exclude_hydrogen else ""
+def correlation_output_path(
+    stem: str, exclude_hydrogen: bool, exclude_pt_water: bool = False,
+) -> Path:
+    if exclude_pt_water:
+        suffix = NO_HYDROGEN_PT_WATER_SUFFIX if exclude_hydrogen else NO_PT_WATER_SUFFIX
+    else:
+        suffix = NO_HYDROGEN_FORCE_SUFFIX if exclude_hydrogen else ""
     return SCRIPT_DIR / "plots" / f"{stem}{suffix}.pdf"
 
 
-def force_rmse_axis_label(exclude_hydrogen: bool = False) -> str:
+def exclusion_label(exclude_hydrogen: bool, exclude_pt_water: bool) -> str:
+    names = []
+    if exclude_hydrogen:
+        names.append("hydrogen")
+    if exclude_pt_water:
+        names.append("Pt+H₂O")
+    return " and ".join(names)
+
+
+def force_rmse_axis_label(
+    exclude_hydrogen: bool = False, exclude_pt_water: bool = False,
+) -> str:
+    if exclude_pt_water:
+        excluded = exclusion_label(exclude_hydrogen, exclude_pt_water)
+        return f"Force RMSE\n(without {excluded})\n" + r"[eV/$\AA{}$]"
     if exclude_hydrogen:
         return "Force RMSE (without hydrogen)\n" + r"[eV/$\AA{}$]"
     return r"Force RMSE [eV/$\AA{}$]"
+
+
+def error_axis_label(
+    label: str, exclude_hydrogen: bool = False, exclude_pt_water: bool = False,
+) -> str:
+    if exclude_pt_water:
+        excluded = exclusion_label(exclude_hydrogen, exclude_pt_water)
+        return f"{label.removesuffix(' [%]')}\n(without {excluded}) [%]"
+    if exclude_hydrogen:
+        return f"{label.removesuffix(' [%]')} (without hydrogen)\n[%]"
+    return label
 
 
 def is_hydrogen_system(value) -> bool:
@@ -99,6 +153,7 @@ def is_hydrogen_system(value) -> bool:
     } else path.name
     return name.split("_", 1)[0] in {"h", "hydrogen"}
 
+# Match v1's text-to-canvas proportions when the figure is fitted into the paper.
 FONT_SIZE = 12
 LEGEND_FONT_SIZE = 12
 SPLIT_FIGSIZE = (3.53 * 3, 3.53 * 2)
@@ -210,13 +265,74 @@ def values_to_percent(series: pd.Series) -> pd.Series:
 
 def metric_values_to_percent(series: pd.Series, column: str) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce")
-    if "percent" in column.lower() or "[%]" in column:
+    if "percent" in column.lower() or "[%]" in column or column in {"RDF_Error", "Similarity_Score"}:
         return values
     return values_to_percent(values)
 
 
 def aggregate_models(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.groupby("calculator", as_index=False).mean(numeric_only=True)
+
+
+def aggregate_system_metrics(frame: pd.DataFrame, raw: pd.DataFrame) -> pd.DataFrame:
+    """Weight each system equally, including when an input has multiple pairs."""
+    system_column = next((column for column in SYSTEM_ROW_COLUMNS if column in raw), None)
+    if system_column is not None:
+        frame = frame.copy()
+        frame["_system"] = raw[system_column].astype(str)
+        frame = frame.groupby(["calculator", "_system"], as_index=False).mean(numeric_only=True)
+    return aggregate_models(frame)
+
+
+def metric_rows_excluding_systems(
+    frame: pd.DataFrame, *, description: str, source: str | None,
+    exclude_hydrogen: bool = False, exclude_pt_water: bool = False,
+) -> pd.DataFrame:
+    """Remove selected systems and crystals while retaining failure penalties."""
+    if not any(column in frame for column in SYSTEM_ROW_COLUMNS):
+        raise ValueError(
+            f"Excluding benchmark systems requires per-system {description} rows with system "
+            "identifiers; a model-summary CSV cannot be filtered."
+        )
+    if source is not None and "source" in frame:
+        frame = frame.loc[frame["source"] == source].copy()
+    excluded = pd.Series(False, index=frame.index)
+    for column in SYSTEM_ID_COLUMNS:
+        if column in frame:
+            if exclude_hydrogen:
+                excluded |= frame[column].map(is_hydrogen_system)
+            if exclude_pt_water:
+                excluded |= frame[column].map(is_metal_water_interface)
+            excluded |= frame[column].map(is_molecular_crystal)
+    return frame.loc[~excluded].copy()
+
+
+def load_system_metric_rows(path: Path, description: str) -> pd.DataFrame:
+    """Read detailed overrides or the per-system cache beside a model summary."""
+    def read_system_file(csv_path: Path) -> pd.DataFrame:
+        frame = read_csv(csv_path, f"Per-system {description} CSV")
+        if (description == "RDF" and csv_path.stem.startswith(RDF_SYSTEM_FILE_PREFIX)
+                and not any(column in frame for column in ("calculator", "Calculator", "model", "mlip_model"))):
+            frame["calculator"] = csv_path.stem.removeprefix(RDF_SYSTEM_FILE_PREFIX)
+        return frame
+
+    if path.is_file():
+        frame = read_system_file(path)
+        if any(column in frame for column in SYSTEM_ROW_COLUMNS):
+            return frame
+    directory = path if path.is_dir() else path.parent
+    if description == "RDF":
+        files = sorted(directory.glob(f"{RDF_SYSTEM_FILE_PREFIX}*.csv"))
+        if files:
+            return pd.concat([read_system_file(csv_path) for csv_path in files], ignore_index=True)
+    else:
+        detailed_path = directory / SYSTEM_METRIC_FILES[description]
+        if detailed_path.is_file():
+            return read_system_file(detailed_path)
+    raise FileNotFoundError(
+        f"System exclusion requires per-system {description} results in {directory}. "
+        "Generate those metric results or supply a per-system CSV override."
+    )
 
 
 def standardize_rdf(df_rdf_raw: pd.DataFrame) -> pd.DataFrame:
@@ -230,6 +346,7 @@ def standardize_rdf(df_rdf_raw: pd.DataFrame) -> pd.DataFrame:
             col
             for col in (
                 "rdf_error_percent",
+                "RDF_Error",
                 "Mean RDF Error [%]",
                 "RDF Error [%]",
                 "rdf_error_mean",
@@ -243,6 +360,7 @@ def standardize_rdf(df_rdf_raw: pd.DataFrame) -> pd.DataFrame:
             col
             for col in (
                 "rdf_similarity_percent",
+                "Similarity_Score",
                 "Mean Similarity Score [%]",
                 "RDF Similarity [%]",
                 "rdf_similarity_mean",
@@ -265,7 +383,7 @@ def standardize_rdf(df_rdf_raw: pd.DataFrame) -> pd.DataFrame:
     else:
         similarity = metric_values_to_percent(out[metric_col], metric_col)
         out["rdf_error_percent"] = 100.0 - similarity
-    return aggregate_models(out[["calculator", "rdf_error_percent"]])
+    return aggregate_system_metrics(out[["calculator", "rdf_error_percent"]], df_rdf_raw)
 
 
 def standardize_vdos(df_vdos_raw: pd.DataFrame) -> pd.DataFrame:
@@ -314,7 +432,7 @@ def standardize_vdos(df_vdos_raw: pd.DataFrame) -> pd.DataFrame:
     )
     metric = metric_values_to_percent(out[metric_col], metric_col)
     out["vdos_error_percent"] = metric if error_col is not None else 100.0 - metric
-    return aggregate_models(out[["calculator", "vdos_error_percent"]])
+    return aggregate_system_metrics(out[["calculator", "vdos_error_percent"]], df_vdos_raw)
 
 
 def standardize_pressure(
@@ -375,7 +493,7 @@ def standardize_pressure(
     )
     metric = metric_values_to_percent(out[metric_col], metric_col)
     out["pressure_error_percent"] = metric if error_col is not None else 100.0 - metric
-    return aggregate_models(out[["calculator", "pressure_error_percent"]])
+    return aggregate_system_metrics(out[["calculator", "pressure_error_percent"]], df_pressure_raw)
 
 
 def model_color(model: str, tier_colors: dict[str, tuple[float, float, float]]) -> str:
@@ -411,31 +529,24 @@ def standardize_force_rmse(df_means_raw: pd.DataFrame) -> pd.DataFrame:
     return aggregate_models(out)
 
 
-def force_rmse_without_hydrogen(
-    frame: pd.DataFrame, source: str | None = None,
+def force_rmse_excluding_systems(
+    frame: pd.DataFrame, source: str | None = None, *,
+    exclude_hydrogen: bool = False, exclude_pt_water: bool = False,
 ) -> pd.DataFrame:
-    """Average successful, non-crystal per-system RMSEs after dropping hydrogen."""
-    system_columns = [column for column in SYSTEM_ID_COLUMNS if column in frame]
-    if not system_columns:
-        raise ValueError(
-            "Excluding hydrogen requires per-system force RMSE rows with system "
-            "identifiers; a model-summary CSV cannot be filtered. Use rmse_per_system.csv "
-            "or a directory of rmse-results-all_*.csv files."
-        )
+    """Average successful per-system RMSEs after applying system exclusions."""
     if source is not None and "source" in frame:
         frame = frame.loc[frame["source"] == source].copy()
     model_column = pick_first_column(
         frame, ["calculator", "Calculator", "model", "mlip_model"], "RMSE model column",
     )
-    # Keep models with only hydrogen RMSEs available in the F1/k_SRME panels.
+    # Keep models with only excluded RMSEs available in the F1/k_SRME panels.
     models = pd.DataFrame({
         "calculator": frame[model_column].map(normalize_model_name).drop_duplicates(),
     })
-    excluded = pd.Series(False, index=frame.index)
-    for column in system_columns:
-        excluded |= frame[column].map(is_hydrogen_system)
-        excluded |= frame[column].map(is_molecular_crystal)
-    frame = frame.loc[~excluded].copy()
+    frame = metric_rows_excluding_systems(
+        frame, description="force RMSE", source=source,
+        exclude_hydrogen=exclude_hydrogen, exclude_pt_water=exclude_pt_water,
+    )
     if source is not None and "torchsim" in source:
         if "trajectory" not in frame:
             raise ValueError(
@@ -444,7 +555,7 @@ def force_rmse_without_hydrogen(
             )
         succeeded = pd.Series([
             torchsim_md_succeeded(
-                CONFIG_DIR / "data" / source / Path(trajectory).parent.name
+                CONFIG_DIR / "data" / model_trajectory_source(source, model) / Path(trajectory).parent.name
                 / f"nvt_{model}.h5"
             ) if isinstance(trajectory, str) else False
             for trajectory, model in zip(frame["trajectory"], frame[model_column])
@@ -456,6 +567,7 @@ def force_rmse_without_hydrogen(
 
 def load_force_rmse(
     path: Path, *, exclude_hydrogen: bool = False, source: str | None = None,
+    exclude_pt_water: bool = False,
 ) -> pd.DataFrame:
     """Load model means, or filter and average detailed per-system RMSE rows."""
     if path.is_file():
@@ -475,8 +587,10 @@ def load_force_rmse(
                 f"No rmse-results-all_*.csv files with force_rmse found under {path}"
             )
         frame = pd.concat(frames, ignore_index=True)
-    if exclude_hydrogen:
-        return force_rmse_without_hydrogen(frame, source)
+    if exclude_hydrogen or exclude_pt_water:
+        return force_rmse_excluding_systems(
+            frame, source, exclude_hydrogen=exclude_hydrogen, exclude_pt_water=exclude_pt_water,
+        )
     return standardize_force_rmse(frame)
 
 
@@ -521,11 +635,13 @@ def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
     pressure_backend, pressure_mode = source_pressure_provenance(args.source)
 
     exclude_hydrogen = getattr(args, "exclude_hydrogen_force_rmse", False)
-    if exclude_hydrogen:
+    exclude_pt_water = getattr(args, "exclude_pt_water", False)
+    if exclude_hydrogen or exclude_pt_water:
         default_force = default_force.with_name("rmse_per_system.csv")
     df_means = load_force_rmse(
         args.force_rmse_input or default_force,
         exclude_hydrogen=exclude_hydrogen,
+        exclude_pt_water=exclude_pt_water,
         source=args.source,
     )
     df_f1 = standardize_score(
@@ -546,18 +662,27 @@ def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
         output_column="ksrme_score",
         description="k_SRME score column",
     )
-    df_rdf = standardize_rdf(
-        read_csv(args.rdf_file or default_rdf, "RDF model-summary CSV")
-    )
+    def read_metric_input(path: Path, description: str) -> pd.DataFrame:
+        if exclude_hydrogen or exclude_pt_water:
+            return metric_rows_excluding_systems(
+                load_system_metric_rows(path, description), description=description, source=args.source,
+                exclude_hydrogen=exclude_hydrogen, exclude_pt_water=exclude_pt_water,
+            )
+        return read_csv(path, f"{description} metric CSV")
+
+    df_rdf = standardize_rdf(read_metric_input(args.rdf_file or default_rdf, "RDF"))
     df_pressure = standardize_pressure(
-        read_csv(args.pressure_file or CONFIG_DIR / "pressures/results" / args.source / "model_pressure_error_metric.csv", "Pressure metric CSV"),
+        read_metric_input(
+            args.pressure_file or CONFIG_DIR / "pressures/results" / args.source / "model_pressure_error_metric.csv",
+            "pressure",
+        ),
         backend=args.pressure_backend or pressure_backend,
         mode=args.pressure_mode or pressure_mode,
     )
     df_vdos = standardize_vdos(
-        read_csv(
+        read_metric_input(
             args.vdos_model_means_file or default_vdos,
-            "VDOS model-summary CSV",
+            "VDOS",
         )
     )
 
@@ -642,13 +767,13 @@ def parse_args() -> argparse.Namespace:
         "--rdf-file",
         type=Path,
         default=None,
-        help="Override the source-specific generated RDF model-summary CSV.",
+        help="Override the RDF summary or per-system CSV (or per-model CSV directory).",
     )
     parser.add_argument(
         "--pressure-file",
         type=Path,
         default=None,
-        help="Generated CSV with model-level pressure histogram metrics.",
+        help="Generated CSV with model-level or per-system pressure histogram metrics.",
     )
     parser.add_argument(
         "--pressure-backend",
@@ -664,7 +789,7 @@ def parse_args() -> argparse.Namespace:
         "--vdos-model-means-file",
         type=Path,
         default=None,
-        help="Override the source-specific generated VDOS model-summary CSV.",
+        help="Override the source-specific VDOS summary or per-system CSV.",
     )
     parser.add_argument(
         "--f1-file",
@@ -708,6 +833,7 @@ def parse_args() -> argparse.Namespace:
         if getattr(args, argument) is None:
             setattr(args, argument, correlation_output_path(
                 f"figure_SI_7_8_9_{metric}", args.exclude_hydrogen_force_rmse,
+                args.exclude_pt_water,
             ))
     return args
 
@@ -767,19 +893,20 @@ def plot_single_error_figure(
     output_file: str | Path,
     tier_colors: dict[str, tuple[float, float, float]],
     exclude_hydrogen_force_rmse: bool = False,
+    exclude_pt_water: bool = False,
 ) -> None:
     x_metrics = [
-        ("force_rmse", force_rmse_axis_label(exclude_hydrogen_force_rmse)),
+        ("force_rmse", force_rmse_axis_label(exclude_hydrogen_force_rmse, exclude_pt_water)),
         ("f1_score", "F1 score"),
         ("ksrme_score", r"$\kappa_{\mathrm{SRME}}$ score"),
     ]
+    y_label = error_axis_label(y_label, exclude_hydrogen_force_rmse, exclude_pt_water)
 
     fig, axes_arr = plt.subplots(
         1,
         3,
-        figsize=(SPLIT_FIGSIZE[0] * 1.3, SPLIT_FIGSIZE[1]),
+        figsize=SPLIT_FIGSIZE,
         sharey=True,
-        gridspec_kw={"width_ratios": [1.5, 1, 1]},
     )
     axes = np.asarray(axes_arr)
 
@@ -889,6 +1016,7 @@ def main() -> None:
         output_file=args.rdf_output_file,
         tier_colors=tier_colors,
         exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
+        exclude_pt_water=args.exclude_pt_water,
     )
     plot_single_error_figure(
         df=df,
@@ -897,6 +1025,7 @@ def main() -> None:
         output_file=args.pressure_output_file,
         tier_colors=tier_colors,
         exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
+        exclude_pt_water=args.exclude_pt_water,
     )
     plot_single_error_figure(
         df=df,
@@ -905,6 +1034,7 @@ def main() -> None:
         output_file=args.vdos_output_file,
         tier_colors=tier_colors,
         exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
+        exclude_pt_water=args.exclude_pt_water,
     )
 
 

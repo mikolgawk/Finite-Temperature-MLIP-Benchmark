@@ -27,6 +27,7 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from md_success import registered_md_failure_reason
+from metric_sources import cohort_timing_files, source_from_path
 from system_filters import add_molecular_crystal_option, include_system
 
 
@@ -74,7 +75,7 @@ def read_timing_files(
 	if not timings_dir.is_dir():
 		raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 
-	paths = sorted(timings_dir.glob("*/md_timing_*.csv"))
+	paths = cohort_timing_files(timings_dir)
 	if not paths:
 		raise FileNotFoundError(f"No md_timing_*.csv files found below {timings_dir}")
 
@@ -153,6 +154,7 @@ def read_timing_files(
 				"milliseconds_per_step": seconds_per_step * 1000.0,
 				"engine": str(row.get("engine", "")),
 				"source_file": str(csv_path),
+				"trajectory_source": source_from_path(csv_path),
 			}
 		)
 

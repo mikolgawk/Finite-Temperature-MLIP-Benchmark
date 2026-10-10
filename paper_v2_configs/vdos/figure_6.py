@@ -15,8 +15,10 @@ are far from the fitted trend or from the central point cloud. A larger SI
 output with every model labeled is written by default for readers who want to
 identify all points.
 
-Use --exclude-hydrogen-force-rmse to exclude hydrogen only from the force RMSE
-means and save separate outputs with a _no_hydrogen_force_rmse suffix.
+Use --exclude-hydrogen to exclude hydrogen from force RMSE, RDF, pressure, and
+VDOS means. The legacy --exclude-hydrogen-force-rmse option and
+_no_hydrogen_force_rmse output suffix remain supported.
+Add --exclude-pt-water to also exclude Pt+H2O from the metric averages.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from figure_SI_7_8_9 import (
     add_force_rmse_exclusion_option,
     correlation_output_path,
     display_name,
+    error_axis_label,
     force_rmse_axis_label,
     load_joined_data,
     model_color,
@@ -46,6 +49,7 @@ from figure_SI_7_8_9 import (
 )
 from correlation_labels import inward_label_offset, position_model_labels
 
+# Match v1's text-to-canvas proportions when the figure is fitted into the paper.
 MAIN_FIGSIZE = (3.53 * 3, 3.53 * 3)
 OUTLIER_LABEL_FONT_SIZE = 10
 SI_LABEL_FONT_SIZE = FONT_SIZE
@@ -261,6 +265,7 @@ def render_figure(
     figsize: tuple[float, float],
     label_font_size: int,
     exclude_hydrogen_force_rmse: bool = False,
+    exclude_pt_water: bool = False,
 ) -> dict[str, list[str]]:
     tier_colors = {
         "tier_1": palette[2],
@@ -272,17 +277,17 @@ def render_figure(
     fig, axes = plt.subplots(
         len(Y_METRICS),
         3,
-        figsize=(figsize[0] * 1.3, figsize[1]),
+        figsize=figsize,
         sharex="col",
         sharey="row",
-        gridspec_kw={"width_ratios": [1.5, 1, 1]},
     )
     label_summary: dict[str, list[str]] = {}
 
     for row_idx, (y_col, y_label) in enumerate(Y_METRICS):
+        y_label = error_axis_label(y_label, exclude_hydrogen_force_rmse, exclude_pt_water)
         for col_idx, (x_col, x_label) in enumerate(X_METRICS):
-            if x_col == "force_rmse" and exclude_hydrogen_force_rmse:
-                x_label = force_rmse_axis_label(True)
+            if x_col == "force_rmse":
+                x_label = force_rmse_axis_label(exclude_hydrogen_force_rmse, exclude_pt_water)
             ax = axes[row_idx, col_idx]
             is_bottom_row = row_idx == len(Y_METRICS) - 1
             is_left_col = col_idx == 0
@@ -366,13 +371,13 @@ def parse_args() -> argparse.Namespace:
         "--rdf-file",
         type=Path,
         default=None,
-        help="Override the source-specific generated RDF model-summary CSV.",
+        help="Override the RDF summary or per-system CSV (or per-model CSV directory).",
     )
     parser.add_argument(
         "--pressure-file",
         type=Path,
         default=None,
-        help="Generated CSV with model-level pressure histogram metrics.",
+        help="Generated CSV with model-level or per-system pressure histogram metrics.",
     )
     parser.add_argument(
         "--pressure-backend",
@@ -388,7 +393,7 @@ def parse_args() -> argparse.Namespace:
         "--vdos-model-means-file",
         type=Path,
         default=None,
-        help="Override the source-specific generated VDOS model-summary CSV.",
+        help="Override the source-specific VDOS summary or per-system CSV.",
     )
     parser.add_argument(
         "--f1-file",
@@ -441,10 +446,13 @@ def parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
     if args.output_file is None:
-        args.output_file = correlation_output_path("figure_6", args.exclude_hydrogen_force_rmse)
+        args.output_file = correlation_output_path(
+            "figure_6", args.exclude_hydrogen_force_rmse, args.exclude_pt_water,
+        )
     if args.si_output_file is None:
         args.si_output_file = str(correlation_output_path(
             "figure_6_all_labels", args.exclude_hydrogen_force_rmse,
+            args.exclude_pt_water,
         ))
     return args
 
@@ -462,6 +470,7 @@ def main() -> None:
         figsize=MAIN_FIGSIZE,
         label_font_size=OUTLIER_LABEL_FONT_SIZE,
         exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
+        exclude_pt_water=args.exclude_pt_water,
     )
 
     if args.si_output_file:
@@ -475,6 +484,7 @@ def main() -> None:
             figsize=si_figsize,
             label_font_size=SI_LABEL_FONT_SIZE,
             exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
+            exclude_pt_water=args.exclude_pt_water,
         )
 
     if args.show_outlier_summary:

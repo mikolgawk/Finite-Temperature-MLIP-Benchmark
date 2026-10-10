@@ -1,5 +1,7 @@
-"""Check correlation inputs, hydrogen exclusion, and Matbench score matching."""
+"""Check correlation system exclusions, inputs, and Matbench score matching."""
 
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -115,7 +117,7 @@ class MatbenchScoreMatchingTest(unittest.TestCase):
             self.assertEqual(result.loc["mace-mp-0-compile", "vdos_error_percent"], 40)
 
 
-class HydrogenForceRmseTest(unittest.TestCase):
+class CorrelationSystemExclusionTest(unittest.TestCase):
     def test_hydrogen_identifiers_do_not_match_other_elements(self):
         for value in (
             "H", "hydrogen", "H_1050K", "H_1050K_Rupp_QE",
@@ -135,7 +137,9 @@ class HydrogenForceRmseTest(unittest.TestCase):
                             "metal dichalcogenides", "molecular crystals", "hydrogen"],
             "force_rmse": [1000.0, 1.0, 3.0, 8.0, 999.0, 500.0],
         })
-        result = correlations.force_rmse_without_hydrogen(frame).set_index("calculator")
+        result = correlations.force_rmse_excluding_systems(
+            frame, exclude_hydrogen=True,
+        ).set_index("calculator")
         self.assertEqual(result.loc["nequip", "force_rmse"], 4.0)
         self.assertTrue(pd.isna(result.loc["only-hydrogen", "force_rmse"]))
 
@@ -156,7 +160,9 @@ class HydrogenForceRmseTest(unittest.TestCase):
             "source": ["mlip-trajs-ase", "mlip-trajs-ase-accelerated", "mlip-trajs-ase-accelerated"],
             "force_rmse": [1.0, 3.0, 5.0],
         })
-        result = correlations.force_rmse_without_hydrogen(frame, "mlip-trajs-ase")
+        result = correlations.force_rmse_excluding_systems(
+            frame, "mlip-trajs-ase", exclude_hydrogen=True,
+        )
         self.assertEqual(result.to_dict("records"), [{"calculator": "mace-mp-0", "force_rmse": 1.0}])
 
     def test_hydrogen_only_torchsim_model_has_no_force_value(self):
@@ -164,7 +170,9 @@ class HydrogenForceRmseTest(unittest.TestCase):
             "calculator": ["mace-mp-0"], "system": ["H"], "force_rmse": [100.0],
             "trajectory": ["/old-machine/H_1050K_Rupp_QE/traj.extxyz"],
         })
-        result = correlations.force_rmse_without_hydrogen(frame, "mlip-trajs-torchsim-eager")
+        result = correlations.force_rmse_excluding_systems(
+            frame, "mlip-trajs-torchsim-eager", exclude_hydrogen=True,
+        )
         self.assertEqual(result.calculator.tolist(), ["mace-mp-0"])
         self.assertTrue(pd.isna(result.loc[0, "force_rmse"]))
 
@@ -198,18 +206,18 @@ class HydrogenForceRmseTest(unittest.TestCase):
                 "force_rmse": [1.0, 100.0, 200.0, 300.0],
             })
             with patch.object(correlations, "CONFIG_DIR", config_dir):
-                result = correlations.force_rmse_without_hydrogen(frame, source)
+                result = correlations.force_rmse_excluding_systems(frame, source, exclude_hydrogen=True)
             self.assertEqual(result.to_dict("records"), [{"calculator": "esen-30m-oam", "force_rmse": 1.0}])
 
-    def test_joined_metrics_and_other_score_columns_are_unchanged(self):
+    def test_exclusion_variants_reaverage_all_md_metrics_and_keep_scores(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             pd.DataFrame({"calculator": ["mace-mp-0"], "force_rmse": [51.0]}).to_csv(
                 root / "mean_metrics_by_model.csv", index=False,
             )
             pd.DataFrame({
-                "calculator": ["mace-mp-0"] * 2,
-                "system": ["H", "bulkCu"], "force_rmse": [100.0, 2.0],
+                "calculator": ["mace-mp-0"] * 3,
+                "system": ["H", "bulkCu", "Pt111w24H2O"], "force_rmse": [100.0, 2.0, 200.0],
             }).to_csv(root / "rmse_per_system.csv", index=False)
             for filename, column, value in (
                 ("rdf.csv", "rdf_error_percent", 25.0),
@@ -221,6 +229,16 @@ class HydrogenForceRmseTest(unittest.TestCase):
                 pd.DataFrame({"calculator": ["mace-mp-0"], column: [value]}).to_csv(
                     root / filename, index=False,
                 )
+            systems = ["H", "bulkCu", "bulkCu", "bulkAg", "Pt111w24H2O", "picene"]
+            pd.DataFrame({
+                "System": systems, "RDF_Error": [99.0, 10.0, 20.0, 100.0, 30.0, 999.0],
+            }).to_csv(root / f"{correlations.RDF_SYSTEM_FILE_PREFIX}mace-mp-0.csv", index=False)
+            for metric, column, values in (
+                ("pressure", "mean_pressure_error_percent", [90.0, 20.0, 40.0, 100.0, 999.0, 999.0]),
+                ("VDOS", "vdos_error_percent", [80.0, 10.0, 30.0, 100.0, 30.0, 999.0]),
+            ):
+                pd.DataFrame({"model": ["mace-mp-0"] * len(systems), "system": systems,
+                              column: values}).to_csv(root / correlations.SYSTEM_METRIC_FILES[metric], index=False)
             args = SimpleNamespace(
                 source="mlip-trajs-ase", force_rmse_input=None, exclude_hydrogen_force_rmse=False,
                 rdf_file=root / "rdf.csv", pressure_file=root / "pressure.csv",
@@ -228,16 +246,82 @@ class HydrogenForceRmseTest(unittest.TestCase):
                 vdos_model_means_file=root / "vdos.csv", f1_file=root / "f1.csv",
                 ksrme_file=root / "ksrme.csv",
             )
+            original_files = {path: path.read_bytes() for path in root.glob('*.csv')}
             with patch.object(correlations, "source_paths", return_value=(
                 root / "mean_metrics_by_model.csv", root / "rdf.csv", root / "vdos.csv",
             )):
                 original = correlations.load_joined_data(args)
                 args.exclude_hydrogen_force_rmse = True
                 variant = correlations.load_joined_data(args)
+                args.exclude_pt_water = True
+                combined = correlations.load_joined_data(args)
+                args.exclude_hydrogen_force_rmse = False
+                pt_only = correlations.load_joined_data(args)
             self.assertEqual(original.loc[0, "force_rmse"], 51.0)
-            self.assertEqual(variant.loc[0, "force_rmse"], 2.0)
-            pd.testing.assert_frame_equal(
-                original.drop(columns="force_rmse"), variant.drop(columns="force_rmse"),
+            self.assertEqual(variant.loc[0, "force_rmse"], 101.0)
+            self.assertEqual(original.loc[0, "rdf_error_percent"], 25.0)
+            self.assertEqual(original.loc[0, "pressure_error_percent"], 30.0)
+            self.assertEqual(original.loc[0, "vdos_error_percent"], 40.0)
+            # Average repeated pairs within each system before averaging systems.
+            # Failed non-hydrogen systems retain their 100% errors; Pt/water is
+            # excluded only from pressure, and molecular crystals from all four.
+            self.assertAlmostEqual(variant.loc[0, "rdf_error_percent"], (15.0 + 100.0 + 30.0) / 3)
+            self.assertEqual(variant.loc[0, "pressure_error_percent"], 65.0)
+            self.assertEqual(variant.loc[0, "vdos_error_percent"], 50.0)
+            self.assertEqual(combined.loc[0, "force_rmse"], 2.0)
+            self.assertEqual(combined.loc[0, "rdf_error_percent"], 57.5)
+            self.assertEqual(combined.loc[0, "pressure_error_percent"], 65.0)
+            self.assertEqual(combined.loc[0, "vdos_error_percent"], 60.0)
+            self.assertEqual(pt_only.loc[0, "force_rmse"], 51.0)
+            self.assertAlmostEqual(pt_only.loc[0, "rdf_error_percent"], (99.0 + 15.0 + 100.0) / 3)
+            self.assertAlmostEqual(pt_only.loc[0, "pressure_error_percent"], (90.0 + 30.0 + 100.0) / 3)
+            self.assertAlmostEqual(pt_only.loc[0, "vdos_error_percent"], (80.0 + 20.0 + 100.0) / 3)
+            for result in (variant, combined, pt_only):
+                pd.testing.assert_frame_equal(
+                    original[["calculator", "f1_score", "ksrme_score"]],
+                    result[["calculator", "f1_score", "ksrme_score"]],
+                )
+            self.assertEqual(original_files, {path: path.read_bytes() for path in root.glob('*.csv')})
+
+    def test_missing_per_system_metrics_cannot_silently_reuse_summaries(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "summary.csv"
+            pd.DataFrame({"model": ["mace-mp-0"], "error_percent": [10.0]}).to_csv(path, index=False)
+            for metric in ("RDF", "pressure", "VDOS"):
+                with self.subTest(metric=metric), self.assertRaisesRegex(FileNotFoundError, "per-system"):
+                    correlations.load_system_metric_rows(path, metric)
+
+    def test_detailed_rdf_override_keeps_sub_one_percent_errors_in_percent_units(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / f"{correlations.RDF_SYSTEM_FILE_PREFIX}mace-mp-0.csv"
+            pd.DataFrame({"System": ["H", "bulkCu"], "RDF_Error": [0.9, 0.5]}).to_csv(path, index=False)
+            frame = correlations.metric_rows_excluding_systems(
+                correlations.load_system_metric_rows(path, "RDF"),
+                description="RDF", source="mlip-trajs-ase", exclude_hydrogen=True,
+            )
+            self.assertEqual(correlations.standardize_rdf(frame).to_dict("records"),
+                             [{"calculator": "mace-mp-0", "rdf_error_percent": 0.5}])
+
+    def test_metric_source_selection_preserves_eager_models_in_accelerated_cohort(self):
+        source = "mlip-trajs-torchsim-accelerated"
+        frame = pd.DataFrame({
+            "model": ["esen-30m-oam"] * 3,
+            "system": ["H", "bulkCu", "bulkCu"],
+            "source": [source, source, "mlip-trajs-torchsim-eager"],
+            "trajectory_source": ["mlip-trajs-torchsim-eager"] * 3,
+            "vdos_error_percent": [100.0, 5.0, 75.0],
+        })
+        filtered = correlations.metric_rows_excluding_systems(
+            frame, description="VDOS", source=source, exclude_hydrogen=True, exclude_pt_water=True,
+        )
+        self.assertEqual(correlations.standardize_vdos(filtered).to_dict("records"),
+                         [{"calculator": "esen-30m-oam", "vdos_error_percent": 5.0}])
+
+    def test_metric_hydrogen_exclusion_requires_system_identifiers(self):
+        with self.assertRaisesRegex(ValueError, "per-system.*identifiers"):
+            correlations.metric_rows_excluding_systems(
+                pd.DataFrame({"model": ["mace-mp-0"], "vdos_error_percent": [10.0]}),
+                description="VDOS", source="mlip-trajs-ase", exclude_hydrogen=True,
             )
 
     def test_defaults_keep_original_and_extra_outputs_separate(self):
@@ -248,13 +332,25 @@ class HydrogenForceRmseTest(unittest.TestCase):
             with self.subTest(module=module.__name__):
                 with patch("sys.argv", [module.__file__]):
                     original = module.parse_args()
-                with patch("sys.argv", [module.__file__, "--exclude-hydrogen-force-rmse"]):
-                    variant = module.parse_args()
-                for argument in output_arguments:
-                    original_path = Path(getattr(original, argument))
-                    variant_path = Path(getattr(variant, argument))
-                    self.assertEqual(variant_path.stem,
-                                     original_path.stem + correlations.NO_HYDROGEN_FORCE_SUFFIX)
+                for option in ("--exclude-hydrogen", "--exclude-hydrogen-force-rmse"):
+                    with patch("sys.argv", [module.__file__, option]):
+                        variant = module.parse_args()
+                    self.assertTrue(variant.exclude_hydrogen_force_rmse)
+                    for argument in output_arguments:
+                        original_path = Path(getattr(original, argument))
+                        variant_path = Path(getattr(variant, argument))
+                        self.assertEqual(variant_path.stem,
+                                         original_path.stem + correlations.NO_HYDROGEN_FORCE_SUFFIX)
+                for options, suffix in (
+                    (["--exclude-pt-water"], correlations.NO_PT_WATER_SUFFIX),
+                    (["--exclude-hydrogen", "--exclude-pt-water"], correlations.NO_HYDROGEN_PT_WATER_SUFFIX),
+                ):
+                    with patch("sys.argv", [module.__file__, *options]):
+                        variant = module.parse_args()
+                    self.assertTrue(variant.exclude_pt_water)
+                    for argument in output_arguments:
+                        original_path = Path(getattr(original, argument))
+                        self.assertEqual(Path(getattr(variant, argument)).stem, original_path.stem + suffix)
         with patch("sys.argv", [figure_6.__file__, "--exclude-hydrogen-force-rmse",
                                 "--output-file", "custom.pdf", "--si-output-file", ""]):
             args = figure_6.parse_args()
@@ -270,7 +366,72 @@ class HydrogenForceRmseTest(unittest.TestCase):
         self.assertEqual(command[8], "plots/figure_6.pdf")
         self.assertEqual(variant[8], "plots/figure_6_no_hydrogen_force_rmse.pdf")
         self.assertEqual(variant[10], "plots/figure_6_all_labels_no_hydrogen_force_rmse.pdf")
-        self.assertEqual(variant[-1], "--exclude-hydrogen-force-rmse")
+        self.assertEqual(variant[-1], "--exclude-hydrogen")
+        combined = plot_all.without_hydrogen_force_rmse(command, exclude_pt_water=True)
+        self.assertEqual(combined[:7], command[:7])
+        self.assertEqual(combined[8], "plots/figure_6_no_hydrogen_no_pt_water.pdf")
+        self.assertEqual(combined[10], "plots/figure_6_all_labels_no_hydrogen_no_pt_water.pdf")
+        self.assertEqual(combined[-2:], ["--exclude-hydrogen", "--exclude-pt-water"])
+
+    def test_pt_water_filter_recognizes_paths_and_types_but_keeps_other_pt(self):
+        frame = pd.DataFrame({
+            "model": ["mace-mp-0"] * 6,
+            "System": ["Pt111w24H2O", "Pt111w24H2O_380K_Heenen_VASP",
+                       "/old-machine/Pt111w24H2O_380K_Heenen_VASP/traj.extxyz",
+                       "older-name", "bulkPt3Co", "H"],
+            "system_type": [None, None, None, "metal-water interfaces", "alloys", "hydrogen"],
+            "vdos_error_percent": [99, 99, 99, 99, 5, 80],
+        })
+        filtered = correlations.metric_rows_excluding_systems(
+            frame, description="VDOS", source="mlip-trajs-ase", exclude_pt_water=True,
+        )
+        self.assertEqual(filtered.System.tolist(), ["bulkPt3Co", "H"])
+        self.assertEqual(correlations.standardize_vdos(filtered).iloc[0].vdos_error_percent, 42.5)
+
+    def test_pt_only_force_exclusion_retains_hydrogen_and_excluded_only_models(self):
+        frame = pd.DataFrame({
+            "calculator": ["mace-mp-0"] * 3 + ["only-pt-water"],
+            "system": ["H", "bulkCu", "Pt111w24H2O", "Pt111w24H2O"],
+            "force_rmse": [100, 2, 999, 999],
+        })
+        result = correlations.force_rmse_excluding_systems(
+            frame, exclude_pt_water=True,
+        ).set_index("calculator")
+        self.assertEqual(result.loc["mace-mp-0", "force_rmse"], 51)
+        self.assertTrue(pd.isna(result.loc["only-pt-water", "force_rmse"]))
+
+    def test_pt_water_exclusion_cannot_filter_force_summary(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "means.csv"
+            pd.DataFrame({"model": ["mace-mp-0"], "force_rmse": [2]}).to_csv(path, index=False)
+            with self.assertRaisesRegex(ValueError, "per-system.*identifiers"):
+                correlations.load_force_rmse(path, exclude_pt_water=True)
+
+    def test_pipeline_includes_all_three_correlation_sets(self):
+        with patch("sys.argv", [plot_all.__file__, "--source", "mlip-trajs-torchsim-accelerated", "--dry-run"]), \
+                patch.object(plot_all, "run_stage", return_value=True) as run_stage, \
+                redirect_stdout(io.StringIO()):
+            plot_all.main()
+        for module in (figure_6, correlations):
+            commands = [call.args[1] for call in run_stage.call_args_list
+                        if Path(call.args[1][2]).name == Path(module.__file__).name]
+            self.assertEqual(len(commands), 3)
+            parsed = []
+            for command in commands:
+                with patch("sys.argv", [module.__file__, *command[3:]]):
+                    parsed.append(module.parse_args())
+            self.assertEqual([(args.exclude_hydrogen_force_rmse, args.exclude_pt_water) for args in parsed],
+                             [(False, False), (True, False), (True, True)])
+            self.assertEqual(len({args.vdos_model_means_file for args in parsed}), 1)
+            self.assertEqual(len({args.pressure_file for args in parsed}), 1)
+
+    def test_axis_labels_describe_selected_exclusions(self):
+        for label in (
+            correlations.force_rmse_axis_label(True, True),
+            correlations.error_axis_label("RDF error [%]", True, True),
+        ):
+            self.assertIn("without hydrogen and Pt+H₂O", label)
+        self.assertNotIn("hydrogen", correlations.force_rmse_axis_label(False, True))
 
 
 if __name__ == "__main__":

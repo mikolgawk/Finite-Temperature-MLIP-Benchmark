@@ -37,7 +37,11 @@ if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
 from system_filters import add_molecular_crystal_option, filter_molecular_crystals
-from subplot_filters import display_error_percent
+from subplot_filters import (
+    display_error_percent, display_full_error_legend, format_subplot_error_percent,
+)
+from md_success import torchsim_md_succeeded
+from metric_sources import model_trajectory_source
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -376,6 +380,40 @@ def pick_reference_row(subset: pd.DataFrame, system: str) -> pd.Series | None:
     return rows.sort_values("vdos_error_percent").iloc[0]
 
 
+def full_error_models_for_legend(subset: pd.DataFrame, tier_models) -> list[str]:
+    """Only display 100% scores backed by valid spectra and no failure marker."""
+    models = []
+    for model in tier_models:
+        rows = subset[subset["mlip_model"] == model]
+        if rows.empty or not display_full_error_legend(
+            float(rows["vdos_error_percent"].mean()), has_data=True,
+        ):
+            continue
+        for _, row in rows.iterrows():
+            reason = row.get("failure_reason")
+            if pd.notna(reason) and str(reason).strip():
+                continue
+            spectrum_path = Path(str(row.get("mlip_file", "")))
+            source = next((part for part in spectrum_path.parts if part in SOURCES), None)
+            if source is not None and "torchsim" in source:
+                trajectory = (
+                    PAPER_V2_CONFIG_DIR / "data" / model_trajectory_source(source, model) / str(row["system"])
+                    / f"nvt_{spectrum_path.parent.name}.h5"
+                )
+                if not torchsim_md_succeeded(trajectory):
+                    continue
+            try:
+                for column in ("mlip_file", "ref_file"):
+                    energy, intensity = load_vdos(Path(str(row[column])))
+                    if trapz_integral(intensity, energy) <= 0:
+                        raise ValueError("Spectrum has no positive area")
+            except (OSError, ValueError, KeyError):
+                continue
+            models.append(model)
+            break
+    return models
+
+
 def error_to_percent(series: pd.Series) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce")
     if values.dropna().empty:
@@ -402,7 +440,7 @@ def format_model_label_with_vdos_error(model_name: str, error_value: object) -> 
     if error_percent is None:
         return display
 
-    return f"{display} ({error_percent:.1f}%)"
+    return f"{display} ({format_subplot_error_percent(error_percent)})"
 
 
 def mean_system_vdos_error(system_subset: pd.DataFrame) -> float:
@@ -735,6 +773,8 @@ def load_normalized_pairs(path: Path, include_molecular_crystals: bool = False) 
     )
     if "system_type" in df.columns:
         out["system_type"] = df["system_type"]
+    if "failure_reason" in df.columns:
+        out["failure_reason"] = df["failure_reason"]
     out["system"] = out["system"].astype(str)
     out["mlip_model"] = out["mlip_model"].astype(str)
     excluded_models_lower = {model.lower() for model in EXCLUDED_MODELS}
@@ -782,7 +822,8 @@ def plot_combined(
     outer_wspace = 0.45
     bar_system_gap_ratio = 0.22
 
-    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (1.55 * n_top_rows + 0.65)))
+    # Match the v1 RDF panel canvas, adding height only for extra system rows.
+    fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (3.55 + 1.55 * (n_top_rows - 2))))
     panel_slots: list[tuple[int, slice | int, int, int]] = []
     if center_last_two:
         outer_gs = gridspec.GridSpec(
@@ -977,6 +1018,9 @@ def plot_combined(
                 ax.tick_params(labelbottom=False)
 
             handles, labels = ax.get_legend_handles_labels()
+            for model in full_error_models_for_legend(representative_subset, tier_models):
+                handles.append(Line2D([], [], color="none", linestyle="none"))
+                labels.append(format_model_label_with_vdos_error(model, 100.0))
             if np.isfinite(tier_mean_error):
                 handles = handles + [
                     Line2D([], [], color="none", linestyle="none", linewidth=0)

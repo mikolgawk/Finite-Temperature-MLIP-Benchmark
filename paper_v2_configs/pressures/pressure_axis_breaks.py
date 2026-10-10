@@ -105,10 +105,13 @@ def distribution_axis_windows(arrays, reference_arrays):
     return windows
 
 
-def pressure_axes(fig, subplot_spec, windows, *, orientation, core_index=0):
+def pressure_axes(fig, subplot_spec, windows, *, orientation, core_index=0, header=False):
     """Return axes in increasing value order, with conventional break marks."""
     count = len(windows)
     ratios = [2.8 if i == core_index else 1.0 for i in range(count)]
+    if orientation == "y" and header:
+        # Keep the overview's tier headings legible within its top segment.
+        ratios[-1] = max(ratios[-1], 2.8)
     if orientation == "x":
         grid = subplot_spec.subgridspec(1, count, width_ratios=ratios, wspace=0.10)
     else:
