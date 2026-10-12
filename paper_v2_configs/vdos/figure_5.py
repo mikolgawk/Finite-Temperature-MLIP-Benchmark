@@ -35,13 +35,13 @@ import sys
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from system_filters import add_molecular_crystal_option, filter_molecular_crystals
 from subplot_filters import (
     display_error_percent, display_full_error_legend, format_subplot_error_percent,
 )
 from md_success import torchsim_md_succeeded
-from metric_sources import model_trajectory_source
+from metric_sources import cohort_trajectory_path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -84,7 +84,7 @@ def normalize_model_name(name: str) -> str:
     key = key.replace("-force-only", "").replace("-stress", "")
     if key.endswith("-eager"):
         key = key.removesuffix("-eager")
-    return {"nequip-oam-l": "nequip"}.get(key, key)
+    return normalize_display_key(key)
 
 
 def display_name(model: str) -> str:
@@ -396,9 +396,8 @@ def full_error_models_for_legend(subset: pd.DataFrame, tier_models) -> list[str]
             spectrum_path = Path(str(row.get("mlip_file", "")))
             source = next((part for part in spectrum_path.parts if part in SOURCES), None)
             if source is not None and "torchsim" in source:
-                trajectory = (
-                    PAPER_V2_CONFIG_DIR / "data" / model_trajectory_source(source, model) / str(row["system"])
-                    / f"nvt_{spectrum_path.parent.name}.h5"
+                trajectory = cohort_trajectory_path(
+                    PAPER_V2_CONFIG_DIR / "data", source, str(row["system"]), spectrum_path.parent.name,
                 )
                 if not torchsim_md_succeeded(trajectory):
                     continue

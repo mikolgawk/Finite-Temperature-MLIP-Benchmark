@@ -16,12 +16,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 from metric_sources import (
     SOURCES, SOURCE_DATASETS, pressure_input_dir, cohort_model_files, model_trajectory_source,
+    source_from_path, SOURCE_ALIASES,
 )
 from md_success import (
     discover_torchsim_md_trajectories,
     load_failed_md_runs,
     torchsim_md_succeeded,
 )
+from model_display_names import normalize_display_key
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -82,28 +84,12 @@ def normalize_model_name(name: str) -> str:
 
 def canonical_pressure_model_name(name: str) -> str:
     """Map an MD model name to the pressure evaluator's output model name."""
-    name = normalize_model_name(name)
-    name = name.replace("-force-only", "").replace("-stress", "")
-    if name.endswith("-eager"):
-        name = name.removesuffix("-eager")
-    if name == "nequip-oam-l":
-        return "nequip"
-    return name
+    return normalize_display_key(name)
 
 
 def pressure_source(path: Path) -> str | None:
     """Recognize source-specific pressure files, including legacy layouts."""
-    for part in path.parts:
-        if part in SOURCES:
-            return part
-    for backend, mode in SOURCE_DATASETS.values():
-        if backend in path.parts and mode in path.parts:
-            return next(source for source, dataset in SOURCE_DATASETS.items()
-                        if dataset == (backend, mode))
-    for mode in ("md_eager", "md_accelerated"):
-        if mode in path.parts:
-            return f"mlip-trajs-torchsim-{'eager' if mode == 'md_eager' else 'accelerated'}"
-    return None
+    return source_from_path(path)
 
 
 def pressure_md_status(source: str, md_data_dir: Path | None = None) -> dict:
@@ -526,7 +512,7 @@ def add_failed_system_penalties(
     registered_failures = {
         (system, canonical_pressure_model_name(model)): reason
         for (entry_source, system, model), reason in load_failed_md_runs().items()
-        if entry_source == model_trajectory_source(source, model)
+        if SOURCE_ALIASES.get(entry_source, entry_source) == model_trajectory_source(source, model)
     }
     penalties = []
     for system in sorted(systems):

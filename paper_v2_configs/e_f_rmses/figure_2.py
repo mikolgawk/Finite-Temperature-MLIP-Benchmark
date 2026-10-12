@@ -169,7 +169,7 @@ def median_value_label_y(y_max):
     return y_max * 1.08
 
 # Separate data for each subplot
-energy_df = df[df['calculator'] != 'EquiformerV2'].copy()
+energy_df = df.copy()
 force_df = df.copy()
 
 energy_models = energy_df['calculator'].values

@@ -191,7 +191,9 @@ def build_pressure_dataframe(pressures_dir: Path, reference_file: Path | None, i
                 pressures_dir, model_file, reference_file, legacy_reference_files()
             )
             df_m = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
-            df_m = filter_completed_pressure_md_rows(df_m, model_name, pressure_source(model_file))
+            df_m = filter_completed_pressure_md_rows(
+                df_m, model_name, pressure_source(pressures_dir) or pressure_source(model_file),
+            )
             df_ref = load_pressure_per_frame_csv(matched_reference, deduplicate=True, include_molecular_crystals=include_molecular_crystals)
         except (FileNotFoundError, ValueError, KeyError) as exc:
             print(f"[WARN] Skipping {model_file.name}: {exc}")

@@ -54,7 +54,12 @@ metal-water interface, including rows in previously saved pressure results.
 The small RDF, pressure, and VDOS panels omit model curves with 100% error.
 Successful RDF and VDOS runs with valid data and 100% error retain text-only
 legend entries; failed runs and missing data stay out of the legends.
-Pressure subplot legends also omit model names with 100% histogram error.
+Figure 4 names each tier's worst model by valid pressure MAE in its legend,
+including models with 100% histogram error, and shows the MAE in GPa. The worst
+model's histogram is always omitted. Figure SI6's legends continue to omit
+model names with 100% histogram error.
+Figure 4 draws one reference histogram per tier, labeled `Reference`, using the
+best plotted model's matched reference when available.
 Pressure-MAE values and tier means retain their GPa units.
 Those models still contribute to metric computations, averages, and worst-system
 selection.
@@ -81,10 +86,10 @@ uv run --script paper_v2_configs/generate_metrics.py \
 All four metrics are stored separately by trajectory source under
 `paper_v2_configs/<metric-directory>/results/<source>/`, including
 `mlip-trajs-torchsim-eager` and `mlip-trajs-torchsim-accelerated`.
-The TorchSim accelerated paper cohort also includes the **eager eSEN-30M-OAM and
-EquiformerV2** runs by default. This applies to RDF, VDOS, pressure histogram
+The TorchSim accelerated paper cohort also includes **TorchSim eager eSEN-30M-OAM
+and EquiformerV2, and ASE eager CHGNet** runs by default. This applies to RDF, VDOS, pressure histogram
 errors, pressure MAE, energy/force RMSE, correlations, and timing/Pareto plots.
-For these two models, analysis reads the eager trajectories, evaluations,
+For these three models, analysis reads the eager trajectories, evaluations,
 model-matched references, and actual eager step times; every other model uses
 its own source. Eager and ASE analyses retain their existing source selection.
 The output directory and `source`/pressure `mode` identify the paper cohort;
@@ -92,6 +97,10 @@ The output directory and `source`/pressure `mode` identify the paper cohort;
 the source-specific failed-run registry are preserved. Eager failures receive
 100% RDF/VDOS/pressure histogram error and are excluded from RMSE/pressure MAE,
 using the same rules as other models. Each model appears once in the cohort.
+CHGNet trajectories are read from `data/mlip-trajs-ase-eager/` (with the older
+`data/mlip-trajs-ase/` layout also supported). Its `chgnet-force-only-ase` MD
+identifier and `chgnet-force-only` evaluator identifier both join as CHGNet.
+The legacy source key `mlip-trajs-ase` in `trajectory_source` denotes ASE eager.
 
 After changing to this cohort, regenerate the accelerated metric tables and
 then rerun the plotting commands. No new MD or model evaluation is needed when
@@ -101,6 +110,20 @@ the eager evaluation CSVs already exist:
 uv run --script paper_v2_configs/generate_metrics.py \
   --source mlip-trajs-torchsim-accelerated
 ```
+
+If CHGNet's pressure evaluation CSVs are missing, evaluate stresses on its saved
+ASE eager MD frames before aggregating pressure metrics (this does not rerun MD):
+
+```bash
+uv run --script paper_v2_configs/pressures/md_eager/ase-scripts/pressure_chgnet.py
+uv run --script paper_v2_configs/generate_metrics.py \
+  --metric pressure --source mlip-trajs-torchsim-accelerated
+```
+
+The CHGNet pressure evaluator defaults to `data/mlip-trajs-ase-eager/` and writes
+its raw per-frame pressures, matched references, and MAE summaries under
+`pressures/results/ase/md_eager/`. The accelerated cohort reads these files
+directly, without copying them into a TorchSim raw-data directory.
 
 Energy/force means and pressure MAEs are otherwise computed independently for
 each source, even when model names are identical. Existing raw RMSE and pressure input layouts
@@ -136,10 +159,10 @@ v1 sizes: a 10.59 × 12.53-inch canvas, 10-point text, and 6-point legends.
 They retain the centered 3×2 system layout, with v1's tighter column and tier
 spacing and the same relative heights for the overview and system panels.
 Overview tier labels, median values, and panel letters sit inside the plot box;
-vertical median connectors are split at axis breaks. Pressure tier legends omit
-all model names with 100% histogram error. Those model histograms remain hidden,
-and every model still contributes to metric computations and tier means under
-the existing failure policy.
+vertical median connectors are split at axis breaks. Figure 4 adds the worst
+model's name and pressure MAE to each tier legend without drawing its predicted
+histogram. Figure SI6 omits all model names with 100% histogram error. Metric
+computations and tier means retain the existing failure policy.
 VDOS comparison panels use the v1 RDF canvas of 10.59 × 12.53 inches, with
 10-point text and 6-point legends.
 Additional system rows and crowded RDF or pressure legends can add height.

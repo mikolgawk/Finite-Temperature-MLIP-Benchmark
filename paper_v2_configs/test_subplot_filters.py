@@ -142,7 +142,7 @@ class SubplotFilterTests(unittest.TestCase):
         best, worst, tier_scores = pressure_mae.choose_best_worst_from_scores(
             MODELS, scores, visible_models=visible
         )
-        self.assertEqual((best, worst), (MODELS[0], MODELS[1]))
+        self.assertEqual((best, worst), (MODELS[0], MODELS[2]))
         self.assertEqual(tier_scores, scores)
         self.assertAlmostEqual(pressure_mae.mean_finite(tier_scores.values()), 1100.0 / 3)
 

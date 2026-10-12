@@ -44,11 +44,11 @@ import sys
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from matbench_scores import matbench_model_key
 from correlation_labels import inward_label_offset, position_model_labels
 from md_success import torchsim_md_succeeded
-from metric_sources import model_trajectory_source
+from metric_sources import cohort_trajectory_path
 from system_filters import filter_pressure_systems, is_metal_water_interface, is_molecular_crystal
 
 
@@ -184,7 +184,7 @@ def normalize_model_name(name: str) -> str:
     key = key.replace("-force-only", "").replace("-stress", "")
     if key.endswith("-eager"):
         key = key.removesuffix("-eager")
-    return {"nequip-oam-l": "nequip"}.get(key, key)
+    return normalize_display_key(key)
 
 
 def display_name(model: str) -> str:
@@ -554,10 +554,9 @@ def force_rmse_excluding_systems(
                 "to exclude failed MD runs."
             )
         succeeded = pd.Series([
-            torchsim_md_succeeded(
-                CONFIG_DIR / "data" / model_trajectory_source(source, model) / Path(trajectory).parent.name
-                / f"nvt_{model}.h5"
-            ) if isinstance(trajectory, str) else False
+            torchsim_md_succeeded(cohort_trajectory_path(
+                CONFIG_DIR / "data", source, Path(trajectory).parent.name, model,
+            )) if isinstance(trajectory, str) else False
             for trajectory, model in zip(frame["trajectory"], frame[model_column])
         ], index=frame.index, dtype=bool)
         frame = frame.loc[succeeded]

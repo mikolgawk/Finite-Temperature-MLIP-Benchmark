@@ -35,7 +35,7 @@ from md_success import (
     registered_md_failure_reason,
     torchsim_md_succeeded,
 )
-from metric_sources import cohort_model_path, model_trajectory_source
+from metric_sources import cohort_model_path, model_trajectory_source, select_model_names
 from system_filters import (
     DEFAULT_EXCLUDED_SYSTEM_TYPES,
     add_molecular_crystal_option,
@@ -358,7 +358,7 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     }
 
     selected_systems = set(args.systems) if args.systems else None
-    selected_models = set(args.models) if args.models else None
+    selected_models = select_model_names(all_discovered_model_names, set(args.models) if args.models else None)
     excluded_system_types = {
         value.strip().lower() for value in args.excluded_system_types or ()
     }

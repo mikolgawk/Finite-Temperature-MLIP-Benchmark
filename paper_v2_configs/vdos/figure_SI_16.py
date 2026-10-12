@@ -30,7 +30,7 @@ import sys
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from correlation_labels import inward_label_offset, position_model_labels
 from pareto_plot_style import FIGURE_SIZE, MODEL_LABEL_STYLE, apply_pareto_style
 from md_success import registered_md_failure_reason
@@ -66,7 +66,7 @@ def normalize_model_name(name: str) -> str:
     key = key.replace("-force-only", "").replace("-stress", "")
     if key.endswith("-eager"):
         key = key.removesuffix("-eager")
-    return {"nequip-oam-l": "nequip"}.get(key, key)
+    return normalize_display_key(key)
 
 
 def display_name(model: str) -> str:

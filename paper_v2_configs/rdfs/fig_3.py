@@ -29,14 +29,14 @@ import sys
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from system_filters import add_molecular_crystal_option, include_system
 from subplot_filters import (
     display_error_percent, display_full_error_legend, fit_subplot_legends,
     format_subplot_error_percent,
 )
 from md_success import torchsim_md_succeeded
-from metric_sources import SOURCES, model_trajectory_source
+from metric_sources import SOURCES, cohort_trajectory_path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -70,7 +70,7 @@ def normalize_model_name(name: str) -> str:
     normalized = normalized.replace("-force-only", "").replace("-stress", "")
     if normalized.endswith("-eager"):
         normalized = normalized.removesuffix("-eager")
-    return {"nequip-oam-l": "nequip"}.get(normalized, normalized)
+    return normalize_display_key(normalized)
 
 
 def display_name(model: str) -> str:
@@ -436,8 +436,7 @@ def full_error_models_for_legend(
         if curve_path is None:
             continue
         if source is not None and "torchsim" in source:
-            trajectory = (DATA_DIR / model_trajectory_source(source, model) / system
-                          / f"nvt_{curve_path.parent.name}.h5")
+            trajectory = cohort_trajectory_path(DATA_DIR, source, system, curve_path.parent.name)
             if not torchsim_md_succeeded(trajectory):
                 continue
         data = load_rdf_csv(str(curve_path))

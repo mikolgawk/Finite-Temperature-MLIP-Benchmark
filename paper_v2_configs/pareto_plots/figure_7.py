@@ -33,7 +33,7 @@ import sys
 PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
-from model_display_names import MODEL_DISPLAY_NAMES, display_model_name
+from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
 from md_success import registered_md_failure_reason
 from metric_sources import cohort_timing_files
 from system_filters import add_molecular_crystal_option, include_system, filter_pressure_systems
@@ -76,7 +76,7 @@ def metric_model_key(name: str) -> str:
 	name = name.replace("-force-only", "").replace("-stress", "")
 	if name.endswith("-eager"):
 		name = name.removesuffix("-eager")
-	return {"nequip-oam-l": "nequip"}.get(name, name)
+	return normalize_display_key(name)
 
 
 def display_name(model: str) -> str:

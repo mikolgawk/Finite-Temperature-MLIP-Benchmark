@@ -47,6 +47,7 @@ MODEL_DISPLAY_NAMES: dict[str, str] = {
 
 MODEL_KEY_ALIASES = {
     "nequip-oam-l": "nequip",
+    "chgnet-ase": "chgnet",
 }
 
 

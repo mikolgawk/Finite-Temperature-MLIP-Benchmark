@@ -224,7 +224,9 @@ def load_model_values(
                 pressures_dir, model_file, reference_file, (DEFAULT_REFERENCE_FILE,)
             )
             model_df = load_pressure_per_frame_csv(model_file, include_molecular_crystals=include_molecular_crystals)
-            model_df = filter_completed_pressure_md_rows(model_df, model, pressure_source(model_file))
+            model_df = filter_completed_pressure_md_rows(
+                model_df, model, pressure_source(pressures_dir) or pressure_source(model_file),
+            )
             reference_df = load_pressure_per_frame_csv(
                 matched_reference, deduplicate_reference=True,
                 include_molecular_crystals=include_molecular_crystals,

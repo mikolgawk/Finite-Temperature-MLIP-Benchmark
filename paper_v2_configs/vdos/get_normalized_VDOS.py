@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from metric_sources import cohort_model_path, model_trajectory_source
+from metric_sources import cohort_model_path, model_trajectory_source, select_model_names
 from md_success import (
     discover_torchsim_md_trajectories,
     registered_md_failure_reason,
@@ -451,7 +451,7 @@ def process_source(
             for system, models in trajectories.items()
         }
     selected_systems = set(args.systems) if args.systems else None
-    selected_models = set(args.models) if args.models else None
+    selected_models = select_model_names(all_discovered_model_names, set(args.models) if args.models else None)
     excluded_system_types = {
         value.strip().lower() for value in args.excluded_system_types or ()
     }

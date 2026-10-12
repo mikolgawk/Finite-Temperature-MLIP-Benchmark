@@ -12,6 +12,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(CONFIG_DIR))
 from system_filters import filter_pressure_systems
+from model_display_names import normalize_display_key
 
 SOURCES = (
     "mlip-trajs-ase",
@@ -52,7 +53,7 @@ def model_key(name: object) -> str:
     key = key.replace("-force-only", "").replace("-stress", "")
     if key.endswith("-eager"):
         key = key.removesuffix("-eager")
-    return {"nequip-oam-l": "nequip"}.get(key, key)
+    return normalize_display_key(key)
 
 
 def values_to_percent(series: pd.Series) -> pd.Series:

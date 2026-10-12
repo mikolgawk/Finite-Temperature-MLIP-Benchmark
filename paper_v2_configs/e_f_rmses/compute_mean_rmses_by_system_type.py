@@ -12,7 +12,8 @@ from system_filters import (
     add_molecular_crystal_option,
     excluded_system_types,
 )
-from metric_sources import SOURCES, model_trajectory_source
+from metric_sources import SOURCES, model_trajectory_source, cohort_trajectory_path, source_from_path
+from model_display_names import normalize_display_key
 
 
 DATA_DIR = Path(__file__).resolve().parent / 'data' / 'e-f-predictions'
@@ -108,9 +109,9 @@ def canonical_system_key(system_id: str) -> str:
 
 
 def csv_source(csv_file: Path) -> str:
-    for part in csv_file.parts:
-        if part in SOURCES:
-            return part
+    source = source_from_path(csv_file)
+    if source is not None:
+        return source
     backend = 'ase' if 'e-f-predictions-ase' in csv_file.parts else 'torchsim'
     accelerated = csv_file.parent.name in {'md-accelerated', 'md_accelerated'}
     return f'mlip-trajs-{backend}' + ('-accelerated' if accelerated else ('-eager' if backend == 'torchsim' else ''))
@@ -128,7 +129,8 @@ def load_all_data(
         csv_files = [
             csv_file
             for csv_file in csv_files
-            if extract_model_name(csv_file) in models
+            if normalize_display_key(extract_model_name(csv_file))
+            in {normalize_display_key(model) for model in models}
         ]
     if not csv_files:
         requested = (
@@ -151,18 +153,19 @@ def load_all_data(
         if not cohorts:
             continue
         frame = pd.read_csv(csv_file)
-        if 'torchsim' in source:
-            if 'trajectory' not in frame.columns:
-                raise ValueError(f'Missing trajectory column in {csv_file}')
-            frame = frame.loc[frame['trajectory'].map(
-                lambda ref: torchsim_md_succeeded(
-                    md_data_dir / source / Path(ref).parent.name / f'nvt_{model_name}.h5'
-                ) if isinstance(ref, str) else False
-            )].copy()
         frame['calculator'] = model_name
         frame['trajectory_source'] = source
         for cohort in cohorts:
-            frames.append(frame.assign(source=cohort))
+            cohort_frame = frame.assign(source=cohort)
+            if 'torchsim' in cohort:
+                if 'trajectory' not in frame.columns:
+                    raise ValueError(f'Missing trajectory column in {csv_file}')
+                cohort_frame = cohort_frame.loc[frame['trajectory'].map(
+                    lambda ref: torchsim_md_succeeded(cohort_trajectory_path(
+                        md_data_dir, cohort, Path(ref).parent.name, model_name,
+                    )) if isinstance(ref, str) else False
+                )].copy()
+            frames.append(cohort_frame)
 
     if not frames:
         raise FileNotFoundError(f'No RMSE evaluations found for requested sources in {data_dir}')
