@@ -46,6 +46,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Override timing directory for figure SI 14 (requires one source).",
     )
+    parser.add_argument("--skip-figure-si-4", action="store_true")
     parser.add_argument("--skip-figure-si-14", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
     add_molecular_crystal_option(parser)
@@ -81,6 +82,8 @@ def main() -> None:
         command.extend(("--timings-dir", str(args.timings_dir.resolve())))
     if args.skip_figure_si_14:
         command.append("--skip-figure-si-14")
+    if args.skip_figure_si_4:
+        command.append("--skip-figure-si-4")
     if args.dry_run:
         command.append("--dry-run")
 

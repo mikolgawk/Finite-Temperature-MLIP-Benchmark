@@ -46,7 +46,7 @@ DATA_DIR = SCRIPT_DIR.parent / "data"
 FONT_SIZE = 12
 LEGEND_FONT_SIZE = 8
 
-plt.rcParams.update({
+RDF_STYLE = {
     "lines.markersize": 4,
     "lines.linewidth": 1.5,
     "font.size": FONT_SIZE,
@@ -59,7 +59,8 @@ plt.rcParams.update({
     "axes.grid": True,
     "grid.linewidth": 0.5,
     "grid.alpha": 1.0,
-})
+}
+plt.rcParams.update(RDF_STYLE)
 
 palette = sns.color_palette("deep")
 CALCULATOR_DISPLAY_NAMES = MODEL_DISPLAY_NAMES

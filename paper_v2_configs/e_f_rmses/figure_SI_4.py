@@ -45,18 +45,8 @@ def normalize_calculator_name(name):
     return CALCULATOR_DISPLAY_NAMES.get(key, text)
 
 
-def is_molecular_crystal(system):
-    system_name = str(system).lower()
-    return (
-        system_name.startswith("anthracene")
-        or system_name.startswith("naphthalene")
-        or system_name.startswith("pentacene")
-        or system_name.startswith("picene")
-        or system_name.startswith("tetracene")
-    )
-
 # Read and aggregate data from per-model RMSE CSV files
-from _plot_inputs import plot_args, read_metric_csv
+from _plot_inputs import filter_si3_systems, plot_args, read_metric_csv
 from _plot_style import space_tier_labels
 results_dir, plots_dir = plot_args()
 all_data = read_metric_csv(results_dir / 'rmse_per_system.csv')
@@ -66,7 +56,7 @@ if 'system' not in all_data.columns:
     raise ValueError("Missing required column: system")
 
 before_filter_count = len(all_data)
-all_data = all_data[~all_data['system'].map(is_molecular_crystal)].copy()
+all_data = filter_si3_systems(all_data)
 excluded_count = before_filter_count - len(all_data)
 
 df = (
@@ -188,7 +178,7 @@ def median_value_label_y(y_max):
     return y_max * 1.08
 
 # Separate data for each subplot
-# The supplementary overview includes EQv2 in both panels; Figure 2 omits its energy.
+# The supplementary overview includes EQv2 in both panels.
 energy_df = df.copy()
 force_df = df.copy()
 
@@ -376,7 +366,7 @@ print(
     "Saved mean_metrics_by_model_no_molecular_crystals.csv with per-model means for "
     "energy and force RMSE"
 )
-print(f"Excluded {excluded_count} molecular-crystal rows before averaging")
+print(f"Excluded {excluded_count} molecular-crystal and hydrogen rows before averaging")
 print(
     "Energy RMSE medians -> "
     + ", ".join(

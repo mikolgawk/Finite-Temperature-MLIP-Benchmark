@@ -178,6 +178,26 @@ This style also applies to the versions without hydrogen and without Pt+H₂O.
 The E/F RMSE supplementary outputs are numbered SI1–SI3. The existing scripts
 `figure_SI_2.py`, `figure_SI_3.py` and `figure_SI_4.py` save
 `figure_SI_1.pdf`, `figure_SI_2.pdf` and `figure_SI_3.pdf`, respectively.
+SI3 excludes molecular crystals and hydrogen before averaging energy and force
+RMSEs by model and calculating tier medians. Metal-water interfaces are included. Existing
+`rmse_per_system.csv` files are sufficient; rerun SI3 plotting to apply this filter.
+
+RDF Figure SI4 shows the bulk Pt₃Co system at 300 K in four stacked tier panels,
+using Figure 3's best/worst curve selection, fonts, colors, and legend rules.
+Its 3.71 × 5.82-inch canvas matches one Figure 3 system column, with 12-point
+text, 8-point legends, and the same tier spacing. Crowded legends can add height.
+Its model errors and tier means are specific to Pt₃Co. It is included in the RDF
+plotting pipeline and saves `rdfs/plots/<source>/figure_SI_4.pdf`. Run it separately
+from existing results with:
+
+```bash
+uv run --script paper_v2_configs/rdfs/figure_SI_4.py \
+  --source mlip-trajs-torchsim-accelerated
+```
+
+Use `--data-only` to check the selections without creating a figure, or
+`--skip-figure-si-4` on the RDF pipeline to skip this figure. No RDF recomputation
+is needed when the per-model scores and saved curves are already available.
 
 Run the plotting pipelines with:
 
@@ -188,6 +208,26 @@ uv run --script paper_v2_configs/vdos/plot_all.py
 uv run --script paper_v2_configs/pressures/plot_all.py
 uv run --script paper_v2_configs/pareto_plots/plot_all.py
 ```
+
+The Pareto plotting pipeline also includes Figure SI17, a timings-only comparison
+of native accelerated TorchSim and ASE runs. For each shared model it averages
+step times over the same systems with completed, matching MD workloads in both
+runners, excluding molecular crystals and registered failed runs. The panels
+show mean step times and their ASE/TorchSim ratio; ratios above one mean TorchSim
+is faster. Each model label includes its number of matched systems. Borrowed
+eager runs in the paper's accelerated cohort are not used in this comparison.
+The pipeline skips SI17 when no paired timing data is available.
+
+Run SI17 independently from the existing MD timing CSVs and matching trajectories:
+
+```bash
+uv run --script paper_v2_configs/pareto_plots/figure_SI_17.py
+```
+
+This saves `pareto_plots/plots/torchsim_vs_ase_accelerated/figure_SI_17.pdf` and
+summary and per-system CSVs under `pareto_plots/results/torchsim_vs_ase_accelerated/`.
+Add `--data-only` to export just the timing tables. No RDF, VDOS, pressure, or
+energy/force metric computations need to be rerun for SI17.
 
 The VDOS plotting entry point includes Figure 6 and its SI companion, saving the
 two 3×3 correlation figures under `vdos/plots/<source>/`.

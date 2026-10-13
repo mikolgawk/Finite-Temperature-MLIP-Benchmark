@@ -4,7 +4,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from metric_sources import SOURCES
-from system_filters import add_molecular_crystal_option, filter_molecular_crystals
+from system_filters import (
+    SYSTEM_COLUMNS, add_molecular_crystal_option, filter_molecular_crystals,
+)
 
 
 INCLUDE_MOLECULAR_CRYSTALS = False
@@ -26,3 +28,20 @@ def plot_args():
 def read_metric_csv(path):
     import pandas as pd
     return filter_molecular_crystals(pd.read_csv(path), INCLUDE_MOLECULAR_CRYSTALS)
+
+
+def filter_si3_systems(frame):
+    """Exclude crystals and hydrogen before SI3's model means."""
+    def is_hydrogen(value):
+        path = Path(str(value).strip().lower().replace(chr(92), "/"))
+        name = path.parent.name if path.suffix in {
+            ".extxyz", ".xyz", ".h5", ".hdf5", ".traj", ".csv",
+        } else path.name
+        return name.split("_", 1)[0] in {"h", "hydrogen"}
+
+    filtered = filter_molecular_crystals(frame)
+    for column in SYSTEM_COLUMNS:
+        if column in filtered:
+            excluded = filtered[column].map(is_hydrogen)
+            filtered = filtered.loc[~excluded].copy()
+    return filtered

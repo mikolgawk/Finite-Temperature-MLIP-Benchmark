@@ -22,6 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from figure_SI_17 import ASE_SOURCE, COMPARISON_DIR, TORCHSIM_SOURCE, comparison_available
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -115,10 +116,27 @@ def main() -> None:
                 ],
             )
         )
+    if args.dry_run or comparison_available(data_dir, args.include_molecular_crystals):
+        global_stages.append(
+            (
+                "Figure SI 17: TorchSim versus ASE accelerated MD timings",
+                [
+                    sys.executable, "-u", str(HERE / "figure_SI_17.py"),
+                    "--torchsim-dir", str(data_dir / TORCHSIM_SOURCE),
+                    "--ase-dir", str(data_dir / ASE_SOURCE),
+                    "--output-file", str(plots_dir / COMPARISON_DIR / "figure_SI_17.pdf"),
+                    "--output-csv", str(results_dir / COMPARISON_DIR / "figure_SI_17.csv"),
+                    "--paired-csv", str(results_dir / COMPARISON_DIR / "figure_SI_17_per_system.csv"),
+                ],
+            )
+        )
+    else:
+        print("Skipping Figure SI 17: no paired accelerated TorchSim/ASE MD timings.")
     failures: list[str] = []
     for label, command in global_stages:
         if args.include_molecular_crystals and Path(command[2]).name in {
             "plot-model-timings.py", "plot-model-timings-vs-system-size.py", "figure_7.py", "figure_SI_13.py",
+            "figure_SI_17.py",
         }:
             command.append("--include-molecular-crystals")
         if not run_stage(label, command, args.dry_run):

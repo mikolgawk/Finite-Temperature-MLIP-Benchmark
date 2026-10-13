@@ -40,6 +40,7 @@ DATA_DIR = SCRIPT_DIR.parent / "data"
 
 RDF_SCRIPT = SCRIPT_DIR / "get-rdf-and-results-by-system-type-same-simulation-length.py"
 FIGURE_3_SCRIPT = SCRIPT_DIR / "fig_3.py"
+FIGURE_SI_4_SCRIPT = SCRIPT_DIR / "figure_SI_4.py"
 FIGURE_SI_14_SCRIPT = SCRIPT_DIR / "figure_SI_14.py"
 
 SOURCES = (
@@ -124,6 +125,11 @@ def parse_args() -> argparse.Namespace:
         help="do not create the combined RDF panel",
     )
     parser.add_argument(
+        "--skip-figure-si-4",
+        action="store_true",
+        help="do not create the bulk Pt3Co RDF tier panels",
+    )
+    parser.add_argument(
         "--skip-figure-si-14",
         action="store_true",
         help="do not create the RDF-error/time Pareto figure",
@@ -139,7 +145,7 @@ def parse_args() -> argparse.Namespace:
 
     if args.plots_only and args.compute_only:
         parser.error("--plots-only and --compute-only cannot be used together")
-    if args.compute_only and (args.skip_figure_3 or args.skip_figure_si_14):
+    if args.compute_only and (args.skip_figure_3 or args.skip_figure_si_4 or args.skip_figure_si_14):
         parser.error("figure skip options are redundant with --compute-only")
     if args.timings_dir is not None and not args.timings_dir.is_dir():
         parser.error(f"timings directory does not exist: {args.timings_dir}")
@@ -213,6 +219,16 @@ def figure_si_14_command(
     ]
 
 
+def figure_si_4_command(source: str, source_results: Path, output_file: Path) -> list[str]:
+    return [
+        sys.executable, "-u", str(FIGURE_SI_4_SCRIPT),
+        "--source", source,
+        "--rdf-csv-dir", str(source_results),
+        "--rdf-save-dir", str(source_results / "rdf_same_simulation_length_saved"),
+        "--output-file", str(output_file),
+    ]
+
+
 def main() -> None:
     args = parse_args()
     sources = list(dict.fromkeys(args.sources or available_sources()))
@@ -256,6 +272,17 @@ def main() -> None:
                 ) + (["--include-molecular-crystals"] if args.include_molecular_crystals else []),
                 dry_run=args.dry_run,
             )
+
+        if not args.skip_figure_si_4:
+            reference = source_results / "rdf_same_simulation_length_saved/reference/bulkPt3Co_300K_J.Kioseoglou_VASP.csv"
+            if args.dry_run or reference.is_file():
+                run_stage(
+                    f"Create figure SI 4 ({source})",
+                    figure_si_4_command(source, source_results, source_plots / "figure_SI_4.pdf"),
+                    dry_run=args.dry_run,
+                )
+            else:
+                print(f"\n[WARN] Skipping figure SI 4 ({source}): Pt3Co reference RDF is unavailable.", flush=True)
 
         timings_dir = (
             args.timings_dir.resolve()
