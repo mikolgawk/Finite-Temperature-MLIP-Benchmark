@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "adjustText>=1.3",
+#   "matplotlib>=3.9",
+#   "numpy>=1.26",
+#   "pandas>=2.2",
+#   "seaborn>=0.13",
+# ]
+# ///
 """Plot Pareto front for average RDF/VDOS/pressure error vs MD step time.
 
 Objectives:
@@ -15,6 +25,10 @@ where E_P is obtained from the pressure histogram comparison.
 The combined error is the arithmetic mean of the three errors:
 
     E_RPV = (E_RDF + E_VDOS + E_P) / 3
+
+Figure 7 uses the TorchSim eager or accelerated paper cohort.
+Use figure_SI_18.py for the accelerated TorchSim/ASE comparison.
+Use --data-only to export the model metrics and frontier without plotting.
 """
 
 from __future__ import annotations
@@ -24,6 +38,7 @@ from _figure_data import pressure_path
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -34,7 +49,7 @@ PAPER_V2_CONFIG_DIR = Path(__file__).resolve().parents[1]
 if str(PAPER_V2_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(PAPER_V2_CONFIG_DIR))
 from model_display_names import MODEL_DISPLAY_NAMES, display_model_name, normalize_display_key
-from md_success import registered_md_failure_reason
+from md_success import torchsim_md_succeeded
 from metric_sources import cohort_timing_files
 from system_filters import add_molecular_crystal_option, include_system, filter_pressure_systems
 from correlation_labels import inward_label_offset, position_model_labels
@@ -102,9 +117,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = SCRIPT_DIR.parent
 DEFAULT_SOURCE = "mlip-trajs-torchsim-eager"
 SOURCES = (
-	"mlip-trajs-ase",
 	"mlip-trajs-torchsim-eager",
-	"mlip-trajs-ase-accelerated",
 	"mlip-trajs-torchsim-accelerated",
 )
 
@@ -303,7 +316,7 @@ def compute_combined_error(df: pd.DataFrame) -> pd.Series:
 
 
 def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool = False) -> pd.DataFrame:
-	"""Return mean step time for every model with valid timing CSVs."""
+	"""Average completed MD timings over systems, retaining native provenance."""
 	if not timings_dir.is_dir():
 		raise FileNotFoundError(f"Timing directory does not exist: {timings_dir}")
 	model_timings: dict[str, list[float]] = {}
@@ -313,12 +326,17 @@ def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool =
 		for csv_path in paths:
 			if csv_path.parent != system_dir:
 				continue
-			if registered_md_failure_reason(csv_path):
+			trajectory = csv_path.with_name(f"nvt_{csv_path.stem.removeprefix('md_timing_')}.h5")
+			if not torchsim_md_succeeded(trajectory):
 				continue
 			model_name = metric_model_key(csv_path.stem.removeprefix("md_timing_"))
 			try:
 				df = pd.read_csv(csv_path)
+				if len(df) != 1:
+					continue
 				sps = float(df["seconds_per_step"].iloc[0])
+				if not np.isfinite(sps) or sps <= 0:
+					continue
 				model_timings.setdefault(model_name, []).append(sps)
 			except Exception:
 				pass
@@ -480,6 +498,14 @@ def load_and_merge(
 		backend=pressure_backend,
 		mode=pressure_mode,
 	)
+	for metric, available_models in (
+		("RDF/VDOS", set(combined_small["model"])),
+		("pressure", set(pressure_small["model"])),
+	):
+		missing_models = set(timings_df["model"]) - available_models
+		if missing_models:
+			names = ", ".join(display_name(model) for model in sorted(missing_models))
+			print(f"[INFO] Excluding timed models without {metric} metrics ({dataset_label}): {names}")
 
 	merged = pd.merge(
 		timings_df,
@@ -570,6 +596,16 @@ def is_pareto_optimal(df: pd.DataFrame) -> np.ndarray:
 	return pareto
 
 
+def mark_pareto_frontier(df: pd.DataFrame) -> pd.DataFrame:
+	"""Mark dominance separately for each MD source in a comparison."""
+	result = df.copy()
+	result["is_pareto"] = False
+	groups = result.groupby("dataset", sort=False) if "dataset" in result else [(None, result)]
+	for _, rows in groups:
+		result.loc[rows.index, "is_pareto"] = is_pareto_optimal(rows)
+	return result
+
+
 def model_tier(model_name: str) -> str:
 	model_name = normalize_model_name(model_name)
 
@@ -588,12 +624,33 @@ def model_tier(model_name: str) -> str:
 	return "Other"
 
 
-def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
+def source_label(source: str) -> str:
+	return {
+		"mlip-trajs-torchsim-accelerated": "TorchSim",
+		"mlip-trajs-ase-accelerated": "ASE",
+		"mlip-trajs-torchsim-eager": "TorchSim eager",
+		"mlip-trajs-ase": "ASE eager",
+	}.get(source, str(source))
+
+
+def comparison_layout(sources: list[str], layout: str | None = None) -> str:
+	if layout is not None:
+		return layout
+	accelerated_pair = {"mlip-trajs-torchsim-accelerated", "mlip-trajs-ase-accelerated"}
+	return "overlay" if set(sources) == accelerated_pair else "panels"
+
+
+def plot_pareto(
+	df: pd.DataFrame, output_file: Path, *, layout: str | None = None,
+	font_size: float = FONT_SIZE,
+) -> None:
 	all_df = df.copy()
 	if "dataset" not in all_df.columns:
 		all_df["dataset"] = "dataset"
 	all_df["tier"] = all_df["model"].map(model_tier)
 	datasets = all_df["dataset"].drop_duplicates().tolist()
+	overlay = comparison_layout(datasets, layout) == "overlay" and len(datasets) > 1
+	n_panels = 1 if overlay else len(datasets)
 	y_values = all_df["Combined Error [%]"].to_numpy()
 	y_min, y_max = float(np.nanmin(y_values)), float(np.nanmax(y_values))
 	y_padding = max(0.75, (y_max - y_min) * 0.08)
@@ -601,16 +658,20 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 
 	fig, axes = plt.subplots(
 		1,
-		len(datasets),
-		figsize=(3.53 * 1.5 * len(datasets), 3.53 * 1.5),
+		n_panels,
+		figsize=(3.53 * (2 if overlay else 1.5 * n_panels), 3.53 * 1.5),
 		sharey=True,
 		squeeze=False,
 	)
 	axes = axes[0]
 
-	for ax, dataset_name in zip(axes, datasets):
+	for panel_index, dataset_name in enumerate(datasets):
+		ax = axes[0] if overlay else axes[panel_index]
 		dataset_df = all_df[all_df["dataset"] == dataset_name]
 		pareto_df = dataset_df[is_pareto_optimal(dataset_df)].sort_values("mean_time_per_step_ms")
+		style_index = {"mlip-trajs-torchsim-accelerated": 0, "mlip-trajs-ase-accelerated": 1}.get(dataset_name, panel_index)
+		marker = ("o", "^", "s", "D")[style_index % 4] if overlay else "o"
+		linestyle = ("-", "--", ":", "-.")[style_index % 4] if overlay else "-"
 
 		for tier_name in ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Other"]:
 			tier_df = dataset_df[dataset_df["tier"] == tier_name]
@@ -620,6 +681,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 				tier_df["mean_time_per_step_ms"],
 				tier_df["Combined Error [%]"],
 				color=TIER_COLORS[tier_name],
+				marker=marker,
 				alpha=0.9,
 				s=26,
 				label=tier_name,
@@ -631,6 +693,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 			pareto_df["Combined Error [%]"],
 			facecolors="none",
 			edgecolors="black",
+			marker=marker,
 			alpha=0.95,
 			s=58,
 			linewidths=1.0,
@@ -641,6 +704,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 			pareto_df["mean_time_per_step_ms"],
 			pareto_df["Combined Error [%]"],
 			color="black",
+			linestyle=linestyle,
 			linewidth=1.2,
 			alpha=0.9,
 			zorder=3,
@@ -648,7 +712,8 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 
 		x_vals = dataset_df["mean_time_per_step_ms"].to_numpy()
 		y_vals = dataset_df["Combined Error [%]"].to_numpy()
-		ax.set_xlim(left=0, right=max(1.0, float(np.nanmax(x_vals)) * 1.1))
+		axis_times = all_df["mean_time_per_step_ms"].to_numpy() if overlay else x_vals
+		ax.set_xlim(left=0, right=max(1.0, float(np.nanmax(axis_times)) * 1.1))
 		ax.set_ylim(bottom=y_bottom, top=y_top)
 		for xi, yi, model_name in zip(x_vals, y_vals, dataset_df["model"].values):
 			offset, horizontal, vertical = inward_label_offset(ax, float(xi))
@@ -657,7 +722,7 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 				xy=(xi, yi),
 				xytext=offset,
 				textcoords="offset points",
-				fontsize=FONT_SIZE,
+				fontsize=font_size,
 				alpha=0.8,
 				ha=horizontal,
 				va=vertical,
@@ -665,11 +730,34 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 			)
 			label._model_point_label = True
 
-		ax.set_xlabel(r"Mean time per step [ms]")
+		ax.set_xlabel(r"Mean time per step [ms]", fontsize=font_size)
+		ax.tick_params(axis="both", which="both", labelsize=font_size)
+		ax.xaxis.get_offset_text().set_fontsize(font_size)
+		ax.yaxis.get_offset_text().set_fontsize(font_size)
+		if len(datasets) > 1 and not overlay:
+			ax.text(
+				0.02, 0.98, f"{chr(97 + panel_index)}) {source_label(dataset_name)}",
+				transform=ax.transAxes, ha="left", va="top", fontsize=font_size,
+			)
 		ax.grid(True, linestyle="--", alpha=0.4)
-		ax.legend(loc="best", frameon=True)
+		if not overlay:
+			ax.legend(loc="best", frameon=True, fontsize=font_size)
 
-	axes[0].set_ylabel(r"$\bar{E}_{RPV}$ [%]")
+	if overlay:
+		handles = [
+			Line2D([], [], color=TIER_COLORS[tier], marker="o", linestyle="none", label=tier)
+			for tier in TIER_COLORS if tier in set(all_df["tier"])
+		]
+		for index, dataset_name in enumerate(datasets):
+			style_index = {"mlip-trajs-torchsim-accelerated": 0, "mlip-trajs-ase-accelerated": 1}.get(dataset_name, index)
+			handles.append(Line2D(
+				[], [], color="black", marker=("o", "^", "s", "D")[style_index % 4],
+				linestyle=("-", "--", ":", "-.")[style_index % 4], markerfacecolor="none",
+				label=f"{source_label(dataset_name)} (Pareto frontier)",
+			))
+		axes[0].legend(handles=handles, loc="best", frameon=True, fontsize=font_size)
+
+	axes[0].set_ylabel(r"$\bar{E}_{RPV}$ [%]", fontsize=font_size)
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 	fig.tight_layout()
 	position_model_labels(fig, axes, max_offset_points=6, max_distance_points=6)
@@ -682,7 +770,12 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
 	print(f"Pareto-optimal models: {pareto_count}")
 
 
-def main() -> None:
+def run_pareto_figure(
+	*, figure_name: str, allowed_sources: tuple[str, ...],
+	default_sources: tuple[str, ...], required_sources: tuple[str, ...] | None = None,
+	argv: list[str] | None = None, font_size: float = FONT_SIZE,
+) -> None:
+	"""Share metric loading, independent frontiers and styling across Figures 7/SI18."""
 	parser = argparse.ArgumentParser(
 		description=(
 			"Plot Pareto front of average RDF/VDOS/pressure error "
@@ -692,9 +785,13 @@ def main() -> None:
 
 	parser.add_argument(
 		"--source",
-		choices=SOURCES,
+		choices=allowed_sources,
 		action="append",
-		help="V2 trajectory source; repeat to create side-by-side subplots.",
+		help=f"Trajectory source (default: {', '.join(default_sources)}).",
+	)
+	parser.add_argument(
+		"--layout", choices=("overlay", "panels"), default=None,
+		help="Comparison layout (default: overlay for accelerated TorchSim/ASE, panels otherwise).",
 	)
 
 	parser.add_argument(
@@ -768,19 +865,29 @@ def main() -> None:
 
 	parser.add_argument(
 		"--output-file",
-		default=str(DEFAULT_OUTPUT_FILE),
-		help="Output plot path.",
+		default=None,
+		help=f"Output plot path (default: plots/<source or comparison>/{figure_name}.pdf).",
 	)
 
 	parser.add_argument(
 		"--output-csv",
-		default=str(DEFAULT_OUTPUT_CSV),
-		help="Output CSV containing merged RDF, VDOS, pressure, and average-error metrics.",
+		default=None,
+		help=f"Model metrics CSV (default: results/<source or comparison>/{figure_name}_metrics.csv).",
+	)
+	parser.add_argument(
+		"--frontier-csv", default=None,
+		help=f"Pareto-optimal rows CSV (default: {figure_name}_frontier.csv beside the metrics CSV).",
+	)
+	parser.add_argument(
+		"--data-only", action="store_true",
+		help="Export model metrics and the Pareto frontier without creating a figure.",
 	)
 
 	add_molecular_crystal_option(parser)
-	args = parser.parse_args()
-	sources = args.source or [DEFAULT_SOURCE]
+	args = parser.parse_args(argv)
+	sources = list(dict.fromkeys(args.source or default_sources))
+	if required_sources is not None and set(sources) != set(required_sources):
+		parser.error(f"{figure_name} requires both sources: {', '.join(required_sources)}")
 	if len(sources) > 1 and any(
 		value is not None
 		for value in [args.timings_dir, args.combined_metrics_file, args.rdf_metrics_file, args.vdos_metrics_file]
@@ -808,18 +915,39 @@ def main() -> None:
 				clip_pressure_error=not args.no_pressure_clip,
 				pressure_backend=args.pressure_backend or source_pressure_backend(source),
 				pressure_mode=args.pressure_mode or default_pressure_mode,
-				dataset_label="accelerated" if source.endswith("-accelerated") else "eager",
+				dataset_label=source,
 				include_molecular_crystals=args.include_molecular_crystals,
 			)
 		)
-	merged = pd.concat(merged_frames, ignore_index=True)
+	merged = mark_pareto_frontier(pd.concat(merged_frames, ignore_index=True))
 
-	output_csv = Path(args.output_csv)
+	accelerated_pair = {"mlip-trajs-torchsim-accelerated", "mlip-trajs-ase-accelerated"}
+	output_group = "torchsim_vs_ase_accelerated" if set(sources) == accelerated_pair else "__".join(sources)
+	output_csv = Path(args.output_csv) if args.output_csv else SCRIPT_DIR / "results" / output_group / f"{figure_name}_metrics.csv"
 	output_csv.parent.mkdir(parents=True, exist_ok=True)
 	merged.to_csv(output_csv, index=False)
 	print(f"Saved merged RDF/VDOS/pressure average-error metrics: {output_csv}")
+	frontier = merged.loc[merged["is_pareto"]].sort_values(["dataset", "mean_time_per_step_ms"])
+	frontier_csv = Path(args.frontier_csv) if args.frontier_csv else output_csv.with_name(f"{figure_name}_frontier.csv")
+	frontier_csv.parent.mkdir(parents=True, exist_ok=True)
+	frontier.to_csv(frontier_csv, index=False)
+	print(f"Saved Pareto frontier: {frontier_csv}")
+	print(frontier[["dataset", "model", "mean_time_per_step_ms", "Combined Error [%]"]].to_string(index=False))
+	if args.data_only:
+		return
 
-	plot_pareto(merged, Path(args.output_file))
+	output_file = Path(args.output_file) if args.output_file else SCRIPT_DIR / "plots" / output_group / f"{figure_name}.pdf"
+	plot_pareto(
+		merged, output_file, layout=comparison_layout(sources, args.layout),
+		font_size=font_size,
+	)
+
+
+def main() -> None:
+	run_pareto_figure(
+		figure_name="figure_7", allowed_sources=SOURCES,
+		default_sources=(DEFAULT_SOURCE,),
+	)
 
 
 if __name__ == "__main__":

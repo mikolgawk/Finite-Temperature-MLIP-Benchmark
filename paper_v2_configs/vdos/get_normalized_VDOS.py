@@ -33,7 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from metric_sources import cohort_model_path, model_trajectory_source, select_model_names
 from md_success import (
-    discover_torchsim_md_trajectories,
+    discover_md_trajectories,
     registered_md_failure_reason,
     torchsim_md_succeeded,
 )
@@ -117,12 +117,8 @@ def load_metadata(path: Path) -> dict[str, dict]:
 
 
 def discover_mlip_trajectories(base_dir: Path) -> dict[str, dict[str, Path]]:
-    """Discover every ``<system>/nvt_<model>.h5`` trajectory."""
-    trajectories: dict[str, dict[str, Path]] = {}
-    for path in sorted(base_dir.glob("*/nvt_*.h5")):
-        model = path.stem.removeprefix("nvt_")
-        trajectories.setdefault(path.parent.name, {})[model] = path
-    return trajectories
+    """Discover ASE/TorchSim jobs, retaining timing-only failed runs."""
+    return discover_md_trajectories(base_dir)
 
 
 def load_reference_positions(path: Path) -> np.ndarray:
@@ -434,22 +430,17 @@ def process_source(
     trajectory_dir = data_dir / source
     results_dir = args.results_dir.resolve() / source
     spectra_dir = results_dir / SPECTRA_DIR
-    torchsim_source = "torchsim" in source
-    trajectories = (
-        discover_torchsim_md_trajectories(trajectory_dir)
-        if torchsim_source else discover_mlip_trajectories(trajectory_dir)
-    )
+    discovered_trajectories = discover_mlip_trajectories(trajectory_dir)
     all_discovered_model_names = {
-        model for models in trajectories.values() for model in models
+        model for models in discovered_trajectories.values() for model in models
     }
-    if torchsim_source:
-        trajectories = {
-            system: {
-                model: path for model, path in models.items()
-                if torchsim_md_succeeded(path)
-            }
-            for system, models in trajectories.items()
+    trajectories = {
+        system: {
+            model: path for model, path in models.items()
+            if torchsim_md_succeeded(path)
         }
+        for system, models in discovered_trajectories.items()
+    }
     selected_systems = set(args.systems) if args.systems else None
     selected_models = select_model_names(all_discovered_model_names, set(args.models) if args.models else None)
     excluded_system_types = {
@@ -597,9 +588,8 @@ def process_source(
             mlip_path = models.get(model)
             if mlip_path is None:
                 reason = (
-                    registered_md_failure_reason(cohort_model_path(
-                        trajectory_dir / system / f"nvt_{model}.h5", model))
-                    if torchsim_source else None
+                    registered_md_failure_reason(discovered_trajectories.get(system, {}).get(
+                        model, cohort_model_path(trajectory_dir / system / f"nvt_{model}.h5", model)))
                 ) or "MLIP trajectory missing or incomplete"
                 print(f"    [PENALTY] {reason}; assigning 100% VDOS error")
                 rows.append(

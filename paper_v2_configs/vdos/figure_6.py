@@ -10,10 +10,15 @@
 # ///
 """Create RDF/pressure/VDOS correlation panels with only outlier model labels.
 
-The main output keeps the correlation panels clean by labeling only models that
-are far from the fitted trend or from the central point cloud. A larger SI
-output with every model labeled is written by default for readers who want to
-identify all points.
+The main output labels every model with an absolute externally studentized
+regression residual at or above the threshold, without a default limit per
+panel. Extreme x/y coordinates alone do not trigger a label. This is a
+descriptive regression diagnostic, not a statistical significance test. A larger
+SI output with every model labeled is written by default.
+
+Metric means use only each model's completed MD runs that are not registered as
+physically unstable, matching the SI 1x3 correlation plots. Benchmark failure
+penalties remain in the metric CSVs. F1 and k_SRME values are unchanged.
 
 Use --exclude-hydrogen to exclude hydrogen from force RMSE, RDF, pressure, and
 VDOS means. The legacy --exclude-hydrogen-force-rmse option and
@@ -43,7 +48,7 @@ from figure_SI_7_8_9 import (
     display_name,
     error_axis_label,
     force_rmse_axis_label,
-    load_joined_data,
+    load_joined_data as load_correlation_data,
     model_color,
     palette,
 )
@@ -66,41 +71,71 @@ Y_METRICS = [
 ]
 
 
-def robust_z_scores(values: np.ndarray) -> np.ndarray:
-    """Return absolute robust z scores using MAD with a standard-deviation fallback."""
-    values = np.asarray(values, dtype=float)
-    scores = np.zeros_like(values, dtype=float)
-    finite = np.isfinite(values)
-    if finite.sum() < 2:
-        return scores
-
-    finite_values = values[finite]
-    center = np.nanmedian(finite_values)
-    mad = np.nanmedian(np.abs(finite_values - center))
-    scale = 1.4826 * mad
-    if not np.isfinite(scale) or scale <= 0.0:
-        scale = np.nanstd(finite_values)
-    if not np.isfinite(scale) or scale <= 0.0:
-        return scores
-
-    scores[finite] = np.abs(finite_values - center) / scale
-    return scores
+def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
+    """Reaverage Figure 6's metric inputs over each model's stable MD runs."""
+    return load_correlation_data(args, stable_md_only=True, md_data_dir=getattr(args, "md_data_dir", None))
 
 
 def panel_outlier_scores(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Score points by residual outlierness and high-leverage x/y outlierness."""
+    """Absolute externally studentized OLS residuals: |e_i|/(s_(-i)*sqrt(1-h_i)).
+
+    The residual and leverage come from the full intercept/slope fit. Each
+    deleted fit estimates its residual variance using n-3 degrees of freedom.
+    Direct deleted fits avoid cancellation in SSE-e_i**2/(1-h_i). Undefined
+    diagnostics and numerically exact full fits do not produce labels.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    residual_z = np.zeros_like(y, dtype=float)
+    if x.ndim != 1 or x.shape != y.shape:
+        raise ValueError("Outlier scores require paired one-dimensional metric arrays")
+    scores = np.zeros_like(y)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x, y = x[finite], y[finite]
+    n = len(x)
+    if n < 4:
+        return scores
+    x, y = x - x.mean(), y - y.mean()
+    x_scale, y_scale = np.max(np.abs(x)), np.max(np.abs(y))
+    if x_scale == 0 or y_scale == 0:
+        return scores
+    x, y = x / x_scale, y / y_scale
+    design = np.column_stack((np.ones(n), x))
+    coefficients, _, rank, _ = np.linalg.lstsq(design, y, rcond=None)
+    if rank < 2:
+        return scores
+    residuals = y - design @ coefficients
+    numerical_residual = 64 * n * np.finfo(float).eps
+    sse_tolerance = numerical_residual**2 * np.dot(y, y)
+    if np.dot(residuals, residuals) <= sse_tolerance:
+        return scores
+    q, _ = np.linalg.qr(design, mode="reduced")
+    leverage = np.sum(q**2, axis=1)
+    indices = np.flatnonzero(finite)
+    for i in range(n):
+        remaining_leverage = 1 - leverage[i]
+        if remaining_leverage <= 64 * np.finfo(float).eps:
+            continue
+        keep = np.arange(n) != i
+        deleted_coefficients, _, deleted_rank, _ = np.linalg.lstsq(design[keep], y[keep], rcond=None)
+        if deleted_rank < 2:
+            continue
+        deleted_residuals = y[keep] - design[keep] @ deleted_coefficients
+        deleted_sse = np.dot(deleted_residuals, deleted_residuals)
+        if deleted_sse <= sse_tolerance:
+            if abs(residuals[i]) > numerical_residual:
+                scores[indices[i]] = np.inf
+            continue
+        deleted_variance = deleted_sse / (n - 3)
+        scores[indices[i]] = abs(residuals[i]) / np.sqrt(deleted_variance * remaining_leverage)
+    return scores
 
-    if len(x) >= 3 and np.nanstd(x) > 0.0:
-        try:
-            slope, intercept = np.polyfit(x, y, 1)
-            residual_z = robust_z_scores(y - (slope * x + intercept))
-        except Exception:
-            residual_z = np.zeros_like(y, dtype=float)
 
-    return np.maximum.reduce([residual_z, robust_z_scores(x), robust_z_scores(y)])
+def finite_panel_data(df: pd.DataFrame, x_col: str, y_col: str) -> pd.DataFrame:
+    """Use the same finite model/metric pairs for labels, dots, fits, and r."""
+    sub = df.loc[df["calculator"].notna(), ["calculator", x_col, y_col]].copy()
+    for column in (x_col, y_col):
+        sub[column] = pd.to_numeric(sub[column], errors="coerce")
+    return sub.loc[np.isfinite(sub[x_col]) & np.isfinite(sub[y_col])].copy()
 
 
 def select_outlier_labels(
@@ -108,19 +143,31 @@ def select_outlier_labels(
     x_col: str,
     y_col: str,
     threshold: float,
-    max_labels: int,
+    max_labels: int | None = None,
 ) -> set[str]:
-    if max_labels <= 0:
+    if max_labels is not None and max_labels <= 0:
         return set()
 
+    sub = finite_panel_data(sub, x_col, y_col)
     x = sub[x_col].to_numpy(dtype=float)
     y = sub[y_col].to_numpy(dtype=float)
     ranked = sub[["calculator"]].copy()
     ranked["outlier_score"] = panel_outlier_scores(x, y)
     ranked = ranked[ranked["outlier_score"] >= threshold].copy()
     ranked = ranked.sort_values(["outlier_score", "calculator"], ascending=[False, True])
-    ranked = ranked.head(max_labels)
+    if max_labels is not None:
+        ranked = ranked.head(max_labels)
     return set(ranked["calculator"].astype(str))
+
+
+def outlier_label_summary(
+    df: pd.DataFrame, threshold: float, max_labels: int | None = None,
+) -> dict[str, list[str]]:
+    """Report exactly which outlier names each panel will show, without plotting."""
+    return {
+        f"{y_col} vs {x_col}": sorted(select_outlier_labels(df, x_col, y_col, threshold, max_labels))
+        for y_col, _ in Y_METRICS for x_col, _ in X_METRICS
+    }
 
 
 def add_point_labels(
@@ -144,7 +191,8 @@ def add_point_labels(
             xytext=xytext,
             textcoords="offset points",
             fontsize=label_font_size,
-            alpha=0.85,
+            alpha=1.0,
+            zorder=10,
             ha=horizontal_alignment,
             va=vertical_alignment,
             annotation_clip=False,
@@ -152,7 +200,7 @@ def add_point_labels(
                 "boxstyle": "round,pad=0.08",
                 "facecolor": "white",
                 "edgecolor": "none",
-                "alpha": 0.55,
+                "alpha": 0.9,
             },
         )
         txt._model_point_label = True
@@ -166,10 +214,10 @@ def plot_correlation_panel(
     tier_colors: dict[str, tuple[float, float, float]],
     label_mode: str,
     threshold: float,
-    max_labels: int,
+    max_labels: int | None,
     label_font_size: int,
 ) -> list[str]:
-    sub = sub.copy()
+    sub = finite_panel_data(sub, x_col, y_col)
     sub["x_value"] = sub[x_col].astype(float)
     sub["y_value"] = sub[y_col].astype(float)
 
@@ -261,7 +309,7 @@ def render_figure(
     output_file: str,
     label_mode: str,
     threshold: float,
-    max_labels: int,
+    max_labels: int | None,
     figsize: tuple[float, float],
     label_font_size: int,
     exclude_hydrogen_force_rmse: bool = False,
@@ -309,7 +357,7 @@ def render_figure(
                 fontsize=FONT_SIZE,
             )
 
-            sub = df[["calculator", x_col, y_col]].dropna().copy()
+            sub = finite_panel_data(df, x_col, y_col)
             if sub.empty:
                 ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=FONT_SIZE)
                 ax.grid()
@@ -361,12 +409,18 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Override the source-specific RMSE input with per-system/model-summary "
-            "CSV or a directory of rmse-results-all_*.csv files. Hydrogen exclusion "
+            "Override the source-specific RMSE input with a per-system CSV or a "
+            "directory of rmse-results-all_*.csv files. Stable-MD filtering "
             "requires per-system rows (default: rmse_per_system.csv)."
         ),
     )
     add_force_rmse_exclusion_option(parser)
+    parser.add_argument(
+        "--md-data-dir",
+        type=Path,
+        default=None,
+        help="MD data root used to identify completed, stable runs (default: paper_v2_configs/data).",
+    )
     parser.add_argument(
         "--rdf-file",
         type=Path,
@@ -425,19 +479,26 @@ def parse_args() -> argparse.Namespace:
         help="Scale factor applied to the main figure size for the SI all-label figure.",
     )
     parser.add_argument(
+        "--outlier-threshold",
         "--outlier-z-threshold",
+        dest="outlier_z_threshold",
         type=float,
         default=2.5,
         help=(
-            "Robust z-score threshold for labeling main-figure outliers. "
-            "The score combines fit residual, x-value, and y-value outlierness."
+            "Absolute externally studentized residual threshold for labels (default: 2.5). "
+            "Extreme metric coordinates alone are not labeled. This is a descriptive cutoff."
         ),
     )
     parser.add_argument(
         "--max-labels-per-panel",
         type=int,
-        default=3,
-        help="Maximum number of outlier labels to draw in each main-figure panel.",
+        default=None,
+        help="Optional cap on outlier labels per main-figure panel; default: all qualifying models. Use 0 to hide labels.",
+    )
+    parser.add_argument(
+        "--data-only",
+        action="store_true",
+        help="Report outlier names for each panel without creating figures.",
     )
     parser.add_argument(
         "--show-outlier-summary",
@@ -461,7 +522,15 @@ def main() -> None:
     args = parse_args()
     df = load_joined_data(args)
 
-    outlier_summary = render_figure(
+    if args.data_only or args.show_outlier_summary:
+        print("Main-figure outlier labels:")
+        for panel, models in outlier_label_summary(df, args.outlier_z_threshold, args.max_labels_per_panel).items():
+            labels = ", ".join(display_name(model) for model in models) if models else "none"
+            print(f"  {panel}: {labels}")
+    if args.data_only:
+        return
+
+    render_figure(
         df=df,
         output_file=args.output_file,
         label_mode="outliers",
@@ -486,12 +555,6 @@ def main() -> None:
             exclude_hydrogen_force_rmse=args.exclude_hydrogen_force_rmse,
             exclude_pt_water=args.exclude_pt_water,
         )
-
-    if args.show_outlier_summary:
-        print("Main-figure outlier labels:")
-        for panel, models in outlier_summary.items():
-            labels = ", ".join(display_name(model) for model in models) if models else "none"
-            print(f"  {panel}: {labels}")
 
 
 if __name__ == "__main__":

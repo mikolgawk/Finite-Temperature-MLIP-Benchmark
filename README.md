@@ -174,6 +174,28 @@ Both use 12-point text and tier legends, with equal-width panels and no extra
 horizontal stretching. Figure 6 uses 10-point outlier model labels and 12-point
 labels in its larger all-model companion, whose default canvas is scaled by 1.45.
 This style also applies to the versions without hydrogen and without Pt+H₂O.
+Figure 6 labels every model meeting its outlier threshold in each panel by
+default. Labels identify departures from the fitted linear trend using absolute
+externally studentized residuals of at least 2.5. Each residual is scaled by the
+noise estimated with that model omitted and adjusted for its leverage. Extreme
+x/y metric values alone do not trigger a label. This cutoff is descriptive,
+not a significance test; all eligible points remain in the fit and correlation.
+Use `--outlier-threshold` to change the cutoff (`--outlier-z-threshold` remains
+an alias). `--max-labels-per-panel N` applies an optional cap; `0` hides labels.
+Use `--data-only` on `vdos/figure_6.py` to print the selected names without
+generating figures. Nonfinite metric pairs are excluded from dots, fits,
+correlations, and outlier selection.
+Figure 6, its all-label companion, and the SI7–SI9 1×3 correlation plots average
+force RMSE, RDF, VDOS, and pressure errors only over each model's stable MD
+systems, using completed trajectories
+and matching timing records and excluding registered physical failures. This
+also applies to its no-hydrogen and no-hydrogen/no-Pt+H₂O versions. A successful
+run with 100% metric error is still included. Matbench scores are unchanged.
+Benchmark metric CSVs retain their failure penalties. Both correlation scripts
+require per-system metric CSVs and the MD outputs; use `--md-data-dir` to
+override the MD data root. Use `--data-only` on `figure_SI_7_8_9.py` to inspect
+the model averages without generating figures. Rerun plotting only to apply
+this change.
 
 The E/F RMSE supplementary outputs are numbered SI1–SI3. The existing scripts
 `figure_SI_2.py`, `figure_SI_3.py` and `figure_SI_4.py` save
@@ -229,25 +251,66 @@ summary and per-system CSVs under `pareto_plots/results/torchsim_vs_ase_accelera
 Add `--data-only` to export just the timing tables. No RDF, VDOS, pressure, or
 energy/force metric computations need to be rerun for SI17.
 
+Figure 7 uses only the TorchSim eager or accelerated paper cohort. For the
+accelerated main-paper figure, run:
+
+```bash
+uv run --script paper_v2_configs/pareto_plots/figure_7.py \
+  --source mlip-trajs-torchsim-accelerated
+```
+
+This saves `pareto_plots/plots/mlip-trajs-torchsim-accelerated/figure_7.pdf`,
+with `figure_7_metrics.csv` and `figure_7_frontier.csv` under the corresponding
+results directory. The TorchSim paper cohort still includes the previously
+selected eager EQ/eSEN and ASE eager CHGNet results.
+
+Figure SI18 compares accelerated TorchSim and ASE on the same axes:
+
+```bash
+uv run --script paper_v2_configs/pareto_plots/figure_SI_18.py
+```
+
+The runners keep separate Pareto frontiers: TorchSim uses circles and a solid
+line; ASE uses triangles and a dashed line. Colours still denote model tiers,
+and model names remain beside their points. Each runner retains its own metrics
+and available model configurations, including native ASE PET-OAM-XL when its
+metrics are available. The comparison is saved as
+`pareto_plots/plots/torchsim_vs_ase_accelerated/figure_SI_18.pdf`, with
+`figure_SI_18_metrics.csv` and `figure_SI_18_frontier.csv` under the matching
+results directory. Existing metrics are sufficient; add `--data-only` to either
+script to export tables without creating a figure. Add `--layout panels` to
+SI18 for separate panels. The standard Pareto pipeline creates SI18 whenever
+both accelerated sources are selected or discovered, and creates Figure 7 only
+for selected TorchSim sources.
+
+Native ASE timings and all three native ASE observable metrics are required;
+TorchSim errors are never substituted. Models without pressure evaluations are
+omitted until those evaluations are available. If the ASE summaries have not
+yet been generated, compute them from the saved trajectories and pressure
+evaluations:
+
+```bash
+uv run --script paper_v2_configs/generate_metrics.py \
+  --metric rdf --metric vdos --metric pressure \
+  --source mlip-trajs-ase-accelerated
+```
+
+Timing means use completed trajectory/timing pairs, excluding registered
+failures. Molecular crystals remain excluded by default.
+
 The VDOS plotting entry point includes Figure 6 and its SI companion, saving the
 two 3×3 correlation figures under `vdos/plots/<source>/`.
-It also creates no-hydrogen versions of Figure 6, its companion, and the 1×3
-correlations. These exclude hydrogen from force RMSE, RDF, pressure histogram
-error, and VDOS averages, using the existing per-system metric CSVs. F1 and
-k-SRME scores are unchanged. Use `--exclude-hydrogen` when calling a correlation
-script directly; `--exclude-hydrogen-force-rmse` remains an alias. The existing
-`_no_hydrogen_force_rmse` output suffix is retained for compatibility. Rerun
-plotting only to update these figures when the per-system CSVs are available.
-
-The pipeline also creates a third correlation set excluding both hydrogen and
-Pt+H₂O from the force RMSE, RDF, and VDOS averages; pressure already excludes
-Pt+H₂O. These PDFs use the `_no_hydrogen_no_pt_water` suffix, keeping the original
-and no-hydrogen sets. F1 and k-SRME scores remain unchanged, and failed systems
-outside these exclusions still contribute their 100% RDF/pressure/VDOS errors.
-For direct calls, use `--exclude-hydrogen --exclude-pt-water` on `figure_6.py` or
-`figure_SI_7_8_9.py`. Using only `--exclude-pt-water` keeps hydrogen and saves
-PDFs with the `_no_pt_water` suffix. Existing per-system CSVs are sufficient;
-only plotting needs to be rerun.
+It creates the standard Figure 6 and 1×3 correlations only; automatic
+no-hydrogen and combined no-hydrogen/no-Pt+H₂O sets have been removed.
+To create an exclusion variant manually, use `--exclude-hydrogen`,
+`--exclude-pt-water`, or both on `figure_6.py` or `figure_SI_7_8_9.py`.
+These filter the selected systems from force RMSE, RDF, pressure, and VDOS
+averages; pressure already excludes Pt+H₂O. Matbench scores stay unchanged.
+`--exclude-hydrogen-force-rmse` remains an alias for `--exclude-hydrogen`, and
+the `_no_hydrogen_force_rmse`, `_no_pt_water`, and `_no_hydrogen_no_pt_water`
+output suffixes remain supported for manual runs. Figure 6 and the 1×3 SI
+figures both use stable runs only. Existing per-system CSVs and MD outputs are
+sufficient; rerun plotting only.
 
 To plot only the accelerated TorchSim results, use:
 

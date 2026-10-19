@@ -20,6 +20,10 @@ Columns:
 2) F1 score
 3) k_SRME score
 
+Like Figure 6, each model's metric means include only completed MD runs that
+are not registered as physically unstable. Genuine 100% errors from stable
+runs remain included. Benchmark metric CSVs retain their failure penalties.
+
 Use --exclude-hydrogen for an additional set excluding hydrogen from force RMSE,
 RDF, pressure, and VDOS means. F1 and k_SRME scores keep their original values.
 The legacy --exclude-hydrogen-force-rmse option and _no_hydrogen_force_rmse
@@ -50,6 +54,7 @@ from correlation_labels import inward_label_offset, position_model_labels
 from md_success import torchsim_md_succeeded
 from metric_sources import cohort_trajectory_path
 from system_filters import filter_pressure_systems, is_metal_water_interface, is_molecular_crystal
+from _stable_md_inputs import StableMDFilter
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -509,7 +514,7 @@ def model_color(model: str, tier_colors: dict[str, tuple[float, float, float]]) 
     return "#757575"
 
 
-def standardize_force_rmse(df_means_raw: pd.DataFrame) -> pd.DataFrame:
+def standardize_force_rmse(df_means_raw: pd.DataFrame, *, per_system: bool = False) -> pd.DataFrame:
     means_model_col = pick_first_column(
         df_means_raw,
         ["calculator", "Calculator", "model", "mlip_model"],
@@ -526,7 +531,7 @@ def standardize_force_rmse(df_means_raw: pd.DataFrame) -> pd.DataFrame:
     )
     out["calculator"] = out["calculator"].map(normalize_model_name)
     out["force_rmse"] = pd.to_numeric(out["force_rmse"], errors="coerce")
-    return aggregate_models(out)
+    return aggregate_system_metrics(out, df_means_raw) if per_system else aggregate_models(out)
 
 
 def force_rmse_excluding_systems(
@@ -567,6 +572,7 @@ def force_rmse_excluding_systems(
 def load_force_rmse(
     path: Path, *, exclude_hydrogen: bool = False, source: str | None = None,
     exclude_pt_water: bool = False,
+    stable_filter: StableMDFilter | None = None,
 ) -> pd.DataFrame:
     """Load model means, or filter and average detailed per-system RMSE rows."""
     if path.is_file():
@@ -586,6 +592,19 @@ def load_force_rmse(
                 f"No rmse-results-all_*.csv files with force_rmse found under {path}"
             )
         frame = pd.concat(frames, ignore_index=True)
+    if stable_filter is not None:
+        model_column = pick_first_column(
+            frame, ["calculator", "Calculator", "model", "mlip_model"], "RMSE model column",
+        )
+        if source is not None and "source" in frame:
+            frame = frame.loc[frame["source"] == source].copy()
+        models = pd.DataFrame({"calculator": frame[model_column].map(normalize_model_name).drop_duplicates()})
+        frame = metric_rows_excluding_systems(
+            frame, description="force RMSE", source=source,
+            exclude_hydrogen=exclude_hydrogen, exclude_pt_water=exclude_pt_water,
+        )
+        frame = stable_filter.filter_rows(frame, "force RMSE")
+        return models.merge(standardize_force_rmse(frame, per_system=True), on="calculator", how="left")
     if exclude_hydrogen or exclude_pt_water:
         return force_rmse_excluding_systems(
             frame, source, exclude_hydrogen=exclude_hydrogen, exclude_pt_water=exclude_pt_water,
@@ -629,19 +648,25 @@ def read_csv(path: Path, description: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
+def load_joined_data(
+    args: argparse.Namespace, *, stable_md_only: bool = True, md_data_dir: Path | None = None,
+) -> pd.DataFrame:
+    """Build the shared stable-MD metric inputs for Figure 6 and SI7-SI9."""
     default_force, default_rdf, default_vdos = source_paths(args.source)
     pressure_backend, pressure_mode = source_pressure_provenance(args.source)
 
     exclude_hydrogen = getattr(args, "exclude_hydrogen_force_rmse", False)
     exclude_pt_water = getattr(args, "exclude_pt_water", False)
-    if exclude_hydrogen or exclude_pt_water:
+    data_dir = md_data_dir or getattr(args, "md_data_dir", None) or CONFIG_DIR / "data"
+    stable_filter = StableMDFilter(data_dir, args.source) if stable_md_only else None
+    if exclude_hydrogen or exclude_pt_water or stable_md_only:
         default_force = default_force.with_name("rmse_per_system.csv")
     df_means = load_force_rmse(
         args.force_rmse_input or default_force,
         exclude_hydrogen=exclude_hydrogen,
         exclude_pt_water=exclude_pt_water,
         source=args.source,
+        stable_filter=stable_filter,
     )
     df_f1 = standardize_score(
         read_csv(args.f1_file, "F1 score CSV"),
@@ -662,11 +687,12 @@ def load_joined_data(args: argparse.Namespace) -> pd.DataFrame:
         description="k_SRME score column",
     )
     def read_metric_input(path: Path, description: str) -> pd.DataFrame:
-        if exclude_hydrogen or exclude_pt_water:
-            return metric_rows_excluding_systems(
+        if exclude_hydrogen or exclude_pt_water or stable_md_only:
+            frame = metric_rows_excluding_systems(
                 load_system_metric_rows(path, description), description=description, source=args.source,
                 exclude_hydrogen=exclude_hydrogen, exclude_pt_water=exclude_pt_water,
             )
+            return stable_filter.filter_rows(frame, description) if stable_filter is not None else frame
         return read_csv(path, f"{description} metric CSV")
 
     df_rdf = standardize_rdf(read_metric_input(args.rdf_file or default_rdf, "RDF"))
@@ -756,12 +782,23 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Override the source-specific RMSE input with per-system/model-summary "
-            "CSV or a directory of rmse-results-all_*.csv files. Hydrogen exclusion "
+            "Override the source-specific RMSE input with a per-system CSV or a "
+            "directory of rmse-results-all_*.csv files. Stable-MD filtering "
             "requires per-system rows (default: rmse_per_system.csv)."
         ),
     )
     add_force_rmse_exclusion_option(parser)
+    parser.add_argument(
+        "--md-data-dir",
+        type=Path,
+        default=None,
+        help="MD data root used to identify completed, stable runs (default: paper_v2_configs/data).",
+    )
+    parser.add_argument(
+        "--data-only",
+        action="store_true",
+        help="Print stable-MD model averages used in the correlations without creating figures.",
+    )
     parser.add_argument(
         "--rdf-file",
         type=Path,
@@ -1000,6 +1037,10 @@ def plot_single_error_figure(
 def main() -> None:
     args = parse_args()
     df = load_joined_data(args)
+    if args.data_only:
+        print("Stable-MD model averages for SI7-SI9:")
+        print(df.to_string(index=False))
+        return
 
     tier_colors = {
         "tier_1": palette[2],

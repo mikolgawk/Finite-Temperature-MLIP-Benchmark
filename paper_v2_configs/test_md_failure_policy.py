@@ -178,6 +178,7 @@ class MdFailurePolicyTest(unittest.TestCase):
                 for run_system, seconds in ((system, 10.0), (METAL, 0.1)):
                     target = folder / run_system
                     target.mkdir(parents=True, exist_ok=True)
+                    (target / f"nvt_{model}.h5").touch()
                     (target / f"md_timing_{model}.csv").write_text(
                         "calculator,system,n_steps,elapsed_seconds,seconds_per_step\n"
                         f"{model},{run_system},100,{seconds * 100},{seconds}\n"
@@ -268,7 +269,7 @@ class MdFailurePolicyTest(unittest.TestCase):
                 self.assertTrue(models.pressure_mae_GPa.isna().all())
                 self.assertTrue(pd.read_csv(output / "model_mean_pressure_comparison.csv").empty)
 
-    def test_model_selection_and_ase_scores_are_preserved(self):
+    def test_model_selection_and_ase_completion_are_enforced(self):
         source = SOURCES[0]
         folder = self.pressure_inputs(source)
         models, pairs, _ = self.compute_pressure(source, folder, models={NEQUIP})
@@ -278,7 +279,10 @@ class MdFailurePolicyTest(unittest.TestCase):
         old_pairs = pressure.build_pair_rows(folder, None, pressure.DEFAULT_MODEL_FILE_SUFFIX, 80)
         ase = pressure.add_failed_system_penalties(old_pairs, folder, "mlip-trajs-ase",
                                                    None, set(), 80, self.data)
-        pd.testing.assert_frame_equal(ase, old_pairs)
+        # Cached scores from another runner cannot establish ASE completion.
+        self.assertEqual(set(ase.mlip_model), {"nequip", MACE})
+        self.assertTrue(ase.pressure_error_percent.eq(100.0).all())
+        self.assertTrue(ase.backend.eq("ase").all())
 
     def test_rmse_excludes_saved_failed_md_rows_in_custom_layouts(self):
         rmse = load_module("e_f_rmses/compute_mean_rmses_by_system_type.py")

@@ -102,7 +102,7 @@ class MatbenchScoreMatchingTest(unittest.TestCase):
                 f1_file=root / "f1.csv", ksrme_file=root / "ksrme.csv",
                 exclude_hydrogen_force_rmse=False,
             )
-            result = correlations.load_joined_data(args).set_index("calculator")
+            result = correlations.load_joined_data(args, stable_md_only=False).set_index("calculator")
             self.assertEqual(set(result.index), set(models))
             for model, original_force in zip(models, force.force_rmse):
                 self.assertEqual(result.loc[model, "force_rmse"], original_force)
@@ -250,13 +250,13 @@ class CorrelationSystemExclusionTest(unittest.TestCase):
             with patch.object(correlations, "source_paths", return_value=(
                 root / "mean_metrics_by_model.csv", root / "rdf.csv", root / "vdos.csv",
             )):
-                original = correlations.load_joined_data(args)
+                original = correlations.load_joined_data(args, stable_md_only=False)
                 args.exclude_hydrogen_force_rmse = True
-                variant = correlations.load_joined_data(args)
+                variant = correlations.load_joined_data(args, stable_md_only=False)
                 args.exclude_pt_water = True
-                combined = correlations.load_joined_data(args)
+                combined = correlations.load_joined_data(args, stable_md_only=False)
                 args.exclude_hydrogen_force_rmse = False
-                pt_only = correlations.load_joined_data(args)
+                pt_only = correlations.load_joined_data(args, stable_md_only=False)
             self.assertEqual(original.loc[0, "force_rmse"], 51.0)
             self.assertEqual(variant.loc[0, "force_rmse"], 101.0)
             self.assertEqual(original.loc[0, "rdf_error_percent"], 25.0)
@@ -357,22 +357,6 @@ class CorrelationSystemExclusionTest(unittest.TestCase):
         self.assertEqual(args.output_file, Path("custom.pdf"))
         self.assertEqual(args.si_output_file, "")
 
-    def test_pipeline_variant_preserves_input_paths(self):
-        command = ["python", "-u", "figure_6.py", "--source", "mlip-trajs-torchsim-eager",
-                   "--rdf-file", "rdf.csv", "--output-file", "plots/figure_6.pdf",
-                   "--si-output-file", "plots/figure_6_all_labels.pdf"]
-        variant = plot_all.without_hydrogen_force_rmse(command)
-        self.assertEqual(variant[:7], command[:7])
-        self.assertEqual(command[8], "plots/figure_6.pdf")
-        self.assertEqual(variant[8], "plots/figure_6_no_hydrogen_force_rmse.pdf")
-        self.assertEqual(variant[10], "plots/figure_6_all_labels_no_hydrogen_force_rmse.pdf")
-        self.assertEqual(variant[-1], "--exclude-hydrogen")
-        combined = plot_all.without_hydrogen_force_rmse(command, exclude_pt_water=True)
-        self.assertEqual(combined[:7], command[:7])
-        self.assertEqual(combined[8], "plots/figure_6_no_hydrogen_no_pt_water.pdf")
-        self.assertEqual(combined[10], "plots/figure_6_all_labels_no_hydrogen_no_pt_water.pdf")
-        self.assertEqual(combined[-2:], ["--exclude-hydrogen", "--exclude-pt-water"])
-
     def test_pt_water_filter_recognizes_paths_and_types_but_keeps_other_pt(self):
         frame = pd.DataFrame({
             "model": ["mace-mp-0"] * 6,
@@ -407,21 +391,27 @@ class CorrelationSystemExclusionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "per-system.*identifiers"):
                 correlations.load_force_rmse(path, exclude_pt_water=True)
 
-    def test_pipeline_includes_all_three_correlation_sets(self):
+    def test_pipeline_includes_only_standard_correlation_sets(self):
         with patch("sys.argv", [plot_all.__file__, "--source", "mlip-trajs-torchsim-accelerated", "--dry-run"]), \
                 patch.object(plot_all, "run_stage", return_value=True) as run_stage, \
                 redirect_stdout(io.StringIO()):
             plot_all.main()
+        self.assertEqual(len(run_stage.call_args_list), 5)
+        for call in run_stage.call_args_list:
+            command = call.args[1]
+            self.assertNotIn("--exclude-hydrogen", command)
+            self.assertNotIn("--exclude-pt-water", command)
+            self.assertFalse(any("_no_hydrogen" in argument for argument in command))
         for module in (figure_6, correlations):
             commands = [call.args[1] for call in run_stage.call_args_list
                         if Path(call.args[1][2]).name == Path(module.__file__).name]
-            self.assertEqual(len(commands), 3)
+            self.assertEqual(len(commands), 1)
             parsed = []
             for command in commands:
                 with patch("sys.argv", [module.__file__, *command[3:]]):
                     parsed.append(module.parse_args())
             self.assertEqual([(args.exclude_hydrogen_force_rmse, args.exclude_pt_water) for args in parsed],
-                             [(False, False), (True, False), (True, True)])
+                             [(False, False)])
             self.assertEqual(len({args.vdos_model_means_file for args in parsed}), 1)
             self.assertEqual(len({args.pressure_file for args in parsed}), 1)
 

@@ -19,7 +19,7 @@ from metric_sources import (
     source_from_path, SOURCE_ALIASES,
 )
 from md_success import (
-    discover_torchsim_md_trajectories,
+    discover_md_trajectories,
     load_failed_md_runs,
     torchsim_md_succeeded,
 )
@@ -95,10 +95,14 @@ def pressure_source(path: Path) -> str | None:
 def pressure_md_status(source: str, md_data_dir: Path | None = None) -> dict:
     """Resolve relocated trajectory paths through the source's local MD data."""
     root = md_data_dir if md_data_dir is not None else DEFAULT_MD_DATA_DIR
-    trajectories = discover_torchsim_md_trajectories(root / source)
+    trajectories = discover_md_trajectories(root / source)
+    metadata_path = root / "ref-trajs" / "md_metadata.json"
+    metadata = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
     return {
         (system, canonical_pressure_model_name(model)): torchsim_md_succeeded(path)
         for system, models in trajectories.items() for model, path in models.items()
+        if not ("stress_print_stride" in metadata.get(system, {})
+                and metadata[system]["stress_print_stride"] is None)
     }
 
 
@@ -110,7 +114,7 @@ def filter_completed_pressure_md_rows(
     md_status: dict | None = None,
 ) -> pd.DataFrame:
     """Exclude failed MD from pressure MAE and distribution plots."""
-    if source is None or "torchsim" not in source:
+    if source not in SOURCE_DATASETS:
         return frame
     status = md_status if md_status is not None else pressure_md_status(source, md_data_dir)
     if "system" in frame:
@@ -140,6 +144,20 @@ def structure_from_trajectory_file(path_like: str) -> str:
 
 def parse_model_name(file_path: Path, suffix: str) -> str:
     return canonical_pressure_model_name(file_path.name.removesuffix(suffix))
+
+
+def pressure_model_files(directory: Path, suffix: str) -> list[Path]:
+    """Prefer current ASE evaluator files over obsolete runner-tagged copies."""
+    files = cohort_model_files(directory, f"*{suffix}",
+                               lambda path: parse_model_name(path, suffix), recursive=True)
+    if pressure_source(directory) not in {"mlip-trajs-ase", "mlip-trajs-ase-accelerated"}:
+        return files
+    selected = {}
+    for path in sorted(files, key=lambda path: (
+        path.name.removesuffix(suffix).endswith("-ase"), str(path),
+    )):
+        selected.setdefault((path.parent, parse_model_name(path, suffix)), path)
+    return sorted(selected.values())
 
 
 def resolve_reference_pressure_file(
@@ -333,9 +351,7 @@ def build_pair_rows(
         if fallback_ref_df.empty:
             raise RuntimeError(f"No usable reference rows in {reference_file}")
 
-    model_files = cohort_model_files(pressures_dir, f"*{model_file_suffix}",
-                                     lambda path: parse_model_name(path, model_file_suffix),
-                                     recursive=True)
+    model_files = pressure_model_files(pressures_dir, model_file_suffix)
     model_files = [p for p in model_files if not p.name.startswith("reference_")]
     if models is not None:
         normalized_models = {
@@ -462,7 +478,7 @@ def add_failed_system_penalties(
 ) -> pd.DataFrame:
     """Enforce 100% error for failed MD, replacing even saved pressure scores."""
     pair_df = filter_pressure_systems(pair_df, include_molecular_crystals=True)
-    if "torchsim" not in source:
+    if source not in SOURCE_DATASETS:
         return pair_df
 
     root = md_data_dir if md_data_dir is not None else DEFAULT_MD_DATA_DIR
@@ -472,16 +488,24 @@ def add_failed_system_penalties(
     systems = set(pair_df["system"].astype(str)) | {system for system, _ in status}
     reference_dir = root / "ref-trajs"
     systems.update(path.parent.name for path in reference_dir.glob("*/traj.extxyz"))
-    discovered_models = set(pair_df["mlip_model"].astype(str)) | {model for _, model in status}
+    discovered_models = set(pair_df["mlip_model"].astype(str))
+    if "torchsim" in source:
+        discovered_models.update(model for _, model in status)
+    # Native ASE frontiers include models with available pressure evaluations.
+    # A successful MD job without evaluated stresses is unavailable, not a
+    # measured 100% pressure error. Failed systems of evaluated models still
+    # receive the usual penalties below.
     discovered_models.update(
         canonical_pressure_model_name(parse_model_name(path, DEFAULT_MODEL_FILE_SUFFIX))
-        for path in cohort_model_files(pressures_dir, f"*{DEFAULT_MODEL_FILE_SUFFIX}",
-                                       lambda path: parse_model_name(path, DEFAULT_MODEL_FILE_SUFFIX),
-                                       recursive=True)
+        for path in pressure_model_files(pressures_dir, DEFAULT_MODEL_FILE_SUFFIX)
         if not path.name.startswith("reference_")
     )
     if models is not None:
-        discovered_models = {canonical_pressure_model_name(model) for model in models}
+        requested_models = {canonical_pressure_model_name(model) for model in models}
+        if "torchsim" in source:
+            discovered_models = requested_models
+        else:
+            discovered_models &= requested_models
     discovered_models -= {canonical_pressure_model_name(model) for model in EXCLUDED_MODELS}
 
     excluded = {value.strip().lower() for value in excluded_system_types or ()}
@@ -599,10 +623,7 @@ def build_pressure_mae_from_trajectory_summaries(
     )
     rows: list[pd.DataFrame] = []
     source_status = {}
-    for summary_file in cohort_model_files(
-        pressures_dir, f"*{TRAJECTORY_SUMMARY_SUFFIX}",
-        lambda path: path.name.removesuffix(TRAJECTORY_SUMMARY_SUFFIX), recursive=True,
-    ):
+    for summary_file in pressure_model_files(pressures_dir, TRAJECTORY_SUMMARY_SUFFIX):
         summary = pd.read_csv(summary_file)
         summary = filter_pressure_systems(summary, include_molecular_crystals=True)
         if "system" not in summary and "trajectory_file" in summary:
@@ -627,7 +648,7 @@ def build_pressure_mae_from_trajectory_summaries(
         ):
             continue
         summary_source = source or pressure_source(summary_file)
-        if summary_source is not None and "torchsim" in summary_source:
+        if summary_source in SOURCE_DATASETS:
             if summary_source not in source_status:
                 source_status[summary_source] = pressure_md_status(summary_source, md_data_dir)
             summary = filter_completed_pressure_md_rows(
@@ -673,7 +694,7 @@ def ensure_pressure_comparison_file(
 ) -> Path | None:
     """Create the model pressure-MAE CSV from evaluator summaries when needed."""
     source = source or pressure_source(pressures_dir)
-    enforce_md_completion = source is not None and "torchsim" in source
+    enforce_md_completion = source in SOURCE_DATASETS
     if (
         not enforce_md_completion
         and pressure_comparison_file is not None
@@ -818,7 +839,7 @@ def compute_pressure_metric(
         bins=bins,
         models=models,
         excluded_system_types=excluded_system_types,
-        allow_empty=source is not None and "torchsim" in source,
+        allow_empty=source in SOURCE_DATASETS,
     )
     if source is not None:
         pair_df = add_failed_system_penalties(

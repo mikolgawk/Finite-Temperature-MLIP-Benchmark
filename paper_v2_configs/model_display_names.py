@@ -1,9 +1,9 @@
 """Authoritative model names used by every paper-v2 plot.
 
 Edit ``MODEL_DISPLAY_NAMES`` to change a label everywhere. Keys are normalized
-model identifiers (lowercase, without ``-force-only``, ``-stress``, or a final
-``-eager`` tag). Accelerated execution variants have their own entries so their
-suffix labels can also be controlled here.
+model identifiers (lowercase, without ``-force-only``, ``-stress``, or final
+``-ase`` and ``-eager`` tags). Accelerated execution variants have their own
+entries so their suffix labels can also be controlled here.
 """
 
 from __future__ import annotations
@@ -55,6 +55,7 @@ def normalize_display_key(name: object) -> str:
     """Normalize only tags that do not identify a distinct plotted variant."""
     key = str(name).strip().lower()
     key = key.replace("-force-only", "").replace("-stress", "")
+    key = key.removesuffix("-ase")
     if key.endswith("-eager"):
         key = key.removesuffix("-eager")
     return MODEL_KEY_ALIASES.get(key, key)

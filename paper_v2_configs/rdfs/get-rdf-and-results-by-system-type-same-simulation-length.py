@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from md_success import (
-    discover_torchsim_md_trajectories,
+    discover_md_trajectories,
     registered_md_failure_reason,
     torchsim_md_succeeded,
 )
@@ -275,12 +275,8 @@ def aggregate_by_system_type(detailed_results: dict[str, list[dict]], excluded_s
 # ============================================================
 
 def discover_mlip_trajectories(base_dir: Path) -> dict[str, dict[str, Path]]:
-    """Discover every available ``nvt_<model>.h5`` trajectory."""
-    trajectories: dict[str, dict[str, Path]] = {}
-    for path in sorted(base_dir.glob("*/nvt_*.h5")):
-        model = path.stem.removeprefix("nvt_")
-        trajectories.setdefault(path.parent.name, {})[model] = path
-    return trajectories
+    """Discover ASE/TorchSim jobs, retaining timing-only failed runs."""
+    return discover_md_trajectories(base_dir)
 
 
 def parse_args() -> argparse.Namespace:
@@ -334,24 +330,19 @@ def process_source(args: argparse.Namespace, source: str) -> None:
     trajectory_dir = MLIP_TRAJ_DIRS[source]
     print(f"\n=== Trajectory source: {trajectory_dir} ===")
     print(f"Results directory: {results_dir}")
-    torchsim_source = "torchsim" in source
-    mlip_trajectories = (
-        discover_torchsim_md_trajectories(trajectory_dir)
-        if torchsim_source else discover_mlip_trajectories(trajectory_dir)
-    )
+    discovered_trajectories = discover_mlip_trajectories(trajectory_dir)
     all_discovered_model_names = {
         model
-        for system_models in mlip_trajectories.values()
+        for system_models in discovered_trajectories.values()
         for model in system_models
     }
-    if torchsim_source:
-        mlip_trajectories = {
-            system: {
-                model: path for model, path in models.items()
-                if torchsim_md_succeeded(path)
-            }
-            for system, models in mlip_trajectories.items()
+    mlip_trajectories = {
+        system: {
+            model: path for model, path in models.items()
+            if torchsim_md_succeeded(path)
         }
+        for system, models in discovered_trajectories.items()
+    }
     reference_trajectories = {
         path.parent.name: path
         for path in sorted(REF_TRAJ_BASE_DIR.glob("*/traj.extxyz"))
@@ -476,9 +467,8 @@ def process_source(args: argparse.Namespace, source: str) -> None:
             mlip_path = system_models.get(model)
             if mlip_path is None:
                 reason = (
-                    registered_md_failure_reason(cohort_model_path(
-                        trajectory_dir / system / f"nvt_{model}.h5", model))
-                    if torchsim_source else None
+                    registered_md_failure_reason(discovered_trajectories.get(system, {}).get(
+                        model, cohort_model_path(trajectory_dir / system / f"nvt_{model}.h5", model)))
                 ) or "Trajectory missing or incomplete"
                 print(f"    [PENALTY] {reason}; assigning 100% RDF error")
                 record_error(model, system)

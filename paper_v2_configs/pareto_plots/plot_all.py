@@ -132,11 +132,24 @@ def main() -> None:
         )
     else:
         print("Skipping Figure SI 17: no paired accelerated TorchSim/ASE MD timings.")
+    if {TORCHSIM_SOURCE, ASE_SOURCE}.issubset(sources):
+        comparison_command = [
+            sys.executable, "-u", str(HERE / "figure_SI_18.py"),
+            "--source", TORCHSIM_SOURCE,
+            "--source", ASE_SOURCE,
+            "--output-file", str(plots_dir / COMPARISON_DIR / "figure_SI_18.pdf"),
+            "--output-csv", str(results_dir / COMPARISON_DIR / "figure_SI_18_metrics.csv"),
+        ]
+        if args.pressure_file:
+            comparison_command.extend(["--pressure-metrics-file", str(args.pressure_file.resolve())])
+        global_stages.append(
+            ("Figure SI 18: TorchSim versus ASE accelerated MD", comparison_command)
+        )
     failures: list[str] = []
     for label, command in global_stages:
         if args.include_molecular_crystals and Path(command[2]).name in {
             "plot-model-timings.py", "plot-model-timings-vs-system-size.py", "figure_7.py", "figure_SI_13.py",
-            "figure_SI_17.py",
+            "figure_SI_17.py", "figure_SI_18.py",
         }:
             command.append("--include-molecular-crystals")
         if not run_stage(label, command, args.dry_run):
@@ -152,13 +165,6 @@ def main() -> None:
         ]
         common = ["--source", source, "--pressure-file", str(pressure_file.resolve()), *provenance]
         stages = [
-            (
-                "Figure 7",
-                [sys.executable, "-u", str(HERE / "figure_7.py"), "--source", source,
-                 "--pressure-metrics-file", str(pressure_file.resolve()), *provenance,
-                 "--output-file", str(source_plots / "figure_7.pdf"),
-                 "--output-csv", str(source_results / "figure_7_metrics.csv")],
-            ),
             (
                 "Figure SI 10",
                 [sys.executable, "-u", str(HERE / "figure_SI_10.py"), *common,
@@ -188,6 +194,14 @@ def main() -> None:
                  "--output-csv", str(source_results / "figure_SI_13.csv")],
             ),
         ]
+        if "torchsim" in source:
+            stages.insert(0, (
+                "Figure 7",
+                [sys.executable, "-u", str(HERE / "figure_7.py"), "--source", source,
+                 "--pressure-metrics-file", str(pressure_file.resolve()), *provenance,
+                 "--output-file", str(source_plots / "figure_7.pdf"),
+                 "--output-csv", str(source_results / "figure_7_metrics.csv")],
+            ))
         for label, command in stages:
             if args.include_molecular_crystals and Path(command[2]).name in {
                 "plot-model-timings.py", "plot-model-timings-vs-system-size.py", "figure_7.py", "figure_SI_13.py",
