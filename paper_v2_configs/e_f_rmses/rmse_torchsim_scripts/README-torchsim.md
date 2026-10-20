@@ -35,6 +35,11 @@ force RMSE is over all Cartesian components in eV/Angstrom. Aromatic systems and
 hydrogen use the existing benchmark's isolated-atom energy corrections; missing
 required isolated-atom files produce explicit failures. `--raw-energies` disables
 these corrections. Trajectory predictions use the TorchSim model directly.
+Both reference and predicted forces are the raw atomic forces on all atoms,
+including frozen atoms. ASE reference forces are read with
+`apply_constraint=False`, matching the raw TorchSim model output; constraints
+remain attached to the input structures. The all-atom force RMSE uses the
+`3 * n_frames * n_atoms` denominator.
 For eqV2 and eSEN, isolated-atom energies use a native FairChem `OCPCalculator`
 loaded from the same checkpoint, on the same device, in float32 with AMP
 disabled. This preserves the isolated atoms' nonperiodic flags, which the
@@ -61,6 +66,11 @@ Results and remaining failures are checkpointed after each trajectory; resolved
 failure records are cleared, while failures for unavailable references or systems
 without completed MD remain recorded. Saved paths still match after moving the
 reference data root. `--force` recomputes all eligible trajectories.
+Saved Pt/H2O force RMSEs produced before the raw-force fix must be recomputed;
+normal resume does not invalidate those rows automatically. For a Pt-only rerun,
+use a separate `--output-dir` and merge the corrected row into the original
+summary. Using `--force` with a Pt-only reference directory and the original
+output directory would discard the other saved systems.
 `--max-frames` limits reference and evaluated counts
 to the selected prefix; use a separate `--output-dir` for smoke tests so their
 summaries do not cause full runs to be skipped.

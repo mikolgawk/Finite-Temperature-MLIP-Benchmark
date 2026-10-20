@@ -37,21 +37,38 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from figure_SI_7_8_9 import (
-    DEFAULT_SCORE_DIR,
-    DEFAULT_SOURCE,
-    FONT_SIZE,
-    LEGEND_FONT_SIZE,
-    SOURCES,
-    add_force_rmse_exclusion_option,
-    correlation_output_path,
-    display_name,
-    error_axis_label,
-    force_rmse_axis_label,
-    load_joined_data as load_correlation_data,
-    model_color,
-    palette,
-)
+if __package__:
+    from .figure_SI_7_8_9 import (
+        DEFAULT_SCORE_DIR,
+        DEFAULT_SOURCE,
+        FONT_SIZE,
+        LEGEND_FONT_SIZE,
+        SOURCES,
+        add_force_rmse_exclusion_option,
+        correlation_output_path,
+        display_name,
+        error_axis_label,
+        force_rmse_axis_label,
+        load_joined_data as load_correlation_data,
+        model_color,
+        palette,
+    )
+else:
+    from figure_SI_7_8_9 import (
+        DEFAULT_SCORE_DIR,
+        DEFAULT_SOURCE,
+        FONT_SIZE,
+        LEGEND_FONT_SIZE,
+        SOURCES,
+        add_force_rmse_exclusion_option,
+        correlation_output_path,
+        display_name,
+        error_axis_label,
+        force_rmse_axis_label,
+        load_joined_data as load_correlation_data,
+        model_color,
+        palette,
+    )
 from correlation_labels import inward_label_offset, position_model_labels
 
 # Match v1's text-to-canvas proportions when the figure is fitted into the paper.
@@ -379,9 +396,12 @@ def render_figure(
     add_tier_legend(fig, tier_colors)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    position_model_labels(fig, axes.ravel(), max_offset_points=18)
+    label_options = {"max_offset_points": 18}
+    if label_mode == "all":
+        label_options["max_distance_points"] = 18
+    position_model_labels(fig, axes.ravel(), **label_options)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
-    position_model_labels(fig, axes.ravel(), max_offset_points=18)
+    position_model_labels(fig, axes.ravel(), **label_options)
     plt.savefig(output_path)
     plt.show()
     plt.close(fig)
@@ -389,7 +409,7 @@ def render_figure(
     return label_summary
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Create RDF/pressure/VDOS correlation panels with clean outlier-only labels, "
@@ -475,7 +495,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--si-scale",
         type=float,
-        default=1.45,
+        default=1.8,
         help="Scale factor applied to the main figure size for the SI all-label figure.",
     )
     parser.add_argument(
@@ -505,7 +525,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the models labeled in each main-figure panel.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.output_file is None:
         args.output_file = correlation_output_path(
             "figure_6", args.exclude_hydrogen_force_rmse, args.exclude_pt_water,

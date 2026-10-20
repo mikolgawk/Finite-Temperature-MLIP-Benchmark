@@ -97,7 +97,7 @@ def cohort_model_path(path: Path, model: object) -> Path:
 
 def cohort_trajectory_path(data_dir: Path, source: str, system: str, model: object) -> Path:
     """Find the actual HDF5 name, including ASE's CHGNet execution tags."""
-    directory = cohort_model_path(data_dir / source, model) / system
+    directory = source_counterpart(data_dir / source, model_trajectory_source(source, model)) / system
     path = directory / f"nvt_{model}.h5"
     if path.is_file():
         return path

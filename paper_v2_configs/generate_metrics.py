@@ -36,10 +36,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-from metric_sources import SOURCES
+from metric_sources import SOURCES, source_counterpart
 from system_filters import DEFAULT_EXCLUDED_SYSTEM_TYPES, add_molecular_crystal_option
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def available_md_sources(data_dir: Path) -> tuple[str, ...]:
+    """Discover physical ASE/TorchSim sources, including the ASE eager alias."""
+    return tuple(
+        source for source in SOURCES
+        if any(source_counterpart(data_dir / source, source).glob("*/nvt_*.h5"))
+    )
 
 
 @dataclass(frozen=True)
@@ -63,6 +71,16 @@ def metric_stages(
 
     model_args = tuple(arg for model in models for arg in ("--model", model))
     source_args = tuple(arg for source in sources for arg in ("--source", source))
+    # The independent refinement pipeline defaults to the paper's TorchSim
+    # cohorts. The all-metric batch command retains its broader ASE/TorchSim
+    # coverage without inventing failed rows for physically absent sources
+    # when --model is used. Explicit --source selections retain their penalties.
+    default_vdos_source_args = (
+        () if sources else tuple(
+            arg for source in available_md_sources(SCRIPT_DIR / "data")
+            for arg in ("--source", source)
+        )
+    )
     exclusion_args = tuple(
         arg
         for system_type in (
@@ -117,13 +135,14 @@ def metric_stages(
         ),
         MetricStage(
             name="vdos",
-            description="Compute matched-length VDOS metrics",
+            description="Compute refined mass-weighted Welch VDOS metrics",
             command=(
                 sys.executable,
                 "-u",
                 str(vdos_dir / "run_vdos_pipeline.py"),
                 "--compute-only",
                 *exclusion_args,
+                *default_vdos_source_args,
                 *model_args,
                 *source_args,
             ),

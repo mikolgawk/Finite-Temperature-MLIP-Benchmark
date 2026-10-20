@@ -17,12 +17,14 @@ class EnergyForceAggregationTests(unittest.TestCase):
                 pd.DataFrame(
                     {
                         "system": ["bulkCu_300K_test"],
+                        "trajectory": ["/ref/bulkCu_300K_test/traj.extxyz"],
                         "energy_rmse": [1.0],
                         "force_rmse": [2.0],
                     }
                 ).to_csv(data_dir / f"rmse-results-all_{model}.csv", index=False)
 
-            result = load_all_data(data_dir, {"model-b"})
+            with patch("compute_mean_rmses_by_system_type.torchsim_md_succeeded", return_value=True):
+                result = load_all_data(data_dir, {"model-b"})
 
             self.assertEqual(set(result["calculator"]), {"model-b"})
 
@@ -52,6 +54,56 @@ class EnergyForceAggregationTests(unittest.TestCase):
             result = load_all_data(root / "predictions", md_data_dir=root / "md-data")
 
             self.assertEqual(result["system"].tolist(), ["bulkCu"])
+
+    def test_ase_rows_exclude_incomplete_missing_and_audited_md(self) -> None:
+        cases = (
+            ("mlip-trajs-ase", "mlip-trajs-ase", "md_eager"),
+            ("mlip-trajs-ase", "mlip-trajs-ase-eager", "md_eager"),
+            ("mlip-trajs-ase", "ase/md_eager", "md_eager"),
+            ("mlip-trajs-ase-accelerated", "mlip-trajs-ase-accelerated", "md_accelerated"),
+        )
+        for source, physical_directory, mode in cases:
+            with self.subTest(source=source, physical_directory=physical_directory), \
+                    tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                predictions = root / "e-f-predictions-ase" / mode
+                predictions.mkdir(parents=True)
+                model = "nequip-oam-l-force-only"
+                raw_model = model + "-ase"
+                systems = ("bulkCu_300K_test", "H_1050K_test", "bulkAu_1500K_test", "TiSe2_400K_test")
+                pd.DataFrame({
+                    "system": ["bulkCu", "H", "bulkAu", "TiSe2"],
+                    "trajectory": [f"/ref/{system}/traj.extxyz" for system in systems],
+                    "energy_rmse": [1.0, 1e6, 1e6, 1e6],
+                    "force_rmse": [2.0, 1e6, 1e6, 1e6],
+                }).to_csv(predictions / f"rmse-results-all_{model}.csv", index=False)
+                for system in systems:
+                    directory = root / "md-data" / physical_directory / system
+                    directory.mkdir(parents=True)
+                    if system != systems[3]:
+                        (directory / f"nvt_{raw_model}.h5").touch()
+                    (directory / f"md_timing_{raw_model}.csv").write_text(
+                        "" if system == systems[1] else
+                        f"calculator,system,n_steps\n{model},{system},100\n"
+                    )
+                failures = {(source, systems[2], raw_model): "Audited unphysical dynamics"}
+                with patch("md_success.load_failed_md_runs", return_value=failures):
+                    result = load_all_data(predictions.parent, sources={source},
+                                           md_data_dir=root / "md-data")
+                self.assertEqual(result["system"].tolist(), ["bulkCu"])
+                self.assertEqual(result["source"].tolist(), [source])
+                self.assertEqual(result["energy_rmse"].mean(), 1.0)
+                self.assertEqual(result["force_rmse"].mean(), 2.0)
+
+    def test_ase_rows_require_reference_trajectory_identifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            predictions = Path(temporary_directory) / "e-f-predictions-ase" / "md_accelerated"
+            predictions.mkdir(parents=True)
+            pd.DataFrame({"system": ["bulkCu"], "energy_rmse": [1.0], "force_rmse": [2.0]}).to_csv(
+                predictions / "rmse-results-all_model.csv", index=False,
+            )
+            with self.assertRaisesRegex(ValueError, "Missing trajectory column"):
+                load_all_data(predictions)
 
     def test_legacy_discovery_prefers_current_results_per_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -9,25 +9,37 @@
 #   "scipy>=1.13",
 # ]
 # ///
-"""Compute matched-length VDOS results for all ASE/TorchSim MD sources.
+"""Compute matched-length, mass-weighted Welch VDOS and spectrum errors.
 
-Reference positions are read from ``../data/ref-trajs/*/traj.extxyz`` and
-their timesteps from ``../data/ref-trajs/md_metadata.json``. MLIP trajectories
-use the HDF5 format produced by both the ASE and TorchSim MD runners. By
-default, their stored velocities are used; ``--numerical-mlip-velocities``
-instead differentiates their positions, as is necessarily done for references.
+Both reference and MLIP velocities are central differences of minimum-image
+unwrapped positions; the two endpoints are discarded. This prevents PBC jumps
+and avoids comparing differentiated reference positions to stored MLIP
+velocities. Only fixed-cell, fixed-PBC trajectories (NVT) are supported.
 
-Every trajectory source is written to a separate subdirectory of ``results``.
-Existing spectra are reused unless ``--overwrite`` is supplied, so interrupted
-or expanded runs can be resumed cheaply. Failed or missing MD runs and failed
-VDOS calculations receive 100% error and 0% similarity, including in aggregates.
+The default CLI estimator averages one-sided Hann-windowed periodograms of
+overlapping velocity segments (Welch). Component powers are multiplied by
+their atomic masses, summed, and finally normalized to unit area. A requested
+physical window of 2 ps is shortened for short trajectories to provide at
+least four 50%-overlapping segments. This reduces sampling variance without
+squaring an already transformed autocorrelation. Actual segment duration,
+count and frequency resolution are recorded; zero padding is not resolution.
+The original corrected full-trajectory unweighted periodogram remains an
+explicit diagnostic option and the backwards-compatible numerical API.
+
+Each source has a separate results directory. Cache sidecars validate the
+analyzed samples, input identity, method, timestep and FFT settings, as well
+as the saved CSV content. Missing/failed MD and failed calculations retain
+the benchmark's 100% error and 0% similarity policy.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -47,6 +59,8 @@ import h5py
 import numpy as np
 import pandas as pd
 from ase.io import iread
+from ase.geometry import find_mic
+from ase.data import atomic_masses
 from scipy import signal
 
 
@@ -63,6 +77,15 @@ SOURCES = (
 
 SPEED_OF_LIGHT_CM_S = 2.99792458e10
 CM_INVERSE_TO_EV = 1.2398419843320026e-4
+METHOD_VERSION = "mass-welch-hann-central-mic-v2"
+VELOCITY_HANDLING = "minimum-image-unwrapped-positions-central-difference-drop-endpoints"
+DEFAULT_WINDOW_FS = 2000.0
+DEFAULT_MIN_SEGMENTS = 4
+DEFAULT_OVERLAP = 0.5
+_CELL_RTOL = 2e-6
+_CELL_ATOL = 2e-6
+_TRAJECTORY_PROVENANCE: dict[str, dict] = {}
+_TRAJECTORY_ATOMIC_NUMBERS: dict[str, np.ndarray] = {}
 
 SYSTEM_TYPES = {
     "Pure metals": [
@@ -121,18 +144,171 @@ def discover_mlip_trajectories(base_dir: Path) -> dict[str, dict[str, Path]]:
     return discover_md_trajectories(base_dir)
 
 
+def _array_digest(values: np.ndarray) -> str:
+    values = np.ascontiguousarray(values)
+    digest = hashlib.sha256()
+    digest.update(str(values.shape).encode())
+    digest.update(values.dtype.str.encode())
+    digest.update(memoryview(values).cast("B"))
+    return digest.hexdigest()
+
+
+def _record_geometry_provenance(path: Path, cells: np.ndarray, pbc: np.ndarray) -> None:
+    _TRAJECTORY_PROVENANCE[str(path.resolve())] = {
+        "cell_sha256": _array_digest(cells),
+        "pbc_sha256": _array_digest(pbc),
+    }
+
+
+def trajectory_identity(path: Path) -> dict:
+    """Input identity plus exact cell/PBC fingerprints of the loaded segment.
+
+    The exact analyzed coordinate values are additionally hashed by the
+    spectrum cache. Unrelated, unanalyzed HDF5 datasets need not be hashed.
+    """
+    path = path.resolve()
+    stat = path.stat()
+    return {
+        "path": str(path),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "ctime_ns": stat.st_ctime_ns,
+        **_TRAJECTORY_PROVENANCE.get(str(path), {}),
+    }
+
+
+def unwrap_positions(
+    positions: np.ndarray,
+    cells: np.ndarray,
+    pbc: np.ndarray,
+) -> np.ndarray:
+    """Unwrap a fixed-cell trajectory using successive minimum-image steps.
+
+    As for all nearest-image trajectory reconstruction, physical displacement
+    between recorded frames must be smaller than the relevant half-box scale.
+    Triclinic cells use ASE's general minimum-image algorithm, not fractional
+    rounding (which is incorrect for sufficiently skew cells).
+    """
+    positions = np.asarray(positions, dtype=np.float64)
+    if positions.ndim != 3 or positions.shape[-1] != 3 or len(positions) < 1:
+        raise ValueError("positions must have shape (frames, atoms, 3)")
+    if not np.all(np.isfinite(positions)):
+        raise ValueError("positions contain nonfinite values")
+    cells = np.asarray(cells, dtype=np.float64)
+    if cells.shape == (3, 3):
+        cell = cells
+    elif cells.shape in ((1, 3, 3), (len(positions), 3, 3)):
+        cell = cells[0]
+        if not np.allclose(cells, cell, rtol=_CELL_RTOL, atol=_CELL_ATOL):
+            raise ValueError("changing cells are unsupported: this analysis requires fixed-cell NVT")
+    else:
+        raise ValueError(f"cell shape {cells.shape} does not match positions")
+    pbc = np.asarray(pbc, dtype=bool)
+    if pbc.shape == (3,):
+        periodic = pbc
+    elif pbc.shape in ((1, 3), (len(positions), 3)):
+        periodic = pbc[0]
+        if not np.all(pbc == periodic):
+            raise ValueError("changing PBC flags are unsupported")
+    else:
+        raise ValueError(f"PBC shape {pbc.shape} does not match positions")
+    if not np.any(periodic):
+        return positions.copy()
+    if not np.all(np.isfinite(cell)) or abs(np.linalg.det(cell)) < 1e-12:
+        raise ValueError("periodic trajectory has missing or singular cell")
+
+    unwrapped = np.empty_like(positions)
+    unwrapped[0] = positions[0]
+    # A diagonal cell admits an inexpensive exact component-wise MIC. The
+    # general path is chunked to bound ASE's temporary image arrays.
+    diagonal = np.allclose(cell, np.diag(np.diag(cell)), rtol=0.0, atol=1e-12)
+    block_frames = 128
+    for start in range(1, len(positions), block_frames):
+        stop = min(start + block_frames, len(positions))
+        steps = positions[start:stop] - positions[start - 1 : stop - 1]
+        if diagonal:
+            for axis in np.flatnonzero(periodic):
+                length = cell[axis, axis]
+                steps[..., axis] -= np.rint(steps[..., axis] / length) * length
+        else:
+            steps, _ = find_mic(steps.reshape(-1, 3), cell, pbc=periodic)
+            steps = steps.reshape(stop - start, positions.shape[1], 3)
+        unwrapped[start:stop] = unwrapped[start - 1] + np.cumsum(steps, axis=0)
+    return unwrapped
+
+
 def load_reference_positions(path: Path) -> np.ndarray:
-    positions = [
-        np.asarray(atoms.positions, dtype=np.float64)
-        for atoms in iread(path, index=":")
-    ]
+    positions, cells, pbcs = [], [], []
+    numbers = None
+    for atoms in iread(path, index=":"):
+        current_numbers = atoms.get_atomic_numbers()
+        if numbers is None:
+            numbers = current_numbers.copy()
+        elif not np.array_equal(current_numbers, numbers):
+            raise ValueError("reference atomic identities/order change between frames")
+        positions.append(np.asarray(atoms.positions, dtype=np.float64))
+        cells.append(np.asarray(atoms.cell.array, dtype=np.float64))
+        pbcs.append(np.asarray(atoms.pbc, dtype=bool))
     if not positions:
         raise ValueError("trajectory contains no frames")
-    return np.stack(positions)
+    cells_array, pbc_array = np.stack(cells), np.stack(pbcs)
+    _record_geometry_provenance(path, cells_array, pbc_array)
+    _TRAJECTORY_ATOMIC_NUMBERS[str(path.resolve())] = numbers
+    return unwrap_positions(np.stack(positions), cells_array, pbc_array)
 
 
-def h5_frame_count(path: Path, *, numerical_velocities: bool) -> int:
-    dataset = "data/positions" if numerical_velocities else "data/velocities"
+def load_reference_atomic_numbers(path: Path) -> np.ndarray:
+    """Return atom identities in coordinate order (cached while loading positions)."""
+    key = str(path.resolve())
+    if key not in _TRAJECTORY_ATOMIC_NUMBERS:
+        try:
+            atoms = next(iread(path, index="0"))
+        except StopIteration as exc:
+            raise ValueError("reference trajectory contains no frames") from exc
+        return atoms.get_atomic_numbers()
+    return _TRAJECTORY_ATOMIC_NUMBERS[key].copy()
+
+
+def load_mlip_atomic_numbers(path: Path, n_atoms: int | None = None) -> np.ndarray:
+    """Read and validate the recorded HDF5 atom identities, preserving order."""
+    with h5py.File(path, "r") as handle:
+        if "data/atomic_numbers" not in handle:
+            raise ValueError("missing data/atomic_numbers dataset; atomic masses cannot be inferred safely")
+        recorded = np.asarray(handle["data/atomic_numbers"])
+    if recorded.ndim == 2 and len(recorded):
+        numbers = recorded[0]
+        if not np.all(recorded == numbers):
+            raise ValueError("MLIP atomic identities/order change between recorded frames")
+    elif recorded.ndim == 1:
+        numbers = recorded
+    else:
+        raise ValueError(f"invalid atomic_numbers shape: {recorded.shape}")
+    standard_atomic_masses(numbers)  # Validate integer chemical identities.
+    if n_atoms is not None and len(numbers) != n_atoms:
+        raise ValueError("atomic number count does not match coordinate atom count")
+    return numbers.astype(np.int64)
+
+
+def standard_atomic_masses(numbers: np.ndarray) -> np.ndarray:
+    """Use the same ASE standard masses (amu) for reference and MLIP spectra.
+
+    This explicitly defines a natural-isotope VDOS convention, avoiding mass
+    unit differences in trajectory writers. Isotope-specific spectra would
+    require passing a shared explicit mass array to the numerical API.
+    """
+    numbers = np.asarray(numbers)
+    if (numbers.ndim != 1 or not len(numbers) or not np.all(np.isfinite(numbers))
+            or not np.all(numbers == numbers.astype(np.int64))
+            or np.any(numbers < 1) or np.any(numbers >= len(atomic_masses))):
+        raise ValueError("atomic numbers must be a nonempty vector of valid chemical identities")
+    masses = np.asarray(atomic_masses[numbers.astype(np.int64)], dtype=np.float64)
+    if not np.all(np.isfinite(masses) & (masses > 0)):
+        raise ValueError("atomic masses must be finite and positive")
+    return masses
+
+
+def h5_frame_count(path: Path, *, numerical_velocities: bool = True) -> int:
+    dataset = "data/positions"
     with h5py.File(path, "r") as h5:
         if dataset not in h5:
             raise ValueError(f"missing {dataset} dataset")
@@ -143,20 +319,119 @@ def load_mlip_samples(
     path: Path,
     n_frames: int,
     *,
-    numerical_velocities: bool,
+    numerical_velocities: bool = True,
 ) -> tuple[np.ndarray, bool]:
-    dataset = "data/positions" if numerical_velocities else "data/velocities"
+    dataset = "data/positions"
     with h5py.File(path, "r") as h5:
-        if dataset not in h5:
-            raise ValueError(f"missing {dataset} dataset")
+        for required in (dataset, "data/cell", "data/pbc"):
+            if required not in h5:
+                raise ValueError(f"missing {required} dataset")
         samples = np.asarray(h5[dataset][:n_frames], dtype=np.float64)
+        cell_dataset = h5["data/cell"]
+        cells = np.asarray(cell_dataset[:] if cell_dataset.ndim == 2 else cell_dataset[:n_frames])
+        pbc_dataset = h5["data/pbc"]
+        pbcs = np.asarray(pbc_dataset[:] if pbc_dataset.ndim == 1 else pbc_dataset[:n_frames])
+        if "steps/positions" in h5:
+            steps = np.asarray(h5["steps/positions"][:n_frames])
+            if len(steps) != len(samples) or not np.all(np.diff(steps) == 1):
+                raise ValueError("positions must be recorded at every MD timestep")
     if len(samples) != n_frames:
         raise ValueError(f"requested {n_frames} frames but loaded {len(samples)}")
-    return samples, not numerical_velocities
+    _record_geometry_provenance(path, cells, pbcs)
+    return unwrap_positions(samples, cells, pbcs), False
 
 
 def _next_power_of_two(value: int) -> int:
     return 1 << (value - 1).bit_length()
+
+
+def spectral_settings(
+    n_velocity_frames: int,
+    timestep_fs: float,
+    *,
+    estimator: str = "welch",
+    window_fs: float = DEFAULT_WINDOW_FS,
+    min_segments: int = DEFAULT_MIN_SEGMENTS,
+    overlap: float = DEFAULT_OVERLAP,
+    pad_factor: int = 1,
+) -> dict:
+    """Resolve the estimator's physical window and reproducible FFT settings.
+
+    Both trajectories in a pair have the same matched sample count/timestep,
+    so shortening a requested window cannot favour either side. For a Hann
+    window, ``resolution_cm-1`` is the native 1/window frequency spacing;
+    the noise-equivalent bandwidth is 1.5 times larger. Zero padding only
+    changes the displayed FFT bin spacing.
+    """
+    if estimator not in {"welch", "periodogram"}:
+        raise ValueError("estimator must be 'welch' or 'periodogram'")
+    if n_velocity_frames < 3:
+        raise ValueError("at least three velocity frames are required")
+    if not np.isfinite(timestep_fs) or timestep_fs <= 0:
+        raise ValueError("timestep must be positive")
+    if not np.isfinite(window_fs) or window_fs <= 0:
+        raise ValueError("window duration must be positive")
+    if min_segments < 2 or int(min_segments) != min_segments:
+        raise ValueError("minimum segment count must be an integer of at least two")
+    if not np.isfinite(overlap) or not 0 <= overlap < 1:
+        raise ValueError("overlap must be between zero (inclusive) and one (exclusive)")
+    if pad_factor < 1 or int(pad_factor) != pad_factor:
+        raise ValueError("pad factor must be a positive integer")
+    requested_nperseg = max(3, int(round(window_fs / timestep_fs)))
+    if estimator == "periodogram":
+        nperseg = n_velocity_frames
+        noverlap = 0
+        n_segments = 1
+    else:
+        # L + (K-1)*(L-floor(overlap*L)) <= N is monotone in L.
+        # Binary search gives the largest window supporting K segments.
+        low, high, maximum = 3, n_velocity_frames, 3
+        while low <= high:
+            candidate = (low + high) // 2
+            candidate_step = candidate - int(np.floor(overlap * candidate))
+            if candidate + (min_segments - 1) * candidate_step <= n_velocity_frames:
+                maximum = candidate
+                low = candidate + 1
+            else:
+                high = candidate - 1
+        nperseg = min(requested_nperseg, maximum)
+        noverlap = int(np.floor(overlap * nperseg))
+        n_segments = 1 + (n_velocity_frames - nperseg) // (nperseg - noverlap)
+    n_fft = int(pad_factor) * _next_power_of_two(nperseg)
+    segment_duration_fs = nperseg * float(timestep_fs)
+    resolution = 1.0 / (segment_duration_fs * 1e-15 * SPEED_OF_LIGHT_CM_S)
+    return {
+        "estimator": estimator,
+        "requested_window_fs": float(window_fs),
+        "requested_min_segments": int(min_segments),
+        "requested_overlap_fraction": float(overlap),
+        "requested_nperseg": requested_nperseg,
+        "nperseg": int(nperseg),
+        "noverlap": int(noverlap),
+        "n_segments": int(n_segments),
+        "minimum_segments_satisfied": bool(n_segments >= min_segments),
+        "segment_duration_fs": segment_duration_fs,
+        "window_shortened": bool(estimator == "welch" and nperseg < requested_nperseg),
+        "resolution_cm-1": resolution,
+        "hann_noise_equivalent_bandwidth_cm-1": 1.5 * resolution,
+        "n_fft": n_fft,
+        "bin_spacing_cm-1": 1.0 / (n_fft * timestep_fs * 1e-15 * SPEED_OF_LIGHT_CM_S),
+        "averaging": "mean" if estimator == "welch" else "none",
+    }
+
+
+def _component_weights(n_atoms: int, weighting: str, masses: np.ndarray | None) -> np.ndarray:
+    if weighting not in {"velocity", "mass"}:
+        raise ValueError("weighting must be 'mass' or 'velocity'")
+    if masses is not None:
+        masses = np.asarray(masses, dtype=np.float64)
+        if masses.shape != (n_atoms,) or not np.all(np.isfinite(masses) & (masses > 0)):
+            raise ValueError("masses must contain one finite positive value per atom")
+    if weighting == "mass":
+        if masses is None:
+            raise ValueError("mass-weighted VDOS requires explicit atomic masses")
+        return np.repeat(masses, 3)
+    return np.ones(n_atoms * 3)
 
 
 def compute_vdos(
@@ -166,61 +441,71 @@ def compute_vdos(
     samples_are_velocities: bool,
     pad_factor: int = 1,
     chunk_size: int = 32,
+    estimator: str = "periodogram",
+    weighting: str = "velocity",
+    masses: np.ndarray | None = None,
+    window_fs: float = DEFAULT_WINDOW_FS,
+    min_segments: int = DEFAULT_MIN_SEGMENTS,
+    overlap: float = DEFAULT_OVERLAP,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return wavenumber and summed VDOS using the legacy Hann/VACF method.
+    """Return wavenumber and the summed one-sided velocity-power density.
 
-    Columns are processed in chunks so large trajectories do not require a
-    second trajectory-sized FFT work array. Autocorrelations are normalized
-    separately for every Cartesian atom component before their spectra are
-    summed, matching ``VDOS.py``.
+    Position inputs must already be PBC-unwrapped. Central differences at
+    interior frames provide a consistent derivative transfer function for
+    reference and MLIP inputs. Velocity inputs support numerical validation;
+    the analysis pipeline always uses positions for both trajectories. Legacy
+    API defaults retain the unweighted periodogram; the CLI explicitly uses
+    Welch with mass weighting. Mass weights apply to powers before summing,
+    not to separately normalized atom/component spectra.
     """
     samples = np.asarray(samples, dtype=np.float64)
     if samples.ndim != 3 or samples.shape[-1] != 3:
         raise ValueError(f"expected samples with shape (frames, atoms, 3), got {samples.shape}")
     if len(samples) < 3:
         raise ValueError("at least three frames are required for VDOS")
-    if timestep_fs <= 0.0:
+    if not np.isfinite(timestep_fs) or timestep_fs <= 0.0:
         raise ValueError("timestep must be positive")
     if pad_factor < 1:
         raise ValueError("pad factor must be positive")
     if chunk_size < 1:
         raise ValueError("chunk size must be positive")
 
-    n_frames = len(samples)
+    if not np.all(np.isfinite(samples)):
+        raise ValueError("samples contain nonfinite values")
+    n_frames = len(samples) if samples_are_velocities else len(samples) - 2
+    if n_frames < 3:
+        raise ValueError("at least five position frames or three velocity frames are required")
+    settings = spectral_settings(
+        n_frames, timestep_fs, estimator=estimator, window_fs=window_fs,
+        min_segments=min_segments, overlap=overlap, pad_factor=pad_factor,
+    )
     timestep_s = timestep_fs * 1e-15
-    n_fft = pad_factor * _next_power_of_two(n_frames)
-    half = n_fft // 2
-    window = signal.windows.hann(n_frames, sym=False)
-    window /= np.mean(window)
-    intensity = np.zeros(half, dtype=np.float64)
-    flattened = samples.reshape(n_frames, -1)
+    n_fft = settings["n_fft"]
+    intensity = np.zeros(n_fft // 2 + 1, dtype=np.float64)
+    flattened = samples.reshape(len(samples), -1)
+    weights = _component_weights(samples.shape[1], weighting, masses)
 
     for start in range(0, flattened.shape[1], chunk_size):
         block = flattened[:, start : start + chunk_size]
         if not samples_are_velocities:
-            block = np.gradient(block, timestep_s, axis=0)
-
-        centered = block - np.mean(block, axis=0, keepdims=True)
-        norms = np.sum(centered * centered, axis=0)
-        valid = np.isfinite(norms) & (norms > 0.0)
-        if not np.any(valid):
-            continue
-
-        centered = centered[:, valid]
-        norms = norms[valid]
-        acf = signal.fftconvolve(
-            centered,
-            centered[::-1],
-            mode="full",
-            axes=0,
-        )[n_frames - 1 :] / norms
-        transformed = np.fft.rfft(acf * window[:, None], n=n_fft, axis=0) / n_frames
-        intensity += np.sum(np.abs(transformed[:half]) ** 2, axis=1)
+            # Angstrom/fs is consistent on both sides. The absolute scale
+            # cancels in unit-area normalization of the summed spectrum.
+            block = (block[2:] - block[:-2]) / (2.0 * timestep_fs)
+        options = dict(fs=1.0 / timestep_s, window="hann", detrend="constant",
+                       nfft=n_fft, return_onesided=True, scaling="density", axis=0)
+        if estimator == "welch":
+            frequencies, component_power = signal.welch(
+                block, nperseg=settings["nperseg"], noverlap=settings["noverlap"],
+                average="mean", **options,
+            )
+        else:
+            frequencies, component_power = signal.periodogram(block, **options)
+        intensity += np.sum(component_power * weights[None, start : start + chunk_size], axis=1)
 
     if not np.any(np.isfinite(intensity) & (intensity > 0.0)):
         raise ValueError("VDOS is identically zero")
 
-    wavenumber = np.fft.fftfreq(n_fft, timestep_s * SPEED_OF_LIGHT_CM_S)[:half]
+    wavenumber = frequencies / SPEED_OF_LIGHT_CM_S
     return wavenumber, intensity
 
 
@@ -280,22 +565,53 @@ def vdos_similarity(
 def save_spectrum(path: Path, spectrum: tuple[np.ndarray, np.ndarray]) -> None:
     energy_ev, normalized = normalized_spectrum(*spectrum)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savetxt(
-        path,
-        np.column_stack((spectrum[0], energy_ev, spectrum[1], normalized)),
-        delimiter=",",
-        header="wavenumber_cm-1,energy_eV,intensity_au,normalized_intensity_eV-1",
-        comments="",
-    )
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
+        temporary_path = Path(handle.name)
+    try:
+        np.savetxt(
+            temporary_path,
+            np.column_stack((spectrum[0], energy_ev, spectrum[1], normalized)),
+            delimiter=",",
+            header="wavenumber_cm-1,energy_eV,intensity_au,normalized_intensity_eV-1",
+            comments="",
+        )
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def load_spectrum(path: Path) -> tuple[np.ndarray, np.ndarray]:
     values = np.loadtxt(path, delimiter=",", skiprows=1)
     if values.ndim == 1:
         values = values.reshape(1, -1)
-    if values.shape[1] < 3:
+    if values.shape[1] != 4 or len(values) < 2 or not np.all(np.isfinite(values)):
         raise ValueError(f"invalid spectrum file: {path}")
+    if not np.all(np.diff(values[:, 0]) > 0) or np.any(values[:, 2] < 0):
+        raise ValueError(f"invalid frequency/power values in spectrum file: {path}")
     return values[:, 0], values[:, 2]
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _atomic_json(path: Path, payload: dict) -> None:
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
+        temporary_path = Path(handle.name)
+        try:
+            json.dump(payload, handle, indent=2, sort_keys=True, allow_nan=False)
+            handle.write("\n")
+        except BaseException:
+            temporary_path.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def spectrum_for_samples(
@@ -307,17 +623,74 @@ def spectrum_for_samples(
     pad_factor: int,
     chunk_size: int,
     overwrite: bool,
+    input_identity: dict | None = None,
+    estimator: str = "periodogram",
+    weighting: str = "velocity",
+    masses: np.ndarray | None = None,
+    window_fs: float = DEFAULT_WINDOW_FS,
+    min_segments: int = DEFAULT_MIN_SEGMENTS,
+    overlap: float = DEFAULT_OVERLAP,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if path.is_file() and not overwrite:
-        return load_spectrum(path)
+    samples = np.asarray(samples, dtype=np.float64)
+    if samples.ndim != 3 or samples.shape[-1] != 3:
+        raise ValueError("samples must have shape (frames, atoms, 3)")
+    _component_weights(samples.shape[1], weighting, masses)
+    n_velocity_frames = len(samples) if samples_are_velocities else len(samples) - 2
+    settings = spectral_settings(
+        n_velocity_frames, timestep_fs, estimator=estimator, window_fs=window_fs,
+        min_segments=min_segments, overlap=overlap, pad_factor=pad_factor,
+    )
+    signature = {
+        "method_version": METHOD_VERSION,
+        "estimator": f"one-sided-scipy-{estimator}-density",
+        "window": "periodic-Hann",
+        "detrend": "per-segment-per-component-constant",
+        "weighting": weighting,
+        "weighting_convention": "mass-times-component-power" if weighting == "mass" else "component-velocity-power",
+        "normalization": "sum-weighted-component-powers-then-normalize-total-area",
+        "atomic_masses_amu": None if masses is None else np.asarray(masses, dtype=float).tolist(),
+        "masses_sha256": None if masses is None else _array_digest(np.asarray(masses, dtype=np.float64)),
+        "spectral_settings": settings,
+        "velocity_handling": "provided-velocities" if samples_are_velocities else VELOCITY_HANDLING,
+        "timestep_fs": float(timestep_fs),
+        "input_frames": len(samples),
+        "velocity_frames": len(samples) if samples_are_velocities else len(samples) - 2,
+        "sample_shape": list(samples.shape),
+        "sample_sha256": _array_digest(samples),
+        "pad_factor": int(pad_factor),
+        "chunk_size": int(chunk_size),
+        "input_identity": input_identity,
+    }
+    sidecar_path = path.with_suffix(path.suffix + ".json")
+    if path.is_file() and sidecar_path.is_file() and not overwrite:
+        try:
+            with sidecar_path.open() as handle:
+                cached = json.load(handle)
+            if isinstance(cached, dict) and cached.get("signature") == signature and cached.get("spectrum_sha256") == _file_digest(path):
+                return load_spectrum(path)
+        except (OSError, ValueError, TypeError):
+            # Interrupted, incompatible or corrupt caches are regenerated.
+            pass
     spectrum = compute_vdos(
         samples,
         timestep_fs,
         samples_are_velocities=samples_are_velocities,
         pad_factor=pad_factor,
         chunk_size=chunk_size,
+        estimator=estimator,
+        weighting=weighting,
+        masses=masses,
+        window_fs=window_fs,
+        min_segments=min_segments,
+        overlap=overlap,
     )
     save_spectrum(path, spectrum)
+    # CSV then sidecar are individually atomic. If interrupted between them,
+    # their hash mismatch causes regeneration on the next invocation.
+    _atomic_json(sidecar_path, {
+        "signature": signature,
+        "spectrum_sha256": _file_digest(path),
+    })
     return spectrum
 
 
@@ -381,7 +754,7 @@ def aggregate_and_save(pair_df: pd.DataFrame, results_dir: Path, excluded_system
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute matched-length VDOS results for ASE/TorchSim trajectory sources."
+        description="Compute corrected matched-length velocity-power VDOS results for ASE/TorchSim sources."
     )
     parser.add_argument(
         "--source",
@@ -398,12 +771,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR, help="output root")
     parser.add_argument("--e-min", type=float, help="minimum energy in eV used for scoring")
     parser.add_argument("--e-max", type=float, help="maximum energy in eV used for scoring")
-    parser.add_argument("--pad-factor", type=int, default=1, help="FFT zero-padding factor")
+    parser.add_argument("--estimator", choices=("welch", "periodogram"), default="welch", help="spectral estimator (default: Hann Welch averaging)")
+    parser.add_argument("--weighting", choices=("mass", "velocity"), default="mass", help="mass-weighted VDOS or unweighted velocity-power spectrum")
+    parser.add_argument("--window-fs", type=float, default=DEFAULT_WINDOW_FS, help="requested Welch window duration in fs (default: 2000; shortened to retain the minimum segment count)")
+    parser.add_argument("--min-segments", type=int, default=DEFAULT_MIN_SEGMENTS, help="minimum Welch segment count when trajectory length permits (default: 4)")
+    parser.add_argument("--pad-factor", type=int, default=4, help="FFT zero-padding factor (default: 4; interpolates the frequency grid without increasing resolution)")
     parser.add_argument("--chunk-size", type=int, default=32, help="Cartesian signals per FFT chunk")
     parser.add_argument(
         "--numerical-mlip-velocities",
         action="store_true",
-        help="differentiate MLIP positions instead of using stored velocities",
+        help="compatibility flag: both reference and MLIP velocities are always derived from unwrapped positions",
     )
     parser.add_argument("--overwrite", action="store_true", help="recompute existing spectra")
     parser.add_argument("--dry-run", action="store_true", help="show discovered inputs only")
@@ -416,6 +793,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--pad-factor must be positive")
     if args.chunk_size < 1:
         parser.error("--chunk-size must be positive")
+    if not np.isfinite(args.window_fs) or args.window_fs <= 0:
+        parser.error("--window-fs must be finite and positive")
+    if args.min_segments < 2:
+        parser.error("--min-segments must be at least two")
     return args
 
 
@@ -501,6 +882,13 @@ def process_source(
 
     results_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
+    estimator_options = {
+        "estimator": getattr(args, "estimator", "welch"),
+        "weighting": getattr(args, "weighting", "mass"),
+        "window_fs": getattr(args, "window_fs", DEFAULT_WINDOW_FS),
+        "min_segments": getattr(args, "min_segments", DEFAULT_MIN_SEGMENTS),
+        "overlap": DEFAULT_OVERLAP,
+    }
 
     def penalty_row(
         model: str,
@@ -526,6 +914,10 @@ def process_source(
             "reference_spectrum": "",
             "mlip_spectrum": "",
             "failure_reason": reason,
+            "estimator": estimator_options["estimator"],
+            "weighting": estimator_options["weighting"],
+            "requested_window_fs": estimator_options["window_fs"],
+            "requested_min_segments": estimator_options["min_segments"],
         }
 
     for system in sorted(expected_systems):
@@ -548,6 +940,8 @@ def process_source(
         try:
             timestep_fs = float(metadata[system]["timestep"])
             reference_positions = load_reference_positions(ref_path)
+            reference_numbers = load_reference_atomic_numbers(ref_path)
+            masses = standard_atomic_masses(reference_numbers)
         except Exception as exc:
             reason = f"could not load reference trajectory: {exc}"
             print(f"  [PENALTY] {reason}; assigning 100% error")
@@ -556,32 +950,24 @@ def process_source(
 
         n_ref = len(reference_positions)
         print(f"  Reference frames={n_ref}, timestep={timestep_fs:g} fs")
-        ref_cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-
         def reference_spectrum(n_frames: int, model: str | None) -> tuple[np.ndarray, np.ndarray]:
-            overwrite = args.overwrite or (
-                n_frames != n_ref and model_trajectory_source(source, model) != source
-            )
             if n_frames == n_ref:
                 output = spectra_dir / "reference" / f"{system}.csv"
             else:
                 assert model is not None
                 output = spectra_dir / "reference_matched" / model / f"{system}.csv"
-            if n_frames in ref_cache:
-                if not output.is_file() or overwrite:
-                    save_spectrum(output, ref_cache[n_frames])
-                return ref_cache[n_frames]
-            spectrum = spectrum_for_samples(
+            return spectrum_for_samples(
                 output,
                 reference_positions[:n_frames],
                 timestep_fs,
                 samples_are_velocities=False,
                 pad_factor=args.pad_factor,
                 chunk_size=args.chunk_size,
-                overwrite=overwrite,
+                overwrite=args.overwrite,
+                input_identity=trajectory_identity(ref_path),
+                masses=masses,
+                **estimator_options,
             )
-            ref_cache[n_frames] = spectrum
-            return spectrum
 
         for model in eligible_models:
             print(f"  Model: {model}")
@@ -606,21 +992,24 @@ def process_source(
             try:
                 n_mlip = h5_frame_count(
                     mlip_path,
-                    numerical_velocities=args.numerical_mlip_velocities,
                 )
                 n_matched = min(n_ref, n_mlip)
-                if n_matched < 3:
-                    raise ValueError("fewer than three common frames")
+                if n_matched < 5:
+                    raise ValueError("fewer than five common position frames")
                 print(
                     f"    matched frames={n_matched} | ref={n_matched}/{n_ref} | "
                     f"mlip={n_matched}/{n_mlip}"
                 )
-                ref_vdos = reference_spectrum(n_matched, model)
                 mlip_samples, samples_are_velocities = load_mlip_samples(
                     mlip_path,
                     n_matched,
-                    numerical_velocities=args.numerical_mlip_velocities,
                 )
+                if mlip_samples.shape[1:] != reference_positions.shape[1:]:
+                    raise ValueError("reference and MLIP trajectories have different atom counts")
+                mlip_numbers = load_mlip_atomic_numbers(mlip_path, n_atoms=mlip_samples.shape[1])
+                if not np.array_equal(mlip_numbers, reference_numbers):
+                    raise ValueError("reference and MLIP atomic identities/order differ")
+                ref_vdos = reference_spectrum(n_matched, model)
                 mlip_output = spectra_dir / "mlip" / model / f"{system}.csv"
                 mlip_vdos = spectrum_for_samples(
                     mlip_output,
@@ -629,7 +1018,10 @@ def process_source(
                     samples_are_velocities=samples_are_velocities,
                     pad_factor=args.pad_factor,
                     chunk_size=args.chunk_size,
-                    overwrite=args.overwrite or model_trajectory_source(source, model) != source,
+                    overwrite=args.overwrite,
+                    input_identity=trajectory_identity(mlip_path),
+                    masses=masses,
+                    **estimator_options,
                 )
                 error, similarity = vdos_similarity(
                     ref_vdos,
@@ -672,6 +1064,14 @@ def process_source(
                     ),
                     "mlip_spectrum": str(mlip_output),
                     "failure_reason": "",
+                    "estimator": estimator_options["estimator"],
+                    "weighting": estimator_options["weighting"],
+                    **spectral_settings(
+                        n_matched - 2, timestep_fs, estimator=estimator_options["estimator"],
+                        window_fs=estimator_options["window_fs"],
+                        min_segments=estimator_options["min_segments"],
+                        overlap=estimator_options["overlap"], pad_factor=args.pad_factor,
+                    ),
                 }
             )
 

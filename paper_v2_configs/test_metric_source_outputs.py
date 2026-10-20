@@ -62,8 +62,15 @@ class SourceOutputTests(unittest.TestCase):
                 pd.DataFrame({'system': ['bulkCu'], 'trajectory': ['/ref/bulkCu_300K/traj.extxyz'],
                               'energy_rmse': [value], 'force_rmse': [value * 10]}).to_csv(
                     input_dir / 'rmse-results-all_shared.csv', index=False)
-            argv = ['rmse', '--data-dir', str(root / 'e-f-predictions'), '--results-dir', str(root / 'results')]
-            with patch.object(sys, 'argv', argv), patch.object(rmse, 'torchsim_md_succeeded', return_value=True), contextlib.redirect_stdout(io.StringIO()):
+                md = root / 'md-data' / source / 'bulkCu_300K'
+                md.mkdir(parents=True)
+                (md / 'nvt_shared.h5').touch()
+                (md / 'md_timing_shared.csv').write_text(
+                    'calculator,system,n_steps\nshared,bulkCu_300K,100\n'
+                )
+            argv = ['rmse', '--data-dir', str(root / 'e-f-predictions'), '--results-dir', str(root / 'results'),
+                    '--md-data-dir', str(root / 'md-data')]
+            with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(io.StringIO()):
                 rmse.main()
             for value, source in enumerate(SOURCE_DATASETS, 1):
                 directory = root / 'results' / source
@@ -90,13 +97,12 @@ class SourceOutputTests(unittest.TestCase):
                 frames.to_csv(directory / 'references/shared.csv', index=False)
                 pd.DataFrame({'system': ['bulkCu_300K'], 'absolute_mean_error_GPa': [value]}).to_csv(
                     directory / ('shared' + pressure.TRAJECTORY_SUMMARY_SUFFIX), index=False)
-                if backend == 'torchsim':
-                    md = root / 'md-data' / source / 'bulkCu_300K'
-                    md.mkdir(parents=True)
-                    (md / 'nvt_shared.h5').touch()
-                    (md / 'md_timing_shared.csv').write_text(
-                        'calculator,system,n_steps\nshared,bulkCu_300K,100\n'
-                    )
+                md = root / 'md-data' / source / 'bulkCu_300K'
+                md.mkdir(parents=True)
+                (md / 'nvt_shared.h5').touch()
+                (md / 'md_timing_shared.csv').write_text(
+                    'calculator,system,n_steps\nshared,bulkCu_300K,100\n'
+                )
             argv = ['pressure', '--pressures-dir', str(root / 'inputs'),
                     '--results-dir', str(root / 'results'), '--md-data-dir', str(root / 'md-data')]
             with patch.object(sys, 'argv', argv), contextlib.redirect_stdout(io.StringIO()):

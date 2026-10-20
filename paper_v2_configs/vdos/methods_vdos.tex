@@ -1,0 +1,26 @@
+We estimate the classical mass-weighted vibrational density of states from
+the reference and MLIP trajectories using identical preprocessing and
+spectral-estimation settings. Positions are first unwrapped across periodic
+boundaries. Velocities are reconstructed by central differences,
+$\mathbf{v}_i(t_j)=[\mathbf{r}_i(t_{j+1})-\mathbf{r}_i(t_{j-1})]/(2\Delta t)$,
+discarding the two endpoint frames. We use Welch averaging of one-sided
+Hann-windowed velocity periodograms, with 50\% overlap between segments.
+The requested segment duration is 2~ps; for shorter matched trajectories,
+it is reduced identically for the reference and MLIP data to obtain at
+least four overlapping segments. The temporal mean of each Cartesian
+velocity component is removed within each segment. Each atom's component
+spectra are weighted by its ASE standard atomic mass, summed over atoms and Cartesian
+directions, and averaged over segments. The resulting spectrum is
+normalised to unit area before evaluating Eq.~(\ref{eq:vdos-error}).
+The spectra displayed in the figures are the same spectra used for scoring.
+Fourfold zero padding provides a denser frequency grid for integration and
+plotting without increasing the physical spectral resolution. Actual
+segment durations, segment counts and spectral bandwidths are recorded
+with the results. We assess sensitivity to the requested segment duration,
+minimum segment count, frequency grid and mass-weighting convention.
+The short hydrogen and CuAu reference trajectories impose coarser spectral
+resolution; spectral errors retain finite-trajectory sampling uncertainty.
+Segment mean removal suppresses near-zero-frequency and diffusive power;
+the resulting spectra quantify vibrational shape rather than diffusion.
+Central differencing also attenuates high-frequency velocity power, with
+the same frequency response applied to both trajectories.

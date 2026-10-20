@@ -284,7 +284,7 @@ class GraceModel(ModelInterface):
         ref = atoms.copy()
         ref.calc = self._calc
         de = abs(out["energy"].item() - ref.get_potential_energy()) / len(atoms)
-        df = float((torch.from_numpy(ref.get_forces()).to(out["forces"])
+        df = float((torch.from_numpy(ref.get_forces(apply_constraint=False)).to(out["forces"])
                     - out["forces"]).abs().max())
         if de > energy_atol_per_atom or df > force_atol:
             raise RuntimeError(

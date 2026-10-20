@@ -30,6 +30,12 @@ force RMSE is over Cartesian components in eV/Angstrom. Isolated-atom correction
 for hydrogen and the acenes match the TorchSim evaluators. Failed evaluations
 produce a `.failures.json` sidecar and a nonzero exit status.
 
+Reference and predicted forces are extracted with `apply_constraint=False`:
+the RMSE compares raw atomic forces for all atoms, including frozen
+atoms, using the same convention as TorchSim and the all-atom `3MN` denominator.
+Input constraints are preserved. Existing Pt/H2O force RMSEs from the previous
+constrained-force comparison must be recomputed; normal resume retains them.
+
 Reruns preserve existing CSV results. When a `.failures.json` sidecar exists,
 only its listed trajectories are retried, including systems with failed frames.
 New result rows are appended; an existing partial row for a retried trajectory
@@ -38,6 +44,9 @@ from the CSV are evaluated. Results and remaining failures are checkpointed afte
 each trajectory, and the sidecar is removed once all failures are resolved.
 Saved paths still match after moving the reference data root. Use `--force` to
 discard saved results and recompute all trajectories.
+For a Pt-only recomputation, use a separate output directory and merge the
+corrected row afterward. Combining `--force`, a Pt-only reference directory and
+the original output directory would remove the other saved system results.
 
 The standard source `md_chgnet.py` contains a self-import rather than a usable
 calculator-loading function. Its RMSE counterpart uses the accelerated source's native

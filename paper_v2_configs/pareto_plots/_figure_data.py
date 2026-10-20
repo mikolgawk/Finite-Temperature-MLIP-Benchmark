@@ -21,6 +21,12 @@ SOURCES = (
     "mlip-trajs-torchsim-accelerated",
 )
 DEFAULT_SOURCE = "mlip-trajs-torchsim-eager"
+DEFAULT_VDOS_RESULTS_DIR = CONFIG_DIR / "vdos" / "results"
+VDOS_MODEL_FILE = "vdos_model_mean_ev_normalized_same_simulation_length.csv"
+# Presentation exclusions for SI18 only; underlying benchmark metrics are kept.
+SI18_EXCLUDED_MODELS = {
+    "mlip-trajs-ase-accelerated": {"uma-s-omat-turbo", "uma-m-omat-turbo"},
+}
 
 DEFAULT_PRESSURE_FILE = CONFIG_DIR / "pressures" / "results" / DEFAULT_SOURCE / "model_pressure_error_metric.csv"
 
@@ -29,14 +35,30 @@ def pressure_path(source: str) -> Path:
     return CONFIG_DIR / 'pressures' / 'results' / source / 'model_pressure_error_metric.csv'
 
 
+def vdos_metrics_path(source: str, results_dir: Path | None = None) -> Path:
+    """Choose refined VDOS by default; alternative roots require an override."""
+    return (DEFAULT_VDOS_RESULTS_DIR if results_dir is None else results_dir) / source / VDOS_MODEL_FILE
+
+
+def require_vdos_metrics_file(path: Path) -> None:
+    """Reject missing chosen metrics instead of silently using older results."""
+    if not path.is_file():
+        source_option = f" --source {path.parent.name}" if path.parent.name in SOURCES else ""
+        raise FileNotFoundError(
+            f"VDOS metrics not found: {path}. Generate refined metrics with "
+            "uv run --script paper_v2_configs/vdos/run_vdos_pipeline.py "
+            f"--compute-only{source_option}, or explicitly select an existing "
+            "VDOS input for a comparison. Legacy VDOS is never used as a fallback."
+        )
+
+
 def source_paths(source: str) -> tuple[Path, Path, Path]:
-    """Return timing, RDF, and VDOS paths produced for *source*."""
+    """Return timing, RDF, and refined VDOS paths produced for *source*."""
     return (
         CONFIG_DIR / "data" / source,
         CONFIG_DIR / "rdfs" / "results" / source
         / "rdf_similarity_scores_same_simulation_length.csv",
-        CONFIG_DIR / "vdos" / "results" / source
-        / "vdos_model_mean_ev_normalized_same_simulation_length.csv",
+        vdos_metrics_path(source),
     )
 
 
@@ -102,6 +124,7 @@ def load_rdf(path: Path) -> pd.DataFrame:
 
 def load_vdos(path: Path) -> pd.DataFrame:
     """Load a generated or legacy VDOS model-summary table."""
+    require_vdos_metrics_file(path)
     df = pd.read_csv(path)
     model_col = first_column(df, ("model", "mlip_model", "Calculator", "calculator"))
     error_col = first_column(

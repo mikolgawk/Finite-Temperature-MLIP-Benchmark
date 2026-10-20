@@ -3,6 +3,7 @@
 import contextlib
 import csv
 import io
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -82,6 +83,35 @@ class FigureSI17Tests(unittest.TestCase):
         self.assertEqual(summary.model_display.tolist(), ["orb-v2"])
         self.assertEqual(paired.raw_model_ase.iloc[0], "orb-v2-force-only-ase")
 
+    def test_pet_torchscript_names_match_using_engine_metadata(self):
+        for model in ("pet-oam-xl", "pet-omat-xl"):
+            torchsim_model = model + "-force-only-torchscript"
+            for system in (METAL, "unconfirmed"):
+                self.add_run(timing.TORCHSIM_SOURCE, torchsim_model, system=system,
+                             seconds=0.002, engine="torch-sim-0.6.1+pet-torchscript-force-only")
+            self.add_run(timing.ASE_SOURCE, model + "-ase", seconds=0.003,
+                         engine="ase+upet-0.2.6-torchscript-force-only")
+            self.add_run(timing.ASE_SOURCE, model, system="unconfirmed", engine="")
+            self.assertEqual(timing.timing_model_key(model, "ASE+TorchScript"),
+                             model + "-torchscript")
+            for engine in ("", "ase+upet-eager", None):
+                self.assertEqual(timing.timing_model_key(model, engine), model)
+            self.assertEqual(timing.timing_model_key(torchsim_model), model + "-torchscript")
+        paired, summary = self.compare()
+        self.assertEqual(paired.model.tolist(), ["pet-oam-xl-torchscript", "pet-omat-xl-torchscript"])
+        self.assertEqual(paired.system.tolist(), [METAL, METAL])
+        self.assertEqual(summary.model_display.tolist(), ["PET-OAM-XL", "PET-OMAT-XL"])
+        self.assertEqual(summary.n_common_systems.tolist(), [1, 1])
+        self.assertEqual(summary.torchsim_mean_ms_per_step.tolist(), [2.0, 2.0])
+        self.assertEqual(summary.ase_mean_ms_per_step.tolist(), [3.0, 3.0])
+        self.assertEqual(summary.torchsim_speedup.tolist(), [1.5, 1.5])
+
+    def test_ambiguous_pet_torchscript_aliases_are_rejected(self):
+        for model in ("pet-oam-xl", "pet-oam-xl-force-only-torchscript-ase"):
+            self.add_run(timing.ASE_SOURCE, model, engine="ase+upet-0.2.6-torchscript-force-only")
+        with self.assertRaisesRegex(ValueError, "Ambiguous timing files"):
+            self.observations(timing.ASE_SOURCE)
+
     def test_failed_partial_and_crystal_runs_are_excluded(self):
         source = timing.TORCHSIM_SOURCE
         self.add_run(source)
@@ -160,16 +190,83 @@ class FigureSI17Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Ambiguous timing files"):
             self.observations(timing.ASE_SOURCE)
 
+    def test_finished_benchmark_can_include_terminal_failed_systems(self):
+        source = timing.ASE_SOURCE
+        raw_model = "orb-v2-force-only-ase"
+        self.add_run(source, raw_model)
+        failed = self.add_run(source, raw_model, system="exception")
+        failed.write_bytes(b"")
+        trajectory = failed.with_name(f"nvt_{raw_model}.h5")
+        trajectory.rename(trajectory.with_name(trajectory.name + ".inprogress"))
+        self.failures[(source, "audited", raw_model)] = "Audited physical failure"
+
+        finished = timing.finished_model_keys(
+            self.data / source, source, self.observations(source),
+            expected_systems={METAL, "exception", "audited"},
+        )
+
+        self.assertEqual(finished, {"orb-v2"})
+        # Failed attempts establish a terminal result; they do not add timings.
+        self.assertEqual(self.observations(source).system.tolist(), [METAL])
+
+    def test_unfinished_systems_prevent_benchmark_completion(self):
+        source = timing.ASE_SOURCE
+        cases = (
+            ("orb-v2-force-only-ase", "missing"),
+            ("uma-s-omat-turbo-force-only-ase", "inprogress"),
+            ("mace-mp-0-compile-ase", "header-only"),
+            ("mace-mpa-0-compile-ase", "invalid-record"),
+        )
+        for raw_model, status in cases:
+            with self.subTest(status=status):
+                self.add_run(source, raw_model)
+                if status == "inprogress":
+                    folder = self.data / source / "unfinished"
+                    folder.mkdir(exist_ok=True)
+                    (folder / f"nvt_{raw_model}.h5.inprogress").touch()
+                elif status in {"header-only", "invalid-record"}:
+                    path = self.add_run(
+                        source, raw_model, system="unfinished",
+                        row_fields={"n_steps": 0} if status == "invalid-record" else None,
+                    )
+                    if status == "header-only":
+                        path.write_text("calculator,system,n_steps\n")
+
+                finished = timing.finished_model_keys(
+                    self.data / source, source, self.observations(source),
+                    expected_systems={METAL, "unfinished"},
+                )
+
+                self.assertNotIn(timing.timing_model_key(raw_model), finished)
+
+    def test_failed_pet_aliases_use_confirmed_torchscript_configuration(self):
+        source = timing.ASE_SOURCE
+        for model in ("pet-oam-xl", "pet-omat-xl"):
+            raw_model = model + "-ase"
+            self.add_run(source, raw_model, engine="ase+upet-0.2.6-torchscript-force-only")
+            failed = self.add_run(source, raw_model, system="H_1050K_Rupp_QE")
+            failed.write_bytes(b"")
+            failed.with_name(f"nvt_{raw_model}.h5").unlink()
+
+        finished = timing.finished_model_keys(
+            self.data / source, source, self.observations(source),
+            expected_systems={METAL, "H_1050K_Rupp_QE"},
+        )
+
+        self.assertEqual(finished, {"pet-oam-xl-torchscript", "pet-omat-xl-torchscript"})
+
     def test_data_only_cli_exports_tables_without_calling_plotting(self):
         self.add_run(timing.TORCHSIM_SOURCE)
         self.add_run(timing.ASE_SOURCE, "orb-v2-force-only-ase")
         output = self.root / "never-created.pdf"
         summary, paired = self.root / "summary.csv", self.root / "paired.csv"
+        metadata = self.root / "metadata.json"
+        metadata.write_text(json.dumps({METAL: {}}))
         argv = ["figure_SI_17.py", "--data-only",
                 "--torchsim-dir", str(self.data / timing.TORCHSIM_SOURCE),
                 "--ase-dir", str(self.data / timing.ASE_SOURCE),
                 "--output-file", str(output), "--output-csv", str(summary),
-                "--paired-csv", str(paired)]
+                "--paired-csv", str(paired), "--metadata-file", str(metadata)]
         with (patch.object(sys, "argv", argv),
               patch.object(timing, "plot_comparison", side_effect=AssertionError("Must not plot")) as plot,
               contextlib.redirect_stdout(io.StringIO())):
@@ -201,6 +298,7 @@ class FigureSI17Tests(unittest.TestCase):
         self.assertFalse((self.root / "plots").exists())
         with (patch.object(sys, "argv", ["plot_all.py", "--source", timing.TORCHSIM_SOURCE]),
               patch.object(plot_all, "comparison_available", return_value=False),
+              patch.object(plot_all, "require_vdos_metrics_file"),
               patch.object(plot_all, "run_stage", return_value=True) as stage,
               contextlib.redirect_stdout(io.StringIO())):
             plot_all.main()

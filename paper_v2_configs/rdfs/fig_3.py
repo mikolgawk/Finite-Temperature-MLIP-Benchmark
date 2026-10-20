@@ -453,12 +453,11 @@ def full_error_models_for_legend(
 
 
 def mean_system_rdf_error(system: str, rdf_csv_dir: Path, rdf_dir: str) -> float:
+    """Include recorded failure penalties even when no RDF curve is cached."""
     system_errors = find_model_system_errors(system, rdf_csv_dir)
     errors = []
-    for model, rdf_error in system_errors.items():
+    for rdf_error in system_errors.values():
         if not np.isfinite(rdf_error):
-            continue
-        if resolve_saved_rdf_path(system, model, rdf_dir) is None:
             continue
         errors.append(float(rdf_error))
 

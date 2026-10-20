@@ -202,6 +202,34 @@ class Figure7ASETests(unittest.TestCase):
         self.assertTrue(frame.is_pareto.all())
         self.assertEqual(frontier.groupby("dataset").size().to_dict(), {ASE: 2, TORCHSIM: 2})
 
+    def test_si_18_omits_only_ase_uma_turbo_and_recomputes_its_frontier(self):
+        models = ["orb-v2", "uma-s-omat-turbo", "uma-m-omat-turbo"]
+        for source in (TORCHSIM, ASE):
+            for model, seconds in zip(models, (0.003, 0.001, 0.002)):
+                suffix = "-force-only-ase" if source == ASE else "-force-only"
+                self.add_run(source, model + suffix, seconds=seconds)
+        inputs = {
+            TORCHSIM: self.write_metrics(TORCHSIM, models, [30, 10, 5]),
+            ASE: self.write_metrics(ASE, models, [40, 20, 15]),
+        }
+        original_inputs = {path: path.read_bytes()
+                           for paths in inputs.values() for path in paths}
+
+        frame, frontier = self.run_data_only([TORCHSIM, ASE], inputs)
+
+        self.assertEqual(frame.loc[frame.dataset.eq(ASE), "model"].tolist(), ["orb-v2"])
+        self.assertEqual(set(frame.loc[frame.dataset.eq(TORCHSIM), "model"]), set(models))
+        self.assertEqual(frontier.loc[frontier.dataset.eq(ASE), "model"].tolist(), ["orb-v2"])
+        self.assertEqual(set(frontier.loc[frontier.dataset.eq(TORCHSIM), "model"]),
+                         {"uma-s-omat-turbo", "uma-m-omat-turbo"})
+        # Orb was dominated by both ASE UMA configurations before filtering;
+        # the ASE frontier must be recalculated after those rows are removed.
+        ase_orb = frame.loc[frame.dataset.eq(ASE)].iloc[0]
+        self.assertTrue(ase_orb.is_pareto)
+        self.assertEqual(ase_orb["Combined Error [%]"], 40)
+        for path, contents in original_inputs.items():
+            self.assertEqual(path.read_bytes(), contents)
+
     def test_figure_7_defaults_to_a_single_torchsim_source(self):
         source = figure_7.DEFAULT_SOURCE
         self.assertIn("torchsim", source)

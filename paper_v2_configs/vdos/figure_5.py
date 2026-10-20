@@ -17,6 +17,9 @@ bar plot with tier medians from plot-9-same-simulation-length.py.
 Requires: numpy, pandas, matplotlib, seaborn
 """
 
+# Standalone scripts add the shared v2 helper directory before importing it.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -182,19 +185,32 @@ DEFAULT_XLIM_BY_SYSTEM_TYPE = {
     "Hydrogen": (0.0, 0.7),
 }
 
-DEFAULT_YLIM_BY_SYSTEM_TYPE = {
-    "Perovskites": (0.0, 240.0),
-    "Metal dichalcogenides": (0.0, 290.0),
-    "Metal alloys": (0.0, 140.0),
-    "Molecular crystals": (0.0, 60.0),
-}
-
-
 def trapz_integral(y: np.ndarray, x: np.ndarray) -> float:
     trapz_fn = getattr(np, "trapezoid", None)
     if trapz_fn is None:
         trapz_fn = np.trapz
     return float(trapz_fn(y, x=x))
+
+
+def shared_visible_spectrum_ylim(
+    axes: list[plt.Axes], *, headroom: float = 0.10,
+) -> tuple[float, float]:
+    """Fit the displayed spectra to one shared scale across a system's tiers.
+
+    Only finite samples inside each panel's energy window determine the scale.
+    This keeps narrow corrected spectra visible and prevents off-screen peaks
+    from stretching the y axis. Failure-only legend entries have no line data.
+    """
+    peak = 0.0
+    for ax in axes:
+        x_min, x_max = sorted(ax.get_xlim())
+        for line in ax.lines:
+            x = np.asarray(line.get_xdata(), dtype=float)
+            y = np.asarray(line.get_ydata(), dtype=float)
+            visible = np.isfinite(x) & np.isfinite(y) & (x >= x_min) & (x <= x_max)
+            if np.any(visible):
+                peak = max(peak, float(np.max(y[visible])))
+    return (0.0, (1.0 + headroom) * peak if peak > 0.0 else 1.0)
 
 
 def infer_system_type(system: str) -> str:
@@ -819,7 +835,7 @@ def plot_combined(
     n_top_rows = int(np.ceil(n_system_types / n_cols))
     center_last_two = n_top_rows > 1 and (n_system_types % n_cols == 2)
     outer_wspace = 0.45
-    bar_system_gap_ratio = 0.22
+    bar_system_gap_ratio = 0.30
 
     # Match the v1 RDF panel canvas, adding height only for extra system rows.
     fig = plt.figure(figsize=(3.53 * 3.0, 3.53 * (3.55 + 1.55 * (n_top_rows - 2))))
@@ -999,8 +1015,6 @@ def plot_combined(
 
             if system_type in DEFAULT_XLIM_BY_SYSTEM_TYPE:
                 ax.set_xlim(*DEFAULT_XLIM_BY_SYSTEM_TYPE[system_type])
-            if system_type in DEFAULT_YLIM_BY_SYSTEM_TYPE:
-                ax.set_ylim(*DEFAULT_YLIM_BY_SYSTEM_TYPE[system_type])
 
             if is_right_col:
                 ax.set_ylabel(tier_label)
@@ -1040,6 +1054,12 @@ def plot_combined(
                     borderaxespad=0.2,
                 )
             ax.grid()
+
+        # Reference/best/worst curves in all four tier panels use the same
+        # scale, fitted to the corrected spectra visible in this energy range.
+        limits = shared_visible_spectrum_ylim(tier_axes)
+        for ax in tier_axes:
+            ax.set_ylim(*limits)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)

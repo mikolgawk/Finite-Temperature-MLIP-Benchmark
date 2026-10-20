@@ -5,9 +5,13 @@
 # ///
 """Compare native accelerated TorchSim and ASE MD timings on matched systems.
 
-Each model uses the same completed systems and MD workloads in both runners.
+Only models with a terminal success or failure for every benchmark system in
+both runners are included. Each uses the same successful systems and matching
+MD workloads for its timing average; failed systems do not contribute timings.
 Molecular crystals and registered physical failures are excluded by default.
 The paper cohort's borrowed eager runs are not used in this runner comparison.
+PET timing names are matched to TorchScript variants when their engine metadata
+confirms TorchScript inference, including ASE filenames without that suffix.
 
 Panel (a) shows mean MD time per step; panel (b) shows ASE/TorchSim mean time.
 Ratios above one indicate faster TorchSim MD. Use --data-only to export the
@@ -17,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from pathlib import Path
 import sys
 
@@ -36,6 +41,7 @@ COMPARISON_DIR = "torchsim_vs_ase_accelerated"
 DEFAULT_OUTPUT_FILE = HERE / "plots" / COMPARISON_DIR / "figure_SI_17.pdf"
 DEFAULT_OUTPUT_CSV = HERE / "results" / COMPARISON_DIR / "figure_SI_17.csv"
 DEFAULT_PAIRED_CSV = HERE / "results" / COMPARISON_DIR / "figure_SI_17_per_system.csv"
+DEFAULT_METADATA_FILE = CONFIG_DIR / "data" / "ref-trajs" / "md_metadata.json"
 FONT_SIZE = 6
 FIGURE_SIZE = (3.53 * 3, 3.53 * 1.5)
 OBSERVATION_COLUMNS = [
@@ -49,9 +55,12 @@ SUMMARY_COLUMNS = [
 ]
 
 
-def timing_model_key(name: object) -> str:
-    """Remove runner tags while preserving compile/turbo/checkpoint variants."""
-    return normalize_display_key(normalize_display_key(name).removesuffix("-ase"))
+def timing_model_key(name: object, engine: object = "") -> str:
+    """Match PET's runner naming difference using explicit execution metadata."""
+    key = normalize_display_key(normalize_display_key(name).removesuffix("-ase"))
+    if key in {"pet-oam-xl", "pet-omat-xl"} and "torchscript" in str(engine).lower():
+        return f"{key}-torchscript"
+    return key
 
 
 def load_native_timings(
@@ -105,7 +114,8 @@ def load_native_timings(
             skipped.append(f"{path}: {exc}")
             continue
         records.append({
-            "model": timing_model_key(raw_model), "system": system, "source": source,
+            "model": timing_model_key(raw_model, row.get("engine", "")),
+            "system": system, "source": source,
             "raw_model": raw_model, "n_steps": int(steps), "seconds_per_step": seconds,
             "elapsed_seconds": elapsed, **metadata, "engine": row.get("engine", ""),
             "timing_file": str(path), "trajectory_file": str(trajectory),
@@ -116,6 +126,58 @@ def load_native_timings(
         raise ValueError(f"Ambiguous timing files in {source}:\n"
                          + duplicates[["model", "system", "timing_file"]].to_string(index=False))
     return frame, skipped
+
+
+def benchmark_systems(metadata_file: Path, include_molecular_crystals: bool = False) -> set[str]:
+    """Read expected coverage from the reference benchmark, never partial outputs."""
+    metadata = json.loads(metadata_file.read_text())
+    systems = {system for system in metadata if include_system(system, include_molecular_crystals)}
+    if not systems:
+        raise ValueError(f"No benchmark systems selected from {metadata_file}")
+    return systems
+
+
+def finished_model_keys(
+    directory: Path, source: str, observations: pd.DataFrame,
+    expected_systems: set[str],
+) -> set[str]:
+    """Distinguish finished campaigns with failures from unfinished campaigns.
+
+    Runners write an empty timing CSV after an exception. Together with valid
+    completed timings and registered physical failures, these are terminal
+    outcomes. Partial trajectories alone and malformed timing records are not.
+    Failed PET filenames inherit execution aliases from that model's valid runs.
+    """
+    aliases: dict[str, set[str]] = {}
+    valid = set()
+    for row in observations.itertuples():
+        aliases.setdefault(timing_model_key(row.raw_model), set()).add(row.model)
+        valid.add((row.raw_model, row.system))
+    failures = load_failed_md_runs()
+    terminal: dict[str, set[str]] = {}
+    for path in directory.glob("*/md_timing_*.csv"):
+        system = path.parent.name
+        if system not in expected_systems:
+            continue
+        raw = path.stem.removeprefix("md_timing_")
+        trajectory = path.with_name(f"nvt_{raw}.h5")
+        completed = (
+            (raw, system) in valid or path.stat().st_size == 0
+            or registered_md_failure_reason(trajectory)
+            or (source, system, raw) in failures
+        )
+        if not completed:
+            continue
+        key = timing_model_key(raw)
+        for model in aliases.get(key, {key}):
+            terminal.setdefault(model, set()).add(system)
+    # A manually audited failure may remain after its original outputs are removed.
+    for (failed_source, system, raw), _ in failures.items():
+        if failed_source == source and system in expected_systems:
+            key = timing_model_key(raw)
+            for model in aliases.get(key, {key}):
+                terminal.setdefault(model, set()).add(system)
+    return {model for model, systems in terminal.items() if expected_systems <= systems}
 
 
 def compare_timings(torchsim: pd.DataFrame, ase: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -151,14 +213,19 @@ def compare_timings(torchsim: pd.DataFrame, ase: pd.DataFrame) -> tuple[pd.DataF
 
 
 def comparison_available(data_dir: Path, include_molecular_crystals: bool = False) -> bool:
-    """Allow the plotting pipeline to skip S17 when paired timing data is absent."""
+    """Skip S17 when no finished models have paired timing data."""
     folders = [data_dir / source for source in (TORCHSIM_SOURCE, ASE_SOURCE)]
     if not all(folder.is_dir() for folder in folders):
         return False
     torchsim, _ = load_native_timings(folders[0], TORCHSIM_SOURCE, include_molecular_crystals)
     ase, _ = load_native_timings(folders[1], ASE_SOURCE, include_molecular_crystals)
     _, summary = compare_timings(torchsim, ase)
-    return not summary.empty
+    expected = benchmark_systems(DEFAULT_METADATA_FILE, include_molecular_crystals)
+    finished = (
+        finished_model_keys(folders[0], TORCHSIM_SOURCE, torchsim, expected)
+        & finished_model_keys(folders[1], ASE_SOURCE, ase, expected)
+    )
+    return summary["model"].isin(finished).any()
 
 
 def plot_comparison(summary: pd.DataFrame, output: Path) -> None:
@@ -192,7 +259,8 @@ def plot_comparison(summary: pd.DataFrame, output: Path) -> None:
         axes[1].set_xlim(0, max(1., float(summary.torchsim_speedup.max())) * 1.25)
         for position, speedup in zip(positions, summary.torchsim_speedup):
             axes[1].annotate(f"{speedup:.2f}×", (speedup, position), xytext=(3, 0),
-                             textcoords="offset points", va="center", fontsize=FONT_SIZE)
+                             textcoords="offset points", va="center", fontsize=FONT_SIZE,
+                             bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.1})
         for label, ax in zip(("(a)", "(b)"), axes):
             ax.text(0, 1.02, label, transform=ax.transAxes, ha="left", va="bottom", fontsize=FONT_SIZE)
             ax.grid(axis="x")
@@ -206,6 +274,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--torchsim-dir", type=Path, default=CONFIG_DIR / "data" / TORCHSIM_SOURCE)
     parser.add_argument("--ase-dir", type=Path, default=CONFIG_DIR / "data" / ASE_SOURCE)
+    parser.add_argument("--metadata-file", type=Path, default=DEFAULT_METADATA_FILE,
+                        help="Reference MD metadata defining the full benchmark system set.")
     parser.add_argument("--output-file", type=Path, default=DEFAULT_OUTPUT_FILE)
     parser.add_argument("--output-csv", type=Path, default=DEFAULT_OUTPUT_CSV)
     parser.add_argument("--paired-csv", type=Path, default=DEFAULT_PAIRED_CSV)
@@ -219,9 +289,21 @@ def main() -> None:
     torchsim, torchsim_skipped = load_native_timings(args.torchsim_dir, TORCHSIM_SOURCE, args.include_molecular_crystals)
     ase, ase_skipped = load_native_timings(args.ase_dir, ASE_SOURCE, args.include_molecular_crystals)
     paired, summary = compare_timings(torchsim, ase)
+    expected = benchmark_systems(args.metadata_file, args.include_molecular_crystals)
+    finished = (
+        finished_model_keys(args.torchsim_dir, TORCHSIM_SOURCE, torchsim, expected)
+        & finished_model_keys(args.ase_dir, ASE_SOURCE, ase, expected)
+    )
+    unfinished = sorted(set(summary["model"]) - finished)
+    paired = paired.loc[paired["model"].isin(finished)].reset_index(drop=True)
+    summary = summary.loc[summary["model"].isin(finished)].reset_index(drop=True)
+    if unfinished:
+        print("Excluded unfinished model configurations: " + ", ".join(unfinished))
     if summary.empty:
-        raise SystemExit("No shared models have completed, matching accelerated MD timings in both runners.")
-    candidate_pairs = len(torchsim.merge(ase, on=["model", "system"], how="inner", validate="one_to_one"))
+        raise SystemExit("No shared models have finished the benchmark with matching successful timings in both runners.")
+    candidate_pairs = len(torchsim.loc[torchsim.model.isin(finished)].merge(
+        ase.loc[ase.model.isin(finished)], on=["model", "system"], how="inner", validate="one_to_one"))
+    print(f"Finished benchmark coverage requires {len(expected)} systems per runner, allowing terminal failures.")
     print(f"Matched {len(summary)} models on {len(paired)} model/system pairs; "
           f"excluded {candidate_pairs - len(paired)} pairs with different MD workloads.")
     print(f"Skipped {len(torchsim_skipped)} TorchSim and {len(ase_skipped)} ASE timing records.")

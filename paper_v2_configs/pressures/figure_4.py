@@ -3,8 +3,9 @@
 
 The top row adds the global pressure MAE bar plot with tier medians.
 The lower panels reproduce the per-system-type stacked pressure histograms,
-selecting best/worst models by pressure MAE. The worst model appears only in
-the legend, with its MAE; its predicted histogram is omitted.
+selecting best/worst models by pressure MAE. Best-model histograms are solid
+and worst-model histograms are dashed, including valid non-overlapping
+distributions. Failed MD runs remain excluded from this MAE analysis.
 
 Requires: numpy, pandas, matplotlib, seaborn
 """
@@ -177,7 +178,7 @@ def choose_best_worst_from_scores(
     model_scores: dict[str, float],
     visible_models: set[str] | None = None,
 ) -> tuple[str | None, str | None, dict[str, float]]:
-    """Select a visible best histogram and the true worst MAE for the legend."""
+    """Select a visible best histogram and the true finite-MAE worst model."""
     scores = {
         model: score
         for model, score in model_scores.items()
@@ -191,7 +192,7 @@ def choose_best_worst_from_scores(
         return None, None, scores
 
     best = min(visible_scores, key=visible_scores.get) if visible_scores else None
-    # Prefer another tied model so the best histogram can remain visible.
+    # Prefer distinct models when their MAEs are tied.
     worst = max(scores, key=lambda model: (scores[model], model != best))
     return best, worst, scores
 
@@ -269,27 +270,30 @@ def draw_tier_histograms(
     worst_model,
     scores,
     tier_color,
-) -> tuple[Line2D, str] | None:
-    """Draw one reference and the best model, returning a legend-only worst entry."""
-    reference_model = best_model if best_model in references_by_model else next(
-        (model for model in tier_models if model in references_by_model),
-        next(iter(references_by_model), None),
+) -> None:
+    """Draw one matched reference and the selected solid/dashed predictions."""
+    reference_model = next(
+        (model for model in (best_model, worst_model) if model in references_by_model),
+        next((model for model in tier_models if model in references_by_model),
+             next(iter(references_by_model), None)),
     )
     if reference_model is not None:
         draw_histogram(
             references_by_model[reference_model], color="black", linestyle="-", label="Reference",
         )
-    if best_model is not None and best_model != worst_model and best_model in values_by_model:
+    if best_model is not None and best_model in values_by_model:
         draw_histogram(
             values_by_model[best_model], color=tier_color, linestyle="-",
-            label=format_model_label(best_model, scores.get(best_model), prefix="Best"),
+            label=format_model_label(
+                best_model, scores.get(best_model),
+                prefix="Best/Worst" if best_model == worst_model else "Best",
+            ),
         )
-    if worst_model is None:
-        return None
-    return (
-        Line2D([], [], color=tier_color, linestyle="--", linewidth=1.5),
-        format_model_label(worst_model, scores.get(worst_model), prefix="Worst"),
-    )
+    if worst_model is not None and worst_model != best_model and worst_model in values_by_model:
+        draw_histogram(
+            values_by_model[worst_model], color=tier_color, linestyle="--",
+            label=format_model_label(worst_model, scores.get(worst_model), prefix="Worst"),
+        )
 
 
 def format_chemical_formula(formula: str) -> str:
@@ -548,8 +552,8 @@ def draw_overall_pressure_mae_plot(ax, ranking_df: pd.DataFrame, panel_label: st
     bottom.set_xticks(x)
     bottom.set_xticklabels([display_name(model) for model in models], rotation=45,
                            ha="right", fontsize=FONT_SIZE)
-    top.text(0.01, 0.95, panel_label, transform=top.transAxes,
-             ha="left", va="top", fontsize=FONT_SIZE)
+    top.text(-0.01, 1.01, panel_label, transform=top.transAxes,
+             ha="right", va="bottom", fontsize=FONT_SIZE)
     annotate_tier_medians(
         axes, tiers, maximum=float(values.max()), font_size=FONT_SIZE,
         format_value=lambda value: f"{value:.2f}" if abs(value) < 1000 else pressure_tick(value),
@@ -607,8 +611,8 @@ def plot_combined(
             choose_best_worst_from_scores(tier_models, model_scores, visible_models=visible_models)
             for _, tier_models, _ in TIER_DEFS
         ]
-        plotted_models = {best for best, worst, _ in tier_selections
-                          if best is not None and best != worst}
+        plotted_models = {model for best, worst, _ in tier_selections
+                          for model in (best, worst) if model in values_by_model}
         references = list(references_by_model.values())
         plot_arrays = references + [values_by_model[model] for model in plotted_models]
         windows = distribution_axis_windows(plot_arrays, references)
@@ -677,7 +681,7 @@ def plot_combined(
             best_model, worst_model, scores = tier_selections[tier_idx]
             tier_mean_error = mean_finite(scores.values())
 
-            worst_legend_entry = draw_tier_histograms(
+            draw_tier_histograms(
                 draw_histogram, tier_models, references_by_model, values_by_model,
                 best_model, worst_model, scores, tier_color,
             )
@@ -696,10 +700,6 @@ def plot_combined(
                     segment_ax.xaxis.get_offset_text().set_visible(False)
 
             handles, labels = ax.get_legend_handles_labels()
-            if worst_legend_entry is not None:
-                handle, label = worst_legend_entry
-                handles = handles + [handle]
-                labels = labels + [label]
             if handles:
                 handles = handles + [Line2D([], [], color="none", linestyle="none", linewidth=0)]
                 labels = labels + [

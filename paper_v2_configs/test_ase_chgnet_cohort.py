@@ -28,8 +28,11 @@ class AseChgnetCohortTests(unittest.TestCase):
             directory = self.data / ASE_DIRECTORY / system
             directory.mkdir(parents=True)
             with h5py.File(directory / f"nvt_{CHGNET}.h5", "w") as handle:
-                handle.create_dataset("data/positions", data=np.zeros((4, 2, 3)))
-                handle.create_dataset("data/velocities", data=np.ones((4, 2, 3)))
+                handle.create_dataset("data/positions", data=np.zeros((8, 2, 3)))
+                handle.create_dataset("data/velocities", data=np.ones((8, 2, 3)))
+                handle.create_dataset("data/cell", data=np.repeat((10 * np.eye(3))[None], 8, axis=0))
+                handle.create_dataset("data/atomic_numbers", data=[[29, 29]])
+                handle.create_dataset("data/pbc", data=[True, True, True])
             (directory / f"md_timing_{CHGNET}.csv").write_text(
                 "" if system == HYDROGEN else
                 "calculator,system,n_steps,elapsed_seconds,seconds_per_step,engine\n"
@@ -179,6 +182,7 @@ class AseChgnetCohortTests(unittest.TestCase):
                                overwrite=False, e_min=None, e_max=None)
         with (contextlib.redirect_stdout(io.StringIO()),
               patch.object(vdos, "load_reference_positions", return_value=np.zeros((8, 2, 3))),
+              patch.object(vdos, "load_reference_atomic_numbers", return_value=np.array([29, 29])),
               patch.object(vdos, "spectrum_for_samples", return_value=curve)):
             vdos.process_source(args, ACCELERATED, data_dir=self.data,
                                 reference_dir=self.reference, metadata=self.metadata)

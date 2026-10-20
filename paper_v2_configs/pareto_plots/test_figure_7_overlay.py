@@ -32,7 +32,7 @@ class Figure7OverlayTests(unittest.TestCase):
             for source in order
         ], ignore_index=True)
 
-    def simulate_commands(self, frame, *, layout=None):
+    def simulate_commands(self, frame, *, layout=None, label_distance_points=None):
         """Record commands on mocks; all Matplotlib creation/drawing is bypassed."""
         n_axes = 2 if layout == "panels" else 1
         axes = [MagicMock(name=f"fake_axis_{index}") for index in range(n_axes)]
@@ -57,12 +57,20 @@ class Figure7OverlayTests(unittest.TestCase):
                   patch.object(figure_7, "inward_label_offset", return_value=((3, 3), "left", "bottom")),
                   patch.object(figure_7, "position_model_labels") as labels,
                   contextlib.redirect_stdout(io.StringIO())):
-                figure_7.plot_pareto(frame, output, layout=layout)
+                label_options = {} if label_distance_points is None else {
+                    "label_distance_points": label_distance_points,
+                }
+                figure_7.plot_pareto(frame, output, layout=layout, **label_options)
             self.assertFalse(output.exists())
         close.assert_called_once_with(figure)
         labels.assert_called_once()
         self.assertIs(labels.call_args.args[0], figure)
         self.assertTrue(all(left is right for left, right in zip(labels.call_args.args[1], axes)))
+        expected_distance = 6 if label_distance_points is None else label_distance_points
+        self.assertEqual(labels.call_args.kwargs, {
+            "max_offset_points": expected_distance,
+            "max_distance_points": expected_distance,
+        })
         figure.savefig.assert_called_once()
         figure.suptitle.assert_not_called()
         for axis in axes:
@@ -129,6 +137,11 @@ class Figure7OverlayTests(unittest.TestCase):
             axis.legend.assert_called_once()
             self.assertEqual(axis.annotate.call_count, 3)
         handles.assert_not_called()
+
+    def test_explicit_label_distance_keeps_nearby_labels_without_arrows(self):
+        axes, _, _ = self.simulate_commands(self.frame(), label_distance_points=24)
+        self.assertTrue(all("arrowprops" not in call.kwargs
+                            for call in axes[0].annotate.call_args_list))
 
 
 if __name__ == "__main__":

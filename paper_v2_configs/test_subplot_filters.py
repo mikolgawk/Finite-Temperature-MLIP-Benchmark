@@ -87,6 +87,33 @@ class SubplotFilterTests(unittest.TestCase):
         self.assertAlmostEqual(rdf.tier_mean_rdf_error(MODELS, scores), 200.0 / 3)
         self.assertEqual(scores[MODELS[2]], 100.0)
 
+    def test_rdf_worst_system_counts_failure_penalties_without_saved_curves(self):
+        systems = [SYSTEM, "bulkCu_1000K_Kapil"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scores = root / "scores"
+            saved = root / "saved"
+            scores.mkdir()
+            for model, errors in zip(MODELS[:2], ([10.0, 20.0], [100.0, 20.0])):
+                pd.DataFrame({"System": systems, "RDF_Error": errors}).to_csv(
+                    scores / f"rdf_similarity_scores_same_simulation_length_{model}.csv",
+                    index=False,
+                )
+                folder = saved / "mlip" / model
+                folder.mkdir(parents=True)
+                for system, error in zip(systems, errors):
+                    if error < 100.0:
+                        (folder / f"{system}.csv").write_text("r,g\n0,0\n1,1\n")
+
+            self.assertEqual(rdf.mean_system_rdf_error(SYSTEM, scores, str(saved)), 55.0)
+            self.assertEqual(rdf.select_system_with_worst_mean_rdf_error(
+                systems, scores, str(saved)
+            ), SYSTEM)
+            # Removing the entire curve cache must not change the selection.
+            self.assertEqual(rdf.select_system_with_worst_mean_rdf_error(
+                systems, scores, str(root / "missing-cache")
+            ), SYSTEM)
+
     def test_vdos_selects_valid_curves_without_changing_worst_system_or_means(self):
         frame = pd.DataFrame({
             "system": [SYSTEM] * 3 + ["bulkCu_1000K_Kapil"] * 3,

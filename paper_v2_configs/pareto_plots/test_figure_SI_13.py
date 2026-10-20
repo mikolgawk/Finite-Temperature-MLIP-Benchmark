@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.text import Annotation
 import numpy as np
@@ -34,6 +35,7 @@ class FigureSI13Tests(unittest.TestCase):
                 self.assertFalse(output.exists())
                 save.assert_called_once()
                 fig = save.call_args.args[0]
+                FigureCanvasAgg(fig)
                 fig.canvas.draw()
                 ax = fig.axes[0]
                 renderer = fig.canvas.get_renderer()

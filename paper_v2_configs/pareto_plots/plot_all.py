@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 from figure_SI_17 import ASE_SOURCE, COMPARISON_DIR, TORCHSIM_SOURCE, comparison_available
+from _figure_data import DEFAULT_VDOS_RESULTS_DIR, require_vdos_metrics_file, vdos_metrics_path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -42,6 +43,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plots-dir", type=Path, default=HERE / "plots")
     parser.add_argument("--results-dir", type=Path, default=HERE / "results")
     parser.add_argument(
+        "--vdos-results-dir", type=Path, default=DEFAULT_VDOS_RESULTS_DIR,
+        help="VDOS input root (default: vdos/results; select vdos_legacy/results explicitly for legacy comparisons)",
+    )
+    parser.add_argument(
         "--pressure-file",
         type=Path,
         default=None,
@@ -51,11 +56,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def available_sources() -> list[str]:
+def available_sources(vdos_results_dir: Path | None = None) -> list[str]:
     return [
         source for source in SOURCES
         if (CONFIG_DIR / "rdfs/results" / source / "rdf_similarity_scores_same_simulation_length.csv").is_file()
-        and (CONFIG_DIR / "vdos/results" / source / "vdos_model_mean_ev_normalized_same_simulation_length.csv").is_file()
+        and vdos_metrics_path(source, vdos_results_dir).is_file()
     ]
 
 
@@ -73,11 +78,19 @@ def main() -> None:
     args = parse_args()
     plots_dir = args.plots_dir.resolve()
     results_dir = args.results_dir.resolve()
-    sources = args.sources or available_sources()
+    vdos_results_dir = args.vdos_results_dir.resolve()
+    sources = args.sources or available_sources(vdos_results_dir)
     if not sources and not args.dry_run:
-        raise SystemExit("No sources have both RDF and VDOS result tables")
+        raise SystemExit(
+            f"No sources have both RDF and chosen VDOS result tables in {vdos_results_dir}. "
+            "Compute refined VDOS with paper_v2_configs/vdos/run_vdos_pipeline.py "
+            "--compute-only, or select an explicit --vdos-results-dir for a comparison."
+        )
     if not sources:
         sources = list(SOURCES)
+    if not args.dry_run:
+        for source in dict.fromkeys(sources):
+            require_vdos_metrics_file(vdos_metrics_path(source, vdos_results_dir))
 
     data_dir = CONFIG_DIR / "data"
     timing_plots = plots_dir / "timings"
@@ -131,12 +144,13 @@ def main() -> None:
             )
         )
     else:
-        print("Skipping Figure SI 17: no paired accelerated TorchSim/ASE MD timings.")
+        print("Skipping Figure SI 17: no finished models with paired accelerated TorchSim/ASE MD timings.")
     if {TORCHSIM_SOURCE, ASE_SOURCE}.issubset(sources):
         comparison_command = [
             sys.executable, "-u", str(HERE / "figure_SI_18.py"),
             "--source", TORCHSIM_SOURCE,
             "--source", ASE_SOURCE,
+            "--vdos-results-dir", str(vdos_results_dir),
             "--output-file", str(plots_dir / COMPARISON_DIR / "figure_SI_18.pdf"),
             "--output-csv", str(results_dir / COMPARISON_DIR / "figure_SI_18_metrics.csv"),
         ]
@@ -159,6 +173,7 @@ def main() -> None:
         pressure_file = args.pressure_file or CONFIG_DIR / "pressures/results" / source / "model_pressure_error_metric.csv"
         source_plots = plots_dir / source
         source_results = results_dir / source
+        vdos_file = vdos_metrics_path(source, vdos_results_dir)
         provenance = [
             "--pressure-backend", "torchsim" if "torchsim" in source else "ase",
             "--pressure-mode", "md_accelerated" if source.endswith("-accelerated") else "md_eager",
@@ -175,6 +190,7 @@ def main() -> None:
             (
                 "Figure SI 11",
                 [sys.executable, "-u", str(HERE / "figure_SI_11.py"), *common,
+                 "--vdos-file", str(vdos_file),
                  "--output-plot", str(source_plots / "figure_SI_11.pdf"),
                  "--output-csv", str(source_results / "figure_SI_11.csv"),
                  "--output-json", str(source_results / "figure_SI_11.json")],
@@ -182,6 +198,7 @@ def main() -> None:
             (
                 "Figure SI 12",
                 [sys.executable, "-u", str(HERE / "figure_SI_12.py"), "--source", source,
+                 "--vdos-file", str(vdos_file),
                  "--output-plot", str(source_plots / "figure_SI_12.pdf"),
                  "--output-csv", str(source_results / "figure_SI_12.csv"),
                  "--output-json", str(source_results / "figure_SI_12.json")],
@@ -189,6 +206,7 @@ def main() -> None:
             (
                 "Figure SI 13",
                 [sys.executable, "-u", str(HERE / "figure_SI_13.py"), "--source", source,
+                 "--vdos-metrics-file", str(vdos_file),
                  "--pressure-metrics-file", str(pressure_file.resolve()), *provenance,
                  "--output-file", str(source_plots / "figure_SI_13.pdf"),
                  "--output-csv", str(source_results / "figure_SI_13.csv")],
@@ -198,6 +216,7 @@ def main() -> None:
             stages.insert(0, (
                 "Figure 7",
                 [sys.executable, "-u", str(HERE / "figure_7.py"), "--source", source,
+                 "--vdos-metrics-file", str(vdos_file),
                  "--pressure-metrics-file", str(pressure_file.resolve()), *provenance,
                  "--output-file", str(source_plots / "figure_7.pdf"),
                  "--output-csv", str(source_results / "figure_7_metrics.csv")],

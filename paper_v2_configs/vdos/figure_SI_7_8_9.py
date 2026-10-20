@@ -31,6 +31,9 @@ output suffix remain supported.
 Add --exclude-pt-water to also exclude Pt+H2O from the metric averages.
 """
 
+# Standalone scripts add the shared v2 helper directory before importing it.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -54,7 +57,10 @@ from correlation_labels import inward_label_offset, position_model_labels
 from md_success import torchsim_md_succeeded
 from metric_sources import cohort_trajectory_path
 from system_filters import filter_pressure_systems, is_metal_water_interface, is_molecular_crystal
-from _stable_md_inputs import StableMDFilter
+if __package__:
+    from ._stable_md_inputs import StableMDFilter
+else:
+    from _stable_md_inputs import StableMDFilter
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -158,10 +164,10 @@ def is_hydrogen_system(value) -> bool:
     } else path.name
     return name.split("_", 1)[0] in {"h", "hydrogen"}
 
-# Match v1's text-to-canvas proportions when the figure is fitted into the paper.
+# Keep v1's font scale at paper width; extra height separates dense model clusters.
 FONT_SIZE = 12
 LEGEND_FONT_SIZE = 12
-SPLIT_FIGSIZE = (3.53 * 3, 3.53 * 2)
+SPLIT_FIGSIZE = (3.53 * 3, 9.0)
 
 plt.rcParams.update(
     {
@@ -762,7 +768,7 @@ def load_joined_data(
     return joined
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Create separate 1x3 correlation panels for RDF error, pressure histogram error, and VDOS error "
@@ -863,7 +869,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Output path for the VDOS correlation plot.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     for metric in ("rdf", "pressure", "vdos"):
         argument = f"{metric}_output_file"
         if getattr(args, argument) is None:
@@ -920,6 +926,106 @@ def add_tier_legend(
         frameon=False,
         fontsize=LEGEND_FONT_SIZE,
     )
+
+
+def position_dense_model_labels(fig: plt.Figure, axes: np.ndarray) -> None:
+    """Resolve dense labels with deterministic restarts, keeping names near dots.
+
+    The shared greedy placer can trap several labels at the same left edge.
+    Search side and vertical offsets together, then retain the best bounded
+    placement across several label orders. No connectors are introduced.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    padding = fig.dpi / 72
+    rng = np.random.default_rng(0)
+
+    def overlap(boxes: np.ndarray, others: np.ndarray) -> np.ndarray:
+        if not len(others):
+            return np.zeros((len(boxes), 0))
+        lower = np.maximum(boxes[:, None, :2], others[None, :, :2])
+        upper = np.minimum(boxes[:, None, 2:], others[None, :, 2:])
+        return np.prod(np.maximum(upper - lower, 0), axis=2)
+
+    for ax in axes:
+        labels = [t for t in ax.texts if getattr(t, "_model_point_label", False)]
+        if not labels:
+            continue
+        boundary = ax.get_window_extent(renderer)
+        fixed = np.array([
+            t.get_window_extent(renderer).extents
+            for t in ax.texts if t not in labels
+        ]).reshape(-1, 4)
+        marker_radius = 4 * padding
+        markers = np.array([
+            (x - marker_radius, y - marker_radius, x + marker_radius, y + marker_radius)
+            for collection in ax.collections
+            for x, y in collection.get_offset_transform().transform(collection.get_offsets())
+        ]).reshape(-1, 4)
+        positions, boxes, costs = [], [], []
+        for text in labels:
+            choices = [
+                ((direction * dx, dy), horizontal,
+                 "bottom" if dy > 0 else "top" if dy < 0 else "center")
+                for direction, horizontal in ((1, "left"), (-1, "right"))
+                for dx in (3, 6, 9, 12, 18, 24)
+                for dy in range(-24, 25, 3)
+            ]
+            choices.extend(((0, dy), "center", "bottom" if dy > 0 else "top")
+                           for dy in range(-24, 25, 3) if dy)
+            accepted, accepted_boxes, distances = [], [], []
+            point = ax.transData.transform(text.xy)
+            for offset, horizontal, vertical in choices:
+                text.set_position(offset)
+                text.set_horizontalalignment(horizontal)
+                text.set_verticalalignment(vertical)
+                box = text.get_window_extent(renderer)
+                gap = np.maximum(np.maximum(box.p0 - point, point - box.p1), 0)
+                distance = np.linalg.norm(gap) * 72 / fig.dpi
+                if (distance > 26 or box.x0 < boundary.x0 + padding
+                        or box.x1 > boundary.x1 - padding
+                        or box.y0 < boundary.y0 + padding
+                        or box.y1 > boundary.y1 - padding):
+                    continue
+                accepted.append((offset, horizontal, vertical))
+                accepted_boxes.append(box.extents + [-padding, -padding, padding, padding])
+                distances.append(distance)
+            if not accepted:
+                raise ValueError(f"No nearby in-panel position for {text.get_text()}")
+            positions.append(accepted)
+            boxes.append(np.array(accepted_boxes))
+            costs.append(overlap(boxes[-1], fixed).sum(axis=1) * 1000
+                         + overlap(boxes[-1], markers).sum(axis=1) * 1000
+                         + np.array(distances) * 0.01)
+
+        best_indices, best_cost = None, float("inf")
+        for restart in range(24):
+            chosen = np.array([rng.integers(len(b)) for b in boxes])
+            if restart == 0:
+                chosen = np.array([np.argmin(c) for c in costs])
+            for _ in range(30):
+                changed = False
+                for index in rng.permutation(len(labels)):
+                    other_boxes = np.array([boxes[j][chosen[j]]
+                                            for j in range(len(labels)) if j != index])
+                    scores = costs[index] + 1000 * overlap(boxes[index], other_boxes).sum(axis=1)
+                    candidate = int(np.argmin(scores))
+                    changed |= chosen[index] != candidate
+                    chosen[index] = candidate
+                if not changed:
+                    break
+            placed = np.array([boxes[i][chosen[i]] for i in range(len(labels))])
+            score = (sum(costs[i][chosen[i]] for i in range(len(labels)))
+                     + 1000 * np.triu(overlap(placed, placed), 1).sum())
+            if score < best_cost:
+                best_indices, best_cost = chosen.copy(), score
+            if best_cost < 100:
+                break
+        for text, choices, index in zip(labels, positions, best_indices):
+            offset, horizontal, vertical = choices[index]
+            text.set_position(offset)
+            text.set_horizontalalignment(horizontal)
+            text.set_verticalalignment(vertical)
 
 
 def plot_single_error_figure(
@@ -1026,9 +1132,14 @@ def plot_single_error_figure(
     add_tier_legend(fig, tier_colors)
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    position_model_labels(fig, axes.ravel(), max_offset_points=18)
+    label_options = {"max_offset_points": 24, "max_distance_points": 24}
+    position_model_labels(fig, axes.ravel(), **label_options)
     fig.tight_layout(rect=[0, 0, 1, 0.90])
-    position_model_labels(fig, axes.ravel(), max_offset_points=18)
+    position_model_labels(fig, axes.ravel(), **label_options)
+    # Every metric can contain coincident UMA/PET/GRACE points. Use the same
+    # deterministic bounded search for all three rows, rather than leaving
+    # the pressure/VDOS rows with greedy labels trapped in a dense cluster.
+    position_dense_model_labels(fig, axes.ravel())
     fig.savefig(output_path)
     print(f"Saved {output_path}")
     plt.close(fig)

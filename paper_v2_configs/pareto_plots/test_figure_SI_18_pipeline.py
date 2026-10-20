@@ -30,6 +30,7 @@ class FigureSI18PipelineTests(unittest.TestCase):
         with (patch.object(sys, "argv", argv),
               patch.object(plot_all, "available_sources", return_value=list(available)),
               patch.object(plot_all, "comparison_available", return_value=False),
+              patch.object(plot_all, "require_vdos_metrics_file"),
               patch.object(plot_all, "run_stage", return_value=True) as run_stage,
               contextlib.redirect_stdout(io.StringIO())):
             plot_all.main()
@@ -127,6 +128,30 @@ class FigureSI18PipelineTests(unittest.TestCase):
             selected = [command for command in self.all_commands
                         if Path(command[2]).name == f"figure_SI_{number}.py"]
             self.assertEqual([self.option_values(command, "--source")[0] for command in selected], sources)
+
+    def test_all_vdos_dependent_commands_receive_explicit_refined_inputs(self):
+        commands = self.run_pipeline([TORCHSIM, ASE])
+        combined = self.combined_commands(commands)[0]
+        root = plot_all.DEFAULT_VDOS_RESULTS_DIR
+        self.assertEqual(self.option_values(combined, "--vdos-results-dir"), [str(root)])
+        for command in self.all_commands:
+            script = Path(command[2]).name
+            if script in {"figure_7.py", "figure_SI_11.py", "figure_SI_12.py", "figure_SI_13.py"}:
+                source = self.option_values(command, "--source")[0]
+                flag = "--vdos-file" if script in {"figure_SI_11.py", "figure_SI_12.py"} else "--vdos-metrics-file"
+                self.assertEqual(self.option_values(command, flag),
+                                 [str(plot_all.vdos_metrics_path(source, root))])
+
+    def test_explicit_legacy_root_is_forwarded_to_all_comparison_sources(self):
+        root = self.root / "vdos_legacy/results"
+        commands = self.run_pipeline([TORCHSIM, ASE], extra_args=("--vdos-results-dir", str(root)))
+        self.assertEqual(self.option_values(self.combined_commands(commands)[0], "--vdos-results-dir"), [str(root)])
+        for command in self.all_commands:
+            for flag in ("--vdos-file", "--vdos-metrics-file"):
+                values = self.option_values(command, flag)
+                if values:
+                    source = self.option_values(command, "--source")[0]
+                    self.assertEqual(values, [str(plot_all.vdos_metrics_path(source, root))])
 
 
 if __name__ == "__main__":

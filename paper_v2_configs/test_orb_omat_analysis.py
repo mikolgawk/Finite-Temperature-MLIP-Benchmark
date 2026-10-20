@@ -227,7 +227,7 @@ class OrbOmatAnalysisTests(unittest.TestCase):
                         if metric != "md":
                             helper.early_cli.assert_called_once()
                         if metric == "pressure":
-                            source = "mlip-trajs-ase" + ("" if eager else "-accelerated")
+                            source = "mlip-trajs-ase-eager" if eager else "mlip-trajs-ase-accelerated"
                             self.assertEqual(helper.early_cli.call_args.kwargs["default_traj_dir"],
                                              ROOT / "data" / source)
                         if not eager or metric == "md":

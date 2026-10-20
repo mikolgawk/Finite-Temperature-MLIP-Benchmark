@@ -15,6 +15,9 @@ Objectives:
 - minimize mean MD time per step [ms]
 """
 
+# Standalone scripts add the shared v2 helper directory before importing it.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -351,6 +354,9 @@ def plot_pareto(df: pd.DataFrame, output_file: Path) -> None:
     x_vals = all_df["mean_time_per_step_ms"].to_numpy()
     y_vals = all_df["VDOS Error [%]"].to_numpy()
     apply_pareto_style(ax, x_vals, y_vals, ylabel="VDOS error [%]")
+    # A fixed location prevents loc="best" from moving the legend between the
+    # layout and PDF render passes, which can put it outside the tight crop.
+    ax.legend(loc="upper right", frameon=True, fontsize=FONT_SIZE)
     for xi, yi, model in zip(x_vals, y_vals, all_df["model"]):
         offset, horizontal, vertical = inward_label_offset(ax, float(xi))
         label = ax.annotate(

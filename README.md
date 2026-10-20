@@ -43,6 +43,13 @@ Then generate all four metric sets with the `uv` script:
 uv run --script paper_v2_configs/generate_metrics.py
 ```
 
+The default VDOS analysis is the paper's refined mass-weighted Welch method in
+[`vdos/`](paper_v2_configs/vdos/README.md): a 2 ps target segment,
+50% overlap, at least four segments and fourfold FFT padding. Its metrics and
+plots are saved under `vdos/results/` and `vdos/plots/`.
+The standard Pareto scripts read these refined metrics too. The original
+`vdos_legacy/` analysis remains available for explicit historical comparisons.
+
 V2 metric computations, raw energy/force and pressure evaluations, and timing
 analysis exclude the five molecular crystals by default: anthracene,
 naphthalene, pentacene, picene, and tetracene. Pass
@@ -51,13 +58,16 @@ Standalone RDF and VDOS commands use the same default. The remaining workload
 contains 14 systems before any metric-specific exclusions or failed MD runs.
 Pressure evaluation, aggregation, and plots always exclude the Pt(111) + 24 H2O
 metal-water interface, including rows in previously saved pressure results.
-The small RDF, pressure, and VDOS panels omit model curves with 100% error.
+The small RDF, VDOS, and pressure-histogram-error panels omit model curves with
+100% error.
 Successful RDF and VDOS runs with valid data and 100% error retain text-only
 legend entries; failed runs and missing data stay out of the legends.
-Figure 4 names each tier's worst model by valid pressure MAE in its legend,
-including models with 100% histogram error, and shows the MAE in GPa. The worst
-model's histogram is always omitted. Figure SI6's legends continue to omit
-model names with 100% histogram error.
+The pressure MAE panel in Figure 4 draws each tier's best model as a solid
+histogram and its worst model as a dashed histogram, including successful runs
+with 100% histogram error. The legends report their MAEs in GPa. If the same
+model is both best and worst, it is drawn once. Failed MD runs remain excluded
+from the MAE analysis. Figure SI6's legends continue to omit model names with
+100% histogram error.
 Figure 4 draws one reference histogram per tier, labeled `Reference`, using the
 best plotted model's matched reference when available.
 Pressure-MAE values and tier means retain their GPa units.
@@ -85,7 +95,8 @@ uv run --script paper_v2_configs/generate_metrics.py \
 
 All four metrics are stored separately by trajectory source under
 `paper_v2_configs/<metric-directory>/results/<source>/`, including
-`mlip-trajs-torchsim-eager` and `mlip-trajs-torchsim-accelerated`.
+`mlip-trajs-torchsim-eager` and `mlip-trajs-torchsim-accelerated`. The metric
+directories are `e_f_rmses`, `pressures`, `rdfs`, and `vdos`.
 The TorchSim accelerated paper cohort also includes **TorchSim eager eSEN-30M-OAM
 and EquiformerV2, and ASE eager CHGNet** runs by default. This applies to RDF, VDOS, pressure histogram
 errors, pressure MAE, energy/force RMSE, correlations, and timing/Pareto plots.
@@ -130,6 +141,11 @@ each source, even when model names are identical. Existing raw RMSE and pressure
 are still supported. Older aggregate CSVs at the results root are no longer used
 by the plotting entry points.
 
+RMSE aggregation excludes incomplete, missing, and audited physically failed MD
+runs for both ASE and TorchSim, in eager and accelerated modes. Successful runs
+require a matching trajectory and completed timing record. The ASE eager data
+directory may be named `mlip-trajs-ase-eager` or `mlip-trajs-ase`.
+
 RMSE aggregation also discovers evaluations under
 `paper_v2_configs/e_f_rmses/data/e-f-predictions-torchsim/`, including its
 `md_eager/` and `md_accelerated/` subdirectories.
@@ -158,11 +174,11 @@ RDF Figure 3 uses an 11.12 × 14.30-inch canvas for two rows of systems, with
 v1 sizes: a 10.59 × 12.53-inch canvas, 10-point text, and 6-point legends.
 They retain the centered 3×2 system layout, with v1's tighter column and tier
 spacing and the same relative heights for the overview and system panels.
-Overview tier labels, median values, and panel letters sit inside the plot box;
-vertical median connectors are split at axis breaks. Figure 4 adds the worst
-model's name and pressure MAE to each tier legend without drawing its predicted
-histogram. Figure SI6 omits all model names with 100% histogram error. Metric
-computations and tier means retain the existing failure policy.
+Overview tier labels and median values sit inside the plot box; Figure 4's
+overview panel letter sits outside it. Vertical median connectors are split at
+axis breaks. Figure 4 draws the best and worst pressure histograms as solid and
+dashed lines, respectively. Figure SI6 omits all model names with 100% histogram
+error. Metric computations and tier means retain the existing failure policy.
 VDOS comparison panels use the v1 RDF canvas of 10.59 × 12.53 inches, with
 10-point text and 6-point legends.
 Additional system rows and crowded RDF or pressure legends can add height.
@@ -232,13 +248,21 @@ uv run --script paper_v2_configs/pareto_plots/plot_all.py
 ```
 
 The Pareto plotting pipeline also includes Figure SI17, a timings-only comparison
-of native accelerated TorchSim and ASE runs. For each shared model it averages
+of native accelerated TorchSim and ASE runs. Only models with a terminal success
+or failure for every selected reference system in both runners are included.
+Empty timing CSVs are explicit failure markers; missing outputs or an unfinished
+trajectory without a terminal marker do not establish completion. Failed systems
+are allowed in a finished model's coverage but do not contribute timings.
+For each shared model it averages
 step times over the same systems with completed, matching MD workloads in both
 runners, excluding molecular crystals and registered failed runs. The panels
 show mean step times and their ASE/TorchSim ratio; ratios above one mean TorchSim
 is faster. Each model label includes its number of matched systems. Borrowed
 eager runs in the paper's accelerated cohort are not used in this comparison.
 The pipeline skips SI17 when no paired timing data is available.
+PET-OAM-XL and PET-OMAT-XL are matched across runners using their timing engine
+metadata: ASE's unsuffixed model names match TorchSim's `-torchscript` names
+when the ASE records explicitly identify TorchScript inference.
 
 Run SI17 independently from the existing MD timing CSVs and matching trajectories:
 
@@ -274,7 +298,16 @@ The runners keep separate Pareto frontiers: TorchSim uses circles and a solid
 line; ASE uses triangles and a dashed line. Colours still denote model tiers,
 and model names remain beside their points. Each runner retains its own metrics
 and available model configurations, including native ASE PET-OAM-XL when its
-metrics are available. The comparison is saved as
+metrics are available. For each configuration shown in both runners, step times
+are averaged over the same successful systems with matching step counts, time
+steps and recording intervals, using SI17's native timing validation. Accuracy
+metrics retain all existing failure penalties. Configurations shown for only
+one runner retain their usual cohort timing. The SI18 metric CSV records
+`n_timing_systems`, `timing_systems` and `timing_basis`; a shared configuration
+without any matched timing workloads is omitted.
+`ASE` UMA-S-P1 (turbo) and UMA-M-P1 (turbo) are excluded from SI18 only;
+their TorchSim counterparts and the underlying benchmark metrics are retained.
+The comparison is saved as
 `pareto_plots/plots/torchsim_vs_ase_accelerated/figure_SI_18.pdf`, with
 `figure_SI_18_metrics.csv` and `figure_SI_18_frontier.csv` under the matching
 results directory. Existing metrics are sufficient; add `--data-only` to either
@@ -298,8 +331,8 @@ uv run --script paper_v2_configs/generate_metrics.py \
 Timing means use completed trajectory/timing pairs, excluding registered
 failures. Molecular crystals remain excluded by default.
 
-The VDOS plotting entry point includes Figure 6 and its SI companion, saving the
-two 3×3 correlation figures under `vdos/plots/<source>/`.
+The refined VDOS plotting entry point includes Figure 6 and its SI companion,
+saving the two 3×3 correlation figures under `vdos/plots/<source>/`.
 It creates the standard Figure 6 and 1×3 correlations only; automatic
 no-hydrogen and combined no-hydrogen/no-Pt+H₂O sets have been removed.
 To create an exclusion variant manually, use `--exclude-hydrogen`,
@@ -328,6 +361,33 @@ uv run --script paper_v2_configs/pareto_plots/plot_all.py \
 The correlation figures require the F1 and k-SRME score CSVs described
 in the [analysis-pipeline guide](INFO.md#analysis-pipeline). A wrapper attempts
 all of its plot stages and reports any unavailable prerequisites at the end.
+
+For an explicit comparison with the historical VDOS scores, select their result
+root rather than replacing the refined defaults:
+
+```bash
+uv run --script paper_v2_configs/pareto_plots/plot_all.py \
+  --source mlip-trajs-torchsim-accelerated \
+  --vdos-results-dir paper_v2_configs/vdos_legacy/results \
+  --plots-dir /tmp/mlip-legacy-pareto/plots \
+  --results-dir /tmp/mlip-legacy-pareto/results
+```
+
+Native ASE VDOS can be computed and plotted with the refined pipeline. Its
+ordinary VDOS figures are supported; TorchSim-only dependent plotting stages
+are skipped. Figure SI18 uses both accelerated runners' refined summaries:
+
+```bash
+uv run --script paper_v2_configs/vdos/run_vdos_pipeline.py \
+  --source mlip-trajs-ase-accelerated --compute-only
+uv run --script paper_v2_configs/vdos/figure_SI_18.py
+```
+
+To collect existing figures and metrics for sharing, use
+`python paper_v2_configs/vdos/package_plots.py`. The ZIP includes the
+TorchSim figures and summaries, native ASE summaries, and the SI18 comparison
+figure and tables when available. See the
+[refined VDOS guide](paper_v2_configs/vdos/README.md) for packaging options.
 
 ## Evaluating a new potential
 

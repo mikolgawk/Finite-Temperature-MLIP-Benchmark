@@ -34,7 +34,7 @@ Use --data-only to export the model metrics and frontier without plotting.
 from __future__ import annotations
 
 import argparse
-from _figure_data import pressure_path
+from _figure_data import pressure_path, require_vdos_metrics_file, vdos_metrics_path
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -128,8 +128,7 @@ def source_input_paths(source: str) -> tuple[Path, Path, Path, str]:
 		SCRIPTS_DIR / "data" / source,
 		SCRIPTS_DIR / "rdfs" / "results" / source
 		/ "rdf_similarity_scores_same_simulation_length.csv",
-		SCRIPTS_DIR / "vdos" / "results" / source
-		/ "vdos_model_mean_ev_normalized_same_simulation_length.csv",
+		vdos_metrics_path(source),
 		"md_accelerated" if source.endswith("-accelerated") else "md_eager",
 	)
 
@@ -349,11 +348,82 @@ def load_model_avg_timings(timings_dir: Path, include_molecular_crystals: bool =
 	return pd.DataFrame(rows)
 
 
+def apply_matched_runner_timings(
+	frame: pd.DataFrame, *, timings_dirs: dict[str, Path],
+	include_molecular_crystals: bool = False,
+) -> pd.DataFrame:
+	"""Pair shared configurations' timing workloads without changing their errors.
+
+	Reuse SI17's native-run validation and PET execution metadata. Configurations
+	shown for only one runner keep their ordinary cohort timing; shared ones must
+	have at least one successful, matching workload in both runners.
+	"""
+	from figure_SI_17 import (
+		ASE_SOURCE, TORCHSIM_SOURCE, compare_timings, load_native_timings, timing_model_key,
+	)
+
+	sources = (TORCHSIM_SOURCE, ASE_SOURCE)
+	if set(frame["dataset"]) != set(sources):
+		raise ValueError("Matched runner timings require both accelerated TorchSim and ASE cohorts")
+	observations = {
+		source: load_native_timings(timings_dirs[source], source, include_molecular_crystals)[0]
+		for source in sources
+	}
+	keys = pd.Series(index=frame.index, dtype=object)
+	for source in sources:
+		aliases: dict[str, set[str]] = {}
+		for row in observations[source].itertuples():
+			aliases.setdefault(metric_model_key(row.raw_model), set()).add(row.model)
+		for index, row in frame.loc[frame["dataset"].eq(source)].iterrows():
+			candidates = aliases.get(metric_model_key(row["model"]), {timing_model_key(row["model"])})
+			if len(candidates) != 1:
+				raise ValueError(f"Ambiguous timing configuration for {source}: {row['model']}")
+			keys.at[index] = next(iter(candidates))
+	shared = set(keys[frame["dataset"].eq(TORCHSIM_SOURCE)]) & set(keys[frame["dataset"].eq(ASE_SOURCE)])
+	paired, summary = compare_timings(observations[TORCHSIM_SOURCE], observations[ASE_SOURCE])
+	summary = summary.set_index("model")
+	matched_systems = paired.groupby("model")["system"].agg(lambda values: ";".join(sorted(values)))
+	out = frame.copy()
+	out["n_timing_systems"] = pd.Series(pd.NA, index=out.index, dtype="Int64")
+	out["timing_systems"] = ""
+	out["timing_basis"] = "runner-specific"
+	keep = pd.Series(True, index=out.index)
+	for index, row in out.iterrows():
+		key = keys.at[index]
+		if key not in shared:
+			continue
+		if key not in summary.index:
+			keep.at[index] = False
+			continue
+		column = "torchsim_mean_ms_per_step" if row["dataset"] == TORCHSIM_SOURCE else "ase_mean_ms_per_step"
+		out.at[index, "mean_time_per_step_ms"] = summary.at[key, column]
+		out.at[index, "n_timing_systems"] = summary.at[key, "n_common_systems"]
+		out.at[index, "timing_systems"] = matched_systems.at[key]
+		out.at[index, "timing_basis"] = "matched systems"
+	dropped = sorted(set(keys[~keep]))
+	if dropped:
+		print("[INFO] Excluding shared configurations without matching successful MD workloads: " + ", ".join(dropped))
+	return out.loc[keep].reset_index(drop=True)
+
+
+def exclude_model_configurations(
+	frame: pd.DataFrame, excluded_models_by_source: dict[str, set[str]],
+) -> pd.DataFrame:
+	"""Apply a figure's source-specific exclusions before finding its frontier."""
+	keep = pd.Series(True, index=frame.index)
+	models = frame["model"].map(metric_model_key)
+	for source, excluded in excluded_models_by_source.items():
+		keys = {metric_model_key(model) for model in excluded}
+		keep &= ~(frame["dataset"].eq(source) & models.isin(keys))
+	return frame.loc[keep].reset_index(drop=True)
+
+
 def load_rdf_vdos_metrics(
 	rdf_metrics_file: Path,
 	vdos_metrics_file: Path,
 ) -> pd.DataFrame:
 	"""Merge the source-specific RDF and VDOS outputs produced by V2."""
+	require_vdos_metrics_file(vdos_metrics_file)
 	rdf_df = pd.read_csv(rdf_metrics_file)
 	vdos_df = pd.read_csv(vdos_metrics_file)
 
@@ -642,7 +712,7 @@ def comparison_layout(sources: list[str], layout: str | None = None) -> str:
 
 def plot_pareto(
 	df: pd.DataFrame, output_file: Path, *, layout: str | None = None,
-	font_size: float = FONT_SIZE,
+	font_size: float = FONT_SIZE, label_distance_points: int = 6,
 ) -> None:
 	all_df = df.copy()
 	if "dataset" not in all_df.columns:
@@ -760,7 +830,10 @@ def plot_pareto(
 	axes[0].set_ylabel(r"$\bar{E}_{RPV}$ [%]", fontsize=font_size)
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 	fig.tight_layout()
-	position_model_labels(fig, axes, max_offset_points=6, max_distance_points=6)
+	position_model_labels(
+		fig, axes, max_offset_points=label_distance_points,
+		max_distance_points=label_distance_points,
+	)
 	fig.savefig(output_file, bbox_inches="tight", pad_inches=0.02)
 	plt.close(fig)
 
@@ -774,6 +847,9 @@ def run_pareto_figure(
 	*, figure_name: str, allowed_sources: tuple[str, ...],
 	default_sources: tuple[str, ...], required_sources: tuple[str, ...] | None = None,
 	argv: list[str] | None = None, font_size: float = FONT_SIZE,
+	label_distance_points: int = 6,
+	matched_runner_timings: bool = False,
+	excluded_models_by_source: dict[str, set[str]] | None = None,
 ) -> None:
 	"""Share metric loading, independent frontiers and styling across Figures 7/SI18."""
 	parser = argparse.ArgumentParser(
@@ -818,7 +894,11 @@ def run_pareto_figure(
 	parser.add_argument(
 		"--vdos-metrics-file",
 		default=None,
-		help="VDOS model metrics CSV (default: vdos/results/<source>/...).",
+		help="VDOS model metrics CSV for one source (default: vdos/results/<source>/...).",
+	)
+	parser.add_argument(
+		"--vdos-results-dir", type=Path, default=None,
+		help="VDOS results root for all selected sources (default: vdos/results; select vdos_legacy/results explicitly for a legacy comparison).",
 	)
 
 	parser.add_argument(
@@ -888,6 +968,8 @@ def run_pareto_figure(
 	sources = list(dict.fromkeys(args.source or default_sources))
 	if required_sources is not None and set(sources) != set(required_sources):
 		parser.error(f"{figure_name} requires both sources: {', '.join(required_sources)}")
+	if args.vdos_metrics_file is not None and args.vdos_results_dir is not None:
+		parser.error("--vdos-metrics-file and --vdos-results-dir cannot be used together")
 	if len(sources) > 1 and any(
 		value is not None
 		for value in [args.timings_dir, args.combined_metrics_file, args.rdf_metrics_file, args.vdos_metrics_file]
@@ -897,8 +979,17 @@ def run_pareto_figure(
 		parser.error("--pressure-metrics-file must be supplied once or once per --source")
 
 	merged_frames = []
+	timings_dirs = {}
 	for index, source in enumerate(sources):
 		default_timings, default_rdf, default_vdos, default_pressure_mode = source_input_paths(source)
+		timings_dirs[source] = Path(args.timings_dir) if args.timings_dir else default_timings
+		vdos_file = (
+			Path(args.vdos_metrics_file) if args.vdos_metrics_file
+			else vdos_metrics_path(source, args.vdos_results_dir) if args.vdos_results_dir is not None
+			else default_vdos
+		)
+		if not args.combined_metrics_file:
+			require_vdos_metrics_file(vdos_file)
 		pressure_file = (
 			Path(args.pressure_metrics_file[index if len(args.pressure_metrics_file or []) > 1 else 0])
 			if args.pressure_metrics_file
@@ -909,7 +1000,7 @@ def run_pareto_figure(
 				timings_dir=Path(args.timings_dir) if args.timings_dir else default_timings,
 				combined_metrics_file=Path(args.combined_metrics_file) if args.combined_metrics_file else None,
 				rdf_metrics_file=Path(args.rdf_metrics_file) if args.rdf_metrics_file else default_rdf,
-				vdos_metrics_file=Path(args.vdos_metrics_file) if args.vdos_metrics_file else default_vdos,
+				vdos_metrics_file=vdos_file,
 				pressure_metrics_file=pressure_file,
 				pressure_scale_gpa=args.pressure_scale_gpa,
 				clip_pressure_error=not args.no_pressure_clip,
@@ -919,7 +1010,15 @@ def run_pareto_figure(
 				include_molecular_crystals=args.include_molecular_crystals,
 			)
 		)
-	merged = mark_pareto_frontier(pd.concat(merged_frames, ignore_index=True))
+	merged = pd.concat(merged_frames, ignore_index=True)
+	if excluded_models_by_source:
+		merged = exclude_model_configurations(merged, excluded_models_by_source)
+	if matched_runner_timings:
+		merged = apply_matched_runner_timings(
+			merged, timings_dirs=timings_dirs,
+			include_molecular_crystals=args.include_molecular_crystals,
+		)
+	merged = mark_pareto_frontier(merged)
 
 	accelerated_pair = {"mlip-trajs-torchsim-accelerated", "mlip-trajs-ase-accelerated"}
 	output_group = "torchsim_vs_ase_accelerated" if set(sources) == accelerated_pair else "__".join(sources)
@@ -939,7 +1038,7 @@ def run_pareto_figure(
 	output_file = Path(args.output_file) if args.output_file else SCRIPT_DIR / "plots" / output_group / f"{figure_name}.pdf"
 	plot_pareto(
 		merged, output_file, layout=comparison_layout(sources, args.layout),
-		font_size=font_size,
+		font_size=font_size, label_distance_points=label_distance_points,
 	)
 
 

@@ -57,8 +57,11 @@ class MdFailurePolicyTest(unittest.TestCase):
                     folder = self.data / source / system
                     folder.mkdir(parents=True, exist_ok=True)
                     with h5py.File(folder / f"nvt_{model}.h5", "w") as handle:
-                        handle.create_dataset("data/positions", data=np.zeros((4, 2, 3)))
-                        handle.create_dataset("data/velocities", data=np.ones((4, 2, 3)))
+                        handle.create_dataset("data/positions", data=np.zeros((8, 2, 3)))
+                        handle.create_dataset("data/velocities", data=np.ones((8, 2, 3)))
+                        handle.create_dataset("data/cell", data=np.repeat((10 * np.eye(3))[None], 8, axis=0))
+                        handle.create_dataset("data/atomic_numbers", data=[[29, 29]])
+                        handle.create_dataset("data/pbc", data=[True, True, True])
                     timing = folder / f"md_timing_{model}.csv"
                     timing.write_text("" if model == NEQUIP and system == HYDROGEN else
                                       f"calculator,system,n_steps\n{model},{system},100\n")
@@ -379,7 +382,8 @@ class MdFailurePolicyTest(unittest.TestCase):
                                        numerical_mlip_velocities=False, pad_factor=1, chunk_size=4,
                                        overwrite=False, e_min=None, e_max=None)
                 with (
-                    patch.object(vdos, "load_reference_positions", return_value=np.zeros((4, 2, 3))),
+                    patch.object(vdos, "load_reference_positions", return_value=np.zeros((8, 2, 3))),
+                    patch.object(vdos, "load_reference_atomic_numbers", return_value=np.array([29, 29])),
                     patch.object(vdos, "spectrum_for_samples", return_value=curve),
                 ):
                     vdos.process_source(args, source, data_dir=self.data,

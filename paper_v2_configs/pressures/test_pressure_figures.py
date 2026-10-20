@@ -24,7 +24,7 @@ INTERFACE = "Pt111w24H2O_380K_Heenen_VASP"
 
 
 class PressureFiguresTest(unittest.TestCase):
-    def test_full_error_histograms_are_hidden_and_mae_worst_is_legend_only(self) -> None:
+    def test_mae_draws_worst_histograms_while_si6_keeps_full_error_curves_hidden(self) -> None:
         values = np.array([0.1, 0.2, 0.3, 0.4])
         references = {"mace-mp-0": values, "orb-v2": values}
         predictions = {"mace-mp-0": values, "orb-v2": values + 1000}
@@ -53,11 +53,16 @@ class PressureFiguresTest(unittest.TestCase):
             panels = [("Hydrogen", "H_1050K_Rupp_QE", references, predictions,
                        scores, np.linspace(0.1, 1000.4, 6))]
             with self.subTest(figure=module.__name__), tempfile.TemporaryDirectory() as directory:
+                window_patch = (
+                    patch.object(module, "distribution_axis_windows", wraps=module.distribution_axis_windows)
+                    if module is figure_4 else contextlib.nullcontext()
+                )
                 with (
                     patch.object(module, "collect_histogram_panels", return_value=panels),
                     patch.object(module, overview),
                     patch.object(module.plt, "savefig"),
                     patch.object(module.plt, "close"),
+                    window_patch as axis_windows,
                     contextlib.redirect_stdout(io.StringIO()),
                 ):
                     module.plot_combined(Path(directory), None, ranking, 5,
@@ -75,11 +80,24 @@ class PressureFiguresTest(unittest.TestCase):
                                         for label in legend_text))
                     self.assertTrue(any("Worst: orb-v3-conservative-inf-omat" in " ".join(label.split())
                                         for label in legend_text))
-                    self.assertFalse(any(label.startswith("Worst:") for label in drawn_labels))
+                    self.assertTrue(any("Worst: orb-v2" in " ".join(label.split())
+                                        for label in drawn_labels))
+                    self.assertTrue(any("Worst: orb-v3-conservative-inf-omat" in " ".join(label.split())
+                                        for label in drawn_labels))
+                    selected_arrays = axis_windows.call_args.args[0]
+                    self.assertTrue(any(array is predictions["orb-v2"] for array in selected_arrays))
+                    self.assertTrue(any(array is predictions["orb-v3-omat"] for array in selected_arrays))
+                    # The axis break must give actual far-away worst curves a
+                    # visible interval, rather than plotting them off screen.
+                    histogram_limits = [ax.get_xlim() for ax in fig.axes
+                                        if any("Worst: orb-v2" in label
+                                               for label in ax.get_legend_handles_labels()[1])]
+                    self.assertTrue(any(lo <= 1000.1 and hi >= 1000.4
+                                        for lo, hi in histogram_limits))
                 else:
                     self.assertFalse(any("orb-v2" in label for label in legend_text))
+                    self.assertFalse(any("orb-v2" in label for label in drawn_labels))
                 self.assertFalse(any("MACE-MPA" in label for label in legend_text))
-                self.assertFalse(any("orb-v2" in label for label in drawn_labels))
                 self.assertFalse(any("MACE-MPA" in label for label in drawn_labels))
                 full_error_labels = [label for label in legend_text
                                      if "100.0%" in label and "mean error:" not in " ".join(label.split())]
@@ -99,7 +117,7 @@ class PressureFiguresTest(unittest.TestCase):
                 module.plt.close(fig)
         pd.testing.assert_frame_equal(ranking, original)
 
-    def test_mae_worst_is_legend_only_for_visible_and_full_error_models(self) -> None:
+    def test_mae_draws_both_best_and_worst_even_when_worst_has_full_histogram_error(self) -> None:
         models = ["mace-mp-0", "grace-mp", "chgnet", "failed"]
         reference = np.array([0., 100., 200., 300.])
         references = {model: reference.copy() for model in models[:3]}
@@ -118,7 +136,7 @@ class PressureFiguresTest(unittest.TestCase):
                 best, worst, tier_scores = figure_4.choose_best_worst_from_scores(models, scores, visible)
                 self.assertEqual((best, worst), (models[0], models[2]))
                 draw = Mock()
-                handle, label = figure_4.draw_tier_histograms(
+                result = figure_4.draw_tier_histograms(
                     draw, models, references, values, best, worst, tier_scores, "red",
                 )
                 model_calls = [call for call in draw.call_args_list if call.kwargs["color"] != "black"]
@@ -127,21 +145,22 @@ class PressureFiguresTest(unittest.TestCase):
                 self.assertIs(reference_calls[0].args[0], references[best])
                 self.assertEqual(reference_calls[0].kwargs["label"], "Reference")
                 self.assertEqual(reference_calls[0].kwargs["linestyle"], "-")
-                self.assertEqual(len(model_calls), 1)
+                self.assertIsNone(result)
+                self.assertEqual(len(model_calls), 2)
                 self.assertIs(model_calls[0].args[0], values[best])
-                self.assertFalse(any(call.args[0] is values[worst] for call in draw.call_args_list))
-                self.assertEqual(label, f"Worst: CHGNet ({worst_offset:.2f} GPa)")
-                self.assertEqual(len(handle.get_xdata()), 0)
-                self.assertEqual(len(handle.get_ydata()), 0)
-                self.assertIsNone(handle.axes)
+                self.assertEqual(model_calls[0].kwargs["label"], "Best: MACE-MP-0 (0.00 GPa)")
+                self.assertEqual(model_calls[0].kwargs["linestyle"], "-")
+                self.assertIs(model_calls[1].args[0], values[worst])
+                self.assertEqual(model_calls[1].kwargs["label"], f"Worst: CHGNet ({worst_offset:.2f} GPa)")
+                self.assertEqual(model_calls[1].kwargs["linestyle"], "--")
                 self.assertEqual(tier_scores, {model: score for model, score in scores.items()
                                               if np.isfinite(score)})
                 self.assertEqual(scores, original)
 
-    def test_mae_worst_legend_remains_when_all_histograms_are_hidden(self) -> None:
+    def test_mae_draws_worst_when_all_models_have_full_histogram_error(self) -> None:
         models = ["mace-mp-0", "chgnet"]
         reference = np.array([0., 1., 2., 3.])
-        references = dict.fromkeys(models, reference)
+        references = {models[0]: reference, models[1]: reference + 0.1}
         values = {model: reference + offset for model, offset in zip(models, (1000., 2000.))}
         scores = dict(zip(models, (1000., 2000.)))
         visible = figure_4.visible_pressure_models(references, values, 10)
@@ -149,31 +168,45 @@ class PressureFiguresTest(unittest.TestCase):
         best, worst, tier_scores = figure_4.choose_best_worst_from_scores(models, scores, visible)
         self.assertEqual((best, worst), (None, "chgnet"))
         draw = Mock()
-        handle, label = figure_4.draw_tier_histograms(
+        result = figure_4.draw_tier_histograms(
             draw, models, references, values, best, worst, tier_scores, "red",
         )
-        draw.assert_called_once()
-        self.assertIs(draw.call_args.args[0], reference)
-        self.assertEqual(draw.call_args.kwargs["color"], "black")
-        self.assertEqual(draw.call_args.kwargs["label"], "Reference")
-        self.assertEqual(label, "Worst: CHGNet (2000.00 GPa)")
-        self.assertEqual(len(handle.get_xdata()), 0)
+        self.assertIsNone(result)
+        self.assertEqual(draw.call_count, 2)
+        reference_call, worst_call = draw.call_args_list
+        self.assertIs(reference_call.args[0], references[worst])
+        self.assertEqual(reference_call.kwargs["color"], "black")
+        self.assertEqual(reference_call.kwargs["label"], "Reference")
+        self.assertIs(worst_call.args[0], values[worst])
+        self.assertEqual(worst_call.kwargs["linestyle"], "--")
+        self.assertEqual(worst_call.kwargs["label"], "Worst: CHGNet (2000.00 GPa)")
 
-    def test_mae_single_or_tied_models_do_not_draw_the_worst_histogram(self) -> None:
+    def test_mae_single_model_draws_once_and_tied_distinct_models_draw_both(self) -> None:
         models = ["mace-mp-0", "chgnet"]
         scores = dict.fromkeys(models, 0.)
         best, worst, _ = figure_4.choose_best_worst_from_scores(models, scores)
         self.assertEqual((best, worst), tuple(models))
         reference = np.array([0., 1., 2., 3.])
+        predictions = {model: reference.copy() for model in models}
+        draw = Mock()
+        figure_4.draw_tier_histograms(
+            draw, models, dict.fromkeys(models, reference), predictions,
+            best, worst, scores, "red",
+        )
+        model_calls = [call for call in draw.call_args_list if call.kwargs["color"] != "black"]
+        self.assertEqual(len(model_calls), 2)
+        self.assertEqual([call.kwargs["linestyle"] for call in model_calls], ["-", "--"])
         best, worst, scores = figure_4.choose_best_worst_from_scores(models[:1], scores)
         draw = Mock()
-        _, label = figure_4.draw_tier_histograms(
+        result = figure_4.draw_tier_histograms(
             draw, models, {models[0]: reference}, {models[0]: reference.copy()},
             best, worst, scores, "red",
         )
-        draw.assert_called_once()
-        self.assertEqual(draw.call_args.kwargs["color"], "black")
-        self.assertTrue(label.startswith("Worst: MACE-MP-0"))
+        self.assertIsNone(result)
+        self.assertEqual(draw.call_count, 2)
+        self.assertEqual(draw.call_args_list[0].kwargs["color"], "black")
+        self.assertEqual(draw.call_args_list[1].kwargs["label"], "Best/Worst: MACE-MP-0 (0.00 GPa)")
+        self.assertEqual(draw.call_args_list[1].kwargs["linestyle"], "-")
         best, worst, scores = figure_4.choose_best_worst_from_scores(models, dict.fromkeys(models, np.nan))
         self.assertEqual((best, worst, scores), (None, None, {}))
         self.assertIsNone(figure_4.draw_tier_histograms(

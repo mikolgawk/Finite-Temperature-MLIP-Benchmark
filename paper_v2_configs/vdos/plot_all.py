@@ -9,7 +9,19 @@
 #   "seaborn>=0.13",
 # ]
 # ///
-"""Create the standard VDOS plots and correlation figures."""
+"""Plot corrected VDOS results, using unchanged non-VDOS metric inputs.
+
+The default plots cover available TorchSim eager and accelerated sources. All
+VDOS inputs and outputs live under this vdos directory; the original analysis
+in vdos_legacy and manuscript figures are left untouched.
+
+Explicit ASE sources produce the supported VDOS figures. Combined Pareto and
+observable-correlation figures are TorchSim-only; the standalone figure_SI_18.py
+compares the accelerated runners when both refined datasets are available.
+"""
+
+# Standalone scripts add the shared v2 helper directory before importing it.
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -31,12 +43,17 @@ SOURCES = (
     "mlip-trajs-ase-accelerated",
     "mlip-trajs-torchsim-accelerated",
 )
+DEFAULT_SOURCES = ("mlip-trajs-torchsim-eager", "mlip-trajs-torchsim-accelerated")
 MODEL_MEANS = "vdos_model_mean_ev_normalized_same_simulation_length.csv"
+PAIR_ERRORS = "vdos_pair_errors_ev_normalized_same_simulation_length.csv"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", action="append", choices=SOURCES, dest="sources")
+    parser.add_argument(
+        "--source", action="append", choices=SOURCES, dest="sources",
+        help="Repeatable; default: available TorchSim eager and accelerated results.",
+    )
     parser.add_argument("--results-dir", type=Path, default=HERE / "results")
     parser.add_argument("--plots-dir", type=Path, default=HERE / "plots")
     parser.add_argument(
@@ -49,6 +66,85 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Print commands only.")
     add_molecular_crystal_option(parser)
     return parser.parse_args()
+
+
+def plot_stages(args: argparse.Namespace, source: str) -> list[tuple[str, list[str]]]:
+    """Build commands with explicit corrected VDOS inputs for every figure."""
+    source_results = args.results_dir.resolve() / source
+    source_plots = args.plots_dir.resolve() / source
+    pressure_file = (
+        args.pressure_file
+        or CONFIG_DIR / "pressures/results" / source / "model_pressure_error_metric.csv"
+    )
+    common = ["--source", source]
+    correlation_inputs = [
+        *common,
+        "--vdos-model-means-file", str(source_results / MODEL_MEANS),
+        "--pressure-file", str(pressure_file.resolve()),
+        "--f1-file", str(args.f1_file.resolve()),
+        "--ksrme-file", str(args.ksrme_file.resolve()),
+    ]
+    stages = [
+        (
+            "VDOS model-error overview",
+            [
+                sys.executable, "-u", str(HERE / "plot_vdos_results.py"),
+                "--model-means-file", str(source_results / MODEL_MEANS),
+                "--output-file", str(source_plots / "plot_vdos_results.pdf"),
+                "--title", f"Corrected matched-length VDOS error: {source}",
+            ],
+        ),
+        (
+            "Figure 5",
+            [
+                sys.executable, "-u", str(HERE / "figure_5.py"), *common,
+                "--normalized-pairs-file", str(source_results / PAIR_ERRORS),
+                "--model-mean-file", str(source_results / MODEL_MEANS),
+                "--output-file", str(source_plots / "figure_5.pdf"),
+            ],
+        ),
+        (
+            "Figure 6 and its SI companion",
+            [
+                sys.executable, "-u", str(HERE / "figure_6.py"), *correlation_inputs,
+                "--output-file", str(source_plots / "figure_6.pdf"),
+                "--si-output-file", str(source_plots / "figure_6_all_labels.pdf"),
+            ],
+        ),
+        (
+            "Figures SI 7, 8, and 9",
+            [
+                sys.executable, "-u", str(HERE / "figure_SI_7_8_9.py"), *correlation_inputs,
+                "--rdf-output-file", str(source_plots / "figure_SI_7_8_9_rdf.pdf"),
+                "--pressure-output-file", str(source_plots / "figure_SI_7_8_9_pressure.pdf"),
+                "--vdos-output-file", str(source_plots / "figure_SI_7_8_9_vdos.pdf"),
+            ],
+        ),
+        (
+            "Figure SI 16",
+            [
+                sys.executable, "-u", str(HERE / "figure_SI_16.py"), *common,
+                "--vdos-scores-file", str(source_results / MODEL_MEANS),
+                "--output-file", str(source_plots / "figure_SI_16.pdf"),
+            ],
+        ),
+    ]
+    # The dependent scripts accept only TorchSim sources. Native ASE results
+    # still have the five supported stages above and the separate SI18 wrapper.
+    if source in DEFAULT_SOURCES:
+        stages.append((
+            "VDOS-dependent Pareto and correlation figures",
+            [
+                sys.executable, "-u", str(HERE / "plot_dependent.py"), *common,
+                "--results-dir", str(args.results_dir.resolve()),
+                "--plots-dir", str(args.plots_dir.resolve()),
+            ],
+        ))
+    if args.include_molecular_crystals:
+        for _, command in stages:
+            if Path(command[2]).name in {"figure_5.py", "figure_SI_16.py"}:
+                command.append("--include-molecular-crystals")
+    return stages
 
 
 def run_stage(label: str, command: list[str], dry_run: bool) -> bool:
@@ -66,68 +162,18 @@ def main() -> None:
     results_dir = args.results_dir.resolve()
     plots_dir = args.plots_dir.resolve()
     sources = args.sources or [
-        source for source in SOURCES if (results_dir / source / MODEL_MEANS).is_file()
+        source for source in DEFAULT_SOURCES if (results_dir / source / MODEL_MEANS).is_file()
     ]
     if not sources and not args.dry_run:
         raise SystemExit(f"No source-specific VDOS results found in {results_dir}")
     if not sources:
-        sources = list(SOURCES)
+        sources = list(DEFAULT_SOURCES)
 
     failures: list[str] = []
     for source in dict.fromkeys(sources):
-        source_results = results_dir / source
-        pressure_file = args.pressure_file or CONFIG_DIR / "pressures/results" / source / "model_pressure_error_metric.csv"
-        source_plots = plots_dir / source
-        common = ["--source", source]
-        stages = [
-            (
-                "VDOS model-error overview",
-                [
-                    sys.executable, "-u", str(HERE / "plot_vdos_results.py"),
-                    "--model-means-file", str(source_results / MODEL_MEANS),
-                    "--output-file", str(source_plots / "plot_vdos_results.pdf"),
-                    "--title", f"Matched-length VDOS error: {source}",
-                ],
-            ),
-            (
-                "Figure 5",
-                [sys.executable, "-u", str(HERE / "figure_5.py"), *common,
-                 "--output-file", str(source_plots / "figure_5.pdf")],
-            ),
-            (
-                "Figure 6 and its SI companion",
-                [
-                    sys.executable, "-u", str(HERE / "figure_6.py"), *common,
-                    "--vdos-model-means-file", str(source_results / MODEL_MEANS),
-                    "--pressure-file", str(pressure_file.resolve()),
-                    "--f1-file", str(args.f1_file.resolve()),
-                    "--ksrme-file", str(args.ksrme_file.resolve()),
-                    "--output-file", str(source_plots / "figure_6.pdf"),
-                    "--si-output-file", str(source_plots / "figure_6_all_labels.pdf"),
-                ],
-            ),
-            (
-                "Figures SI 7, 8, and 9",
-                [
-                    sys.executable, "-u", str(HERE / "figure_SI_7_8_9.py"), *common,
-                    "--vdos-model-means-file", str(source_results / MODEL_MEANS),
-                    "--pressure-file", str(pressure_file.resolve()),
-                    "--f1-file", str(args.f1_file.resolve()),
-                    "--ksrme-file", str(args.ksrme_file.resolve()),
-                    "--rdf-output-file", str(source_plots / "figure_SI_7_8_9_rdf.pdf"),
-                    "--pressure-output-file", str(source_plots / "figure_SI_7_8_9_pressure.pdf"),
-                    "--vdos-output-file", str(source_plots / "figure_SI_7_8_9_vdos.pdf"),
-                ],
-            ),
-            (
-                "Figure SI 16",
-                [sys.executable, "-u", str(HERE / "figure_SI_16.py"), *common,
-                 "--output-file", str(source_plots / "figure_SI_16.pdf")],
-            ),
-        ]
-        for label, command in stages:
-            if args.include_molecular_crystals and Path(command[2]).name in {'figure_5.py', 'figure_SI_16.py'}:
-                command.append("--include-molecular-crystals")
+        if source not in DEFAULT_SOURCES:
+            print(f"\n[SKIP] TorchSim-only dependent plot stage for {source}", flush=True)
+        for label, command in plot_stages(args, source):
             if not run_stage(f"{label} ({source})", command, args.dry_run):
                 failures.append(f"{label} ({source})")
 

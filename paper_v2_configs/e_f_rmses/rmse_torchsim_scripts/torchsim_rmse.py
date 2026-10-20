@@ -46,10 +46,11 @@ def early_cli(script):
 
 
 def reference(atoms):
-    """Support explicit REF tags and ASE single-point reference calculators."""
+    """Read all-atom reference forces before applying any MD constraints."""
     import numpy as np
     energy = atoms.info['REF_energy'] if 'REF_energy' in atoms.info else atoms.get_potential_energy()
-    forces = atoms.arrays['REF_forces'] if 'REF_forces' in atoms.arrays else atoms.get_forces()
+    forces = (atoms.arrays['REF_forces'] if 'REF_forces' in atoms.arrays
+              else atoms.get_forces(apply_constraint=False))
     return float(energy), np.asarray(forces, dtype=float)
 
 

@@ -2,28 +2,34 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#   "adjustText>=1.3",
 #   "ase>=3.26",
 #   "h5py>=3.11",
 #   "matplotlib>=3.9",
 #   "numpy>=1.26",
 #   "pandas>=2.2",
 #   "scipy>=1.13",
+#   "seaborn>=0.13",
 # ]
 # ///
-"""Compute and plot VDOS results for the four MD trajectory sources.
+"""Compute corrected VDOS spectra and produce the standard VDOS plots.
 
 Run with::
 
-    uv run run_vdos_pipeline.py
+    uv run --script paper_v2_configs/vdos/run_vdos_pipeline.py
 
-The four supported cases are baseline/accelerated MD crossed with ASE/TorchSim.
-Only sources containing ``nvt_*.h5`` files are selected by default. Results and
-plots are kept separate per source, following ``../rdfs/run_rdf_pipeline.py``.
+Available TorchSim eager/accelerated sources are selected by default. Explicit
+ASE sources are also supported. All corrected spectra, metrics, and figures
+are kept under vdos, leaving the original analysis in vdos_legacy untouched.
 """
+
+# Standalone scripts add the shared v2 helper directory before importing it.
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import shlex
 import subprocess
@@ -36,7 +42,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent))
 from system_filters import add_molecular_crystal_option, excluded_system_types
 DATA_DIR = SCRIPT_DIR.parent / "data"
 COMPUTE_SCRIPT = SCRIPT_DIR / "get_normalized_VDOS.py"
-PLOT_SCRIPT = SCRIPT_DIR / "plot_vdos_results.py"
+PLOT_SCRIPT = SCRIPT_DIR / "plot_all.py"
 MODEL_OUTPUT = "vdos_model_mean_ev_normalized_same_simulation_length.csv"
 
 SOURCES = (
@@ -45,22 +51,23 @@ SOURCES = (
     "mlip-trajs-ase-accelerated",
     "mlip-trajs-torchsim-accelerated",
 )
+DEFAULT_SOURCES = ("mlip-trajs-torchsim-eager", "mlip-trajs-torchsim-accelerated")
 
 
 def available_sources(data_dir: Path) -> list[str]:
-    return [source for source in SOURCES if any((data_dir / source).glob("*/nvt_*.h5"))]
+    return [source for source in DEFAULT_SOURCES if any((data_dir / source).glob("*/nvt_*.h5"))]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute and plot matched-length VDOS results for ASE/TorchSim MD."
+        description="Compute and plot corrected matched-length VDOS results for ASE/TorchSim MD."
     )
     parser.add_argument(
         "--source",
         action="append",
         choices=SOURCES,
         dest="sources",
-        help="trajectory source to process (repeatable; default: every available source)",
+        help="trajectory source to process (repeatable; default: available TorchSim eager/accelerated sources)",
     )
     parser.add_argument("--system", action="append", dest="systems", help="system filter (repeatable)")
     parser.add_argument("--model", action="append", dest="models", help="model filter (repeatable)")
@@ -71,12 +78,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plots-dir", type=Path, default=SCRIPT_DIR / "plots")
     parser.add_argument("--e-min", type=float, help="minimum energy in eV used for scoring")
     parser.add_argument("--e-max", type=float, help="maximum energy in eV used for scoring")
-    parser.add_argument("--pad-factor", type=int, default=1, help="FFT zero-padding factor")
+    parser.add_argument(
+        "--estimator", choices=("welch", "periodogram"), default="welch",
+        help="spectral estimator (default: Welch averaging)",
+    )
+    parser.add_argument(
+        "--weighting", choices=("mass", "velocity"), default="mass",
+        help="sum mass-weighted or unweighted velocity powers (default: mass)",
+    )
+    parser.add_argument(
+        "--window-fs", type=float, default=2000.0,
+        help="requested Welch segment duration in fs; shortened for each matched pair to provide --min-segments (default: 2000)",
+    )
+    parser.add_argument(
+        "--min-segments", type=int, default=4,
+        help="minimum number of Welch segments with 50%% overlap (default: 4)",
+    )
+    parser.add_argument("--pad-factor", type=int, default=4, help="FFT zero-padding factor (default: 4; interpolates frequency bins only)")
     parser.add_argument("--chunk-size", type=int, default=32, help="Cartesian signals per FFT chunk")
     parser.add_argument(
         "--numerical-mlip-velocities",
         action="store_true",
-        help="differentiate MLIP positions instead of using stored velocities",
+        help="Compatibility option: corrected analysis always differentiates unwrapped positions for both trajectories.",
     )
     parser.add_argument("--overwrite", action="store_true", help="recompute existing spectra")
     parser.add_argument("--plots-only", action="store_true", help="skip VDOS computation")
@@ -93,6 +116,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--pad-factor must be positive")
     if args.chunk_size < 1:
         parser.error("--chunk-size must be positive")
+    if not math.isfinite(args.window_fs) or args.window_fs <= 0:
+        parser.error("--window-fs must be finite and positive")
+    if args.min_segments < 2:
+        parser.error("--min-segments must be at least 2")
     if args.metadata is not None and not args.metadata.is_file():
         parser.error(f"metadata file does not exist: {args.metadata}")
     return args
@@ -105,7 +132,7 @@ def run_stage(label: str, command: list[str], *, dry_run: bool) -> None:
         return
     env = os.environ.copy()
     env.setdefault("MPLBACKEND", "Agg")
-    env.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-vdos")
+    env.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-vdos-updated")
     subprocess.run(command, cwd=SCRIPT_DIR, env=env, check=True)
 
 
@@ -118,6 +145,14 @@ def computation_command(args: argparse.Namespace, sources: list[str]) -> list[st
         str(args.data_dir),
         "--results-dir",
         str(args.results_dir),
+        "--estimator",
+        args.estimator,
+        "--weighting",
+        args.weighting,
+        "--window-fs",
+        str(args.window_fs),
+        "--min-segments",
+        str(args.min_segments),
         "--pad-factor",
         str(args.pad_factor),
         "--chunk-size",
@@ -148,18 +183,22 @@ def computation_command(args: argparse.Namespace, sources: list[str]) -> list[st
     return command
 
 
-def plot_command(source: str, results_dir: Path, plots_dir: Path) -> list[str]:
-    return [
+def plot_command(
+    sources: list[str], results_dir: Path, plots_dir: Path, *,
+    include_molecular_crystals: bool = False,
+) -> list[str]:
+    command = [
         sys.executable,
         "-u",
         str(PLOT_SCRIPT),
-        "--model-means-file",
-        str(results_dir / source / MODEL_OUTPUT),
-        "--output-file",
-        str(plots_dir / source / "plot_vdos_results.pdf"),
-        "--title",
-        f"Matched-length VDOS error: {source}",
+        "--results-dir", str(results_dir),
+        "--plots-dir", str(plots_dir),
     ]
+    for source in sources:
+        command.extend(("--source", source))
+    if include_molecular_crystals:
+        command.append("--include-molecular-crystals")
+    return command
 
 
 def main() -> None:
@@ -189,11 +228,14 @@ def main() -> None:
         model_file = args.results_dir / source / MODEL_OUTPUT
         if not args.dry_run and not model_file.is_file():
             raise FileNotFoundError(f"VDOS model means were not produced for {source}: {model_file}")
-        run_stage(
-            f"Create VDOS model-error plot ({source})",
-            plot_command(source, args.results_dir, args.plots_dir),
-            dry_run=args.dry_run,
-        )
+    run_stage(
+        "Create corrected VDOS figures and correlations",
+        plot_command(
+            sources, args.results_dir, args.plots_dir,
+            include_molecular_crystals=args.include_molecular_crystals,
+        ),
+        dry_run=args.dry_run,
+    )
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.text import Annotation
 import numpy as np
@@ -26,7 +27,12 @@ class Figure7Tests(unittest.TestCase):
                 figure_7.plot_pareto(frame, output)
             self.assertFalse(output.exists())
             save.assert_called_once()
-            return save.call_args.args[0]
+            figure = save.call_args.args[0]
+            # The plotting helper closes its figure. Attach a rendering canvas
+            # explicitly so label geometry checks also work when close leaves
+            # FigureCanvasBase in this Matplotlib version.
+            FigureCanvasAgg(figure)
+            return figure
 
     def test_labels_stay_beside_their_points_in_single_and_comparison_plots(self):
         eager = pd.DataFrame({

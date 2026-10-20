@@ -157,14 +157,13 @@ def load_all_data(
         frame['trajectory_source'] = source
         for cohort in cohorts:
             cohort_frame = frame.assign(source=cohort)
-            if 'torchsim' in cohort:
-                if 'trajectory' not in frame.columns:
-                    raise ValueError(f'Missing trajectory column in {csv_file}')
-                cohort_frame = cohort_frame.loc[frame['trajectory'].map(
-                    lambda ref: torchsim_md_succeeded(cohort_trajectory_path(
-                        md_data_dir, cohort, Path(ref).parent.name, model_name,
-                    )) if isinstance(ref, str) else False
-                )].copy()
+            if 'trajectory' not in frame.columns:
+                raise ValueError(f'Missing trajectory column in {csv_file}')
+            cohort_frame = cohort_frame.loc[frame['trajectory'].map(
+                lambda ref: torchsim_md_succeeded(cohort_trajectory_path(
+                    md_data_dir, cohort, Path(ref).parent.name, model_name,
+                )) if isinstance(ref, str) else False
+            )].copy()
             frames.append(cohort_frame)
 
     if not frames:
@@ -205,7 +204,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--data-dir', type=Path, default=DATA_DIR)
     parser.add_argument('--results-dir', type=Path, default=RESULTS_DIR)
     parser.add_argument('--md-data-dir', type=Path,
-                        help='MD data root used to validate TorchSim completion records.')
+                        help='MD data root used to validate ASE and TorchSim completion records.')
     add_molecular_crystal_option(parser)
     args = parser.parse_args()
     args.excluded_system_types = excluded_system_types(args)
